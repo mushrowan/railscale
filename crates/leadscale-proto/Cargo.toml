@@ -12,8 +12,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-
-# Noise protocol - user to research best crate
-# snow = "0.9"  # Noise protocol implementation
+snow = "0.9"
 
 [dev-dependencies]

@@ -1,4 +1,4 @@
-//! tailscale protocol implementation for leadscale
+//! tailscale protocol implementation for leadscale.
 //!
 //! this crate handles:
 //! - noise protocol for secure communication
@@ -12,24 +12,25 @@ mod noise;
 
 pub use error::Error;
 pub use map_request::{MapRequest, MapResponse};
+pub use noise::{NoiseHandshake, NoiseTransport};
 
-/// result type for protocol operations
+/// result type for protocol operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
 use serde::{Deserialize, Serialize};
 
-/// protocol version / capability version
+/// protocol version / capability version.
 ///
-/// tailscale client capability version
-/// different versions support different features
+/// this represents the tailscale client capability version.
+/// different versions support different features.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct CapabilityVersion(pub u32);
 
 impl CapabilityVersion {
-    /// minimum supported capability version
+    /// minimum supported capability version.
     pub const MIN: CapabilityVersion = CapabilityVersion(68);
 
-    /// current capability version
+    /// current capability version.
     pub const CURRENT: CapabilityVersion = CapabilityVersion(106);
 }
 
