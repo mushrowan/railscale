@@ -1,0 +1,192 @@
+//! node entity for database storage
+
+use std::net::{IpAddr, SocketAddr};
+
+use chrono::{DateTime, Utc};
+use ipnet::IpNet;
+use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveValue::NotSet, Set};
+
+use leadscale_types::{
+    DiscoKey, HostInfo, MachineKey, Node, NodeId, NodeKey, RegisterMethod, UserId,
+};
+
+/// node database model
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+#[sea_orm(table_name = "nodes")]
+pub struct Model {
+    #[sea_orm(primary_key)]
+    pub id: i64,
+
+    /// machine key bytes
+    #[sea_orm(column_type = "VarBinary(StringLen::None)")]
+    pub machine_key: Vec<u8>,
+
+    /// node key bytes
+    #[sea_orm(column_type = "VarBinary(StringLen::None)")]
+    pub node_key: Vec<u8>,
+
+    /// disco key bytes
+    #[sea_orm(column_type = "VarBinary(StringLen::None)")]
+    pub disco_key: Vec<u8>,
+
+    /// json-serialized vec<socketaddr>
+    #[sea_orm(column_type = "Text")]
+    pub endpoints: String,
+
+    /// json-serialized hostinfo
+    #[sea_orm(column_type = "Text", nullable)]
+    pub hostinfo: Option<String>,
+
+    /// ipv4 address as string
+    pub ipv4: Option<String>,
+
+    /// ipv6 address as string
+    pub ipv6: Option<String>,
+
+    pub hostname: String,
+    pub given_name: String,
+
+    pub user_id: Option<i64>,
+
+    /// registermethod as string
+    pub register_method: String,
+
+    /// json-serialized vec<string>
+    #[sea_orm(column_type = "Text")]
+    pub tags: String,
+
+    pub auth_key_id: Option<i64>,
+
+    pub expiry: Option<DateTime<Utc>>,
+    pub last_seen: Option<DateTime<Utc>>,
+
+    /// json-serialized vec<ipnet>
+    #[sea_orm(column_type = "Text")]
+    pub approved_routes: String,
+
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::user::Entity",
+        from = "Column::UserId",
+        to = "super::user::Column::Id"
+    )]
+    User,
+    #[sea_orm(
+        belongs_to = "super::preauth_key::Entity",
+        from = "Column::AuthKeyId",
+        to = "super::preauth_key::Column::Id"
+    )]
+    AuthKey,
+}
+
+impl Related<super::user::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::User.def()
+    }
+}
+
+impl Related<super::preauth_key::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AuthKey.def()
+    }
+}
+
+impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for Node {
+    fn from(model: Model) -> Self {
+        let endpoints: Vec<SocketAddr> =
+            serde_json::from_str(&model.endpoints).unwrap_or_default();
+        let hostinfo: Option<HostInfo> =
+            model.hostinfo.as_ref().and_then(|s| serde_json::from_str(s).ok());
+        let tags: Vec<String> = serde_json::from_str(&model.tags).unwrap_or_default();
+        let approved_routes: Vec<IpNet> =
+            serde_json::from_str(&model.approved_routes).unwrap_or_default();
+
+        let ipv4: Option<IpAddr> = model.ipv4.as_ref().and_then(|s| s.parse().ok());
+        let ipv6: Option<IpAddr> = model.ipv6.as_ref().and_then(|s| s.parse().ok());
+
+        let register_method = match model.register_method.as_str() {
+            "oidc" => RegisterMethod::Oidc,
+            "cli" => RegisterMethod::Cli,
+            _ => RegisterMethod::AuthKey,
+        };
+
+        Node {
+            id: NodeId(model.id as u64),
+            machine_key: MachineKey::from_bytes(model.machine_key),
+            node_key: NodeKey::from_bytes(model.node_key),
+            disco_key: DiscoKey::from_bytes(model.disco_key),
+            endpoints,
+            hostinfo,
+            ipv4,
+            ipv6,
+            hostname: model.hostname,
+            given_name: model.given_name,
+            user_id: model.user_id.map(|id| UserId(id as u64)),
+            register_method,
+            tags,
+            auth_key_id: model.auth_key_id.map(|id| id as u64),
+            expiry: model.expiry,
+            last_seen: model.last_seen,
+            approved_routes,
+            created_at: model.created_at,
+            updated_at: model.updated_at,
+            is_online: None,
+        }
+    }
+}
+
+impl From<&Node> for ActiveModel {
+    fn from(node: &Node) -> Self {
+        let endpoints_json =
+            serde_json::to_string(&node.endpoints).unwrap_or_else(|_| "[]".to_string());
+        let hostinfo_json = node
+            .hostinfo
+            .as_ref()
+            .and_then(|h| serde_json::to_string(h).ok());
+        let tags_json = serde_json::to_string(&node.tags).unwrap_or_else(|_| "[]".to_string());
+        let approved_routes_json =
+            serde_json::to_string(&node.approved_routes).unwrap_or_else(|_| "[]".to_string());
+
+        let register_method = match node.register_method {
+            RegisterMethod::AuthKey => "authkey",
+            RegisterMethod::Oidc => "oidc",
+            RegisterMethod::Cli => "cli",
+        };
+
+        ActiveModel {
+            id: if node.id.0 == 0 {
+                NotSet
+            } else {
+                Set(node.id.0 as i64)
+            },
+            machine_key: Set(node.machine_key.as_bytes().to_vec()),
+            node_key: Set(node.node_key.as_bytes().to_vec()),
+            disco_key: Set(node.disco_key.as_bytes().to_vec()),
+            endpoints: Set(endpoints_json),
+            hostinfo: Set(hostinfo_json),
+            ipv4: Set(node.ipv4.map(|ip| ip.to_string())),
+            ipv6: Set(node.ipv6.map(|ip| ip.to_string())),
+            hostname: Set(node.hostname.clone()),
+            given_name: Set(node.given_name.clone()),
+            user_id: Set(node.user_id.map(|id| id.0 as i64)),
+            register_method: Set(register_method.to_string()),
+            tags: Set(tags_json),
+            auth_key_id: Set(node.auth_key_id.map(|id| id as i64)),
+            expiry: Set(node.expiry),
+            last_seen: Set(node.last_seen),
+            approved_routes: Set(approved_routes_json),
+            created_at: Set(node.created_at),
+            updated_at: Set(node.updated_at),
+            deleted_at: NotSet,
+        }
+    }
+}

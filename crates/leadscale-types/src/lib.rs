@@ -1,6 +1,6 @@
-//! core types for leadscale - a tailscale control server implementation in rust
+//! core types for leadscale - a tailscale control server implementation in rust.
 //!
-//! fundamental data structures used throughout leadscale:
+//! this crate provides the fundamental data structures used throughout leadscale:
 //! - [`node`]: represents a tailscale client/device
 //! - [`user`]: user/namespace management
 //! - [`preauthkey`]: pre-authentication keys for automated registration
@@ -13,12 +13,12 @@ mod node;
 mod preauth_key;
 mod user;
 
-pub use config::Config;
+pub use config::{Config, DatabaseConfig};
 pub use error::Error;
 pub use keys::{DiscoKey, MachineKey, NodeKey};
 pub use node::{HostInfo, NetInfo, Node, NodeId, NodeView, RegisterMethod};
 pub use preauth_key::PreAuthKey;
 pub use user::{User, UserId};
 
-/// result type alias using the crate's error type
+/// result type alias using the crate's error type.
 pub type Result<T> = std::result::Result<T, Error>;
