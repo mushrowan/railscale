@@ -1,10 +1,10 @@
 //! noise protocol implementation for secure communication.
 //!
-//! uses the noise_ik_25519_chachapoly_blake2s pattern:
-//! - ik: initiator knows responder's static public key
-//!- 25519: curve25519 for key exchange
-//! - chachapoly: chacha20-poly1305 for encryption
-//! - blake2s: hash function
+//! tailscale uses the noise protocol for secure communication between
+//! clients and the control server.
+//!
+//! this implementation uses the noise_ik_25519_chachapoly_blake2s pattern:
+//! - IK: Initiator knows responder's static public key
 //! - 25519: Curve25519 for key exchange
 //! - ChaChaPoly: ChaCha20-Poly1305 for encryption
 //! - BLAKE2s: Hash function
@@ -21,21 +21,21 @@ pub struct NoiseHandshake {
 }
 
 impl NoiseHandshake {
-    /// * `message` - incoming handshake message from the client
+    /// create a new handshake as the responder (server).
     ///
-    /// # returns
-    /// payload extracted from the message (if any)
+    /// # Arguments
+    /// * `private_key` - Server's static private key (32 bytes)
     pub fn new_responder(private_key: &[u8]) -> crate::Result<Self> {
         let params = NOISE_PATTERN.parse()?;
         let builder = Builder::new(params);
-        let state = builder.local_private_key(private_key).build_responder()?;
+        let state = builder.local_private_key(private_key)?.build_responder()?;
         Ok(Self { state })
     }
 
-    /// * `payload` - optional payload to include in the handshake message
+    /// process an incoming handshake message.
     ///
-    /// # returns
-    /// handshake message to send to the client
+    /// # Arguments
+    /// * `message` - The incoming handshake message from the client
     ///
     /// # Returns
     /// the payload extracted from the message (if any).
@@ -46,13 +46,13 @@ impl NoiseHandshake {
         Ok(buf)
     }
 
-    /// should be called after the handshake is complete
+    /// generate an outgoing handshake message.
     ///
     /// # Arguments
     /// * `payload` - Optional payload to include in the handshake message
     ///
-    /// # arguments
-    /// * `plaintext` - message to encrypt
+    /// # Returns
+    /// the handshake message to send to the client.
     pub fn write_message(&mut self, payload: &[u8]) -> crate::Result<Vec<u8>> {
         let mut buf = vec![0u8; 65535];
         let len = self.state.write_message(payload, &mut buf)?;
@@ -65,8 +65,8 @@ impl NoiseHandshake {
         self.state.is_handshake_finished()
     }
 
-    /// # returns
-    ///decrypted plaintext
+    /// get the remote static public key after handshake completion.
+    ///
     /// this returns the client's machine key (their static public key).
     pub fn remote_static(&self) -> Option<Vec<u8>> {
         self.state.get_remote_static().map(|s| s.to_vec())
@@ -92,7 +92,7 @@ impl NoiseTransport {
     ///
     /// # Arguments
     /// * `plaintext` - The message to encrypt
-    //server as responder
+    ///
     /// # Returns
     /// the encrypted message (ciphertext + authentication tag).
     pub fn encrypt(&mut self, plaintext: &[u8]) -> crate::Result<Vec<u8>> {
@@ -104,7 +104,7 @@ impl NoiseTransport {
 
     /// decrypt a message.
     ///
-    //client sends first message: -> e, es, s, ss
+    /// # Arguments
     /// * `ciphertext` - The encrypted message to decrypt
     ///
     /// # Returns
@@ -121,7 +121,7 @@ impl NoiseTransport {
 mod tests {
     use super::*;
 
-    //both sides should have completed handshake
+    /// generate a curve25519 keypair for testing.
     fn generate_keypair() -> (Vec<u8>, Vec<u8>) {
         let params = NOISE_PATTERN.parse().unwrap();
         let builder = Builder::new(params);
@@ -142,7 +142,9 @@ mod tests {
         let builder = Builder::new(params);
         let mut client = builder
             .local_private_key(&client_priv)
+            .unwrap()
             .remote_public_key(&server_pub)
+            .unwrap()
             .build_initiator()
             .unwrap();
 
@@ -183,7 +185,9 @@ mod tests {
         let builder = Builder::new(params);
         let mut client = builder
             .local_private_key(&client_priv)
+            .unwrap()
             .remote_public_key(&server_pub)
+            .unwrap()
             .build_initiator()
             .unwrap();
 
@@ -195,7 +199,7 @@ mod tests {
         let mut buf = vec![0u8; 65535];
         client.read_message(&msg2, &mut buf).unwrap();
 
-        // handshake not complete initially
+        // convert to transport mode
         let mut server_transport = server.into_transport().unwrap();
         let mut client_transport = client.into_transport_mode().unwrap();
 

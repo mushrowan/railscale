@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[lib]
+name = "leadscale"
+path = "src/lib.rs"
+
 [[bin]]
 name = "leadscale"
 path = "src/main.rs"
@@ -18,11 +22,15 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+axum = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
 
 # CLI - user to decide on clap vs argh
 # clap = { version = "4", features = ["derive"] }
 
-# Web framework - user to decide on axum vs actix-web
-# axum = "0.8"
-
 [dev-dependencies]
+tower = "0.5"
+hyper = "1.5"
+chrono = { workspace = true }

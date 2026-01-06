@@ -44,6 +44,10 @@ pub trait Database: Send + Sync {
     // node operations
     fn create_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
     fn get_node(&self, id: NodeId) -> impl Future<Output = Result<Option<Node>>> + Send;
+    fn get_node_by_node_key(
+        &self,
+        node_key: &leadscale_types::NodeKey,
+    ) -> impl Future<Output = Result<Option<Node>>> + Send;
     fn list_nodes(&self) -> impl Future<Output = Result<Vec<Node>>> + Send;
     fn update_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
     fn delete_node(&self, id: NodeId) -> impl Future<Output = Result<()>> + Send;
@@ -63,12 +67,13 @@ pub trait Database: Send + Sync {
 }
 
 /// the main database implementation using sea-orm.
+#[derive(Clone)]
 pub struct LeadscaleDb {
     conn: DatabaseConnection,
 }
 
 impl LeadscaleDb {
-    /// build sea-orm compatible connection url from config
+    /// create a new database connection from config.
     pub async fn new(config: &Config) -> Result<Self> {
         let url = Self::build_connection_url(&config.database)?;
         let conn: DatabaseConnection = SeaOrmDatabase::connect(&url)
@@ -80,7 +85,7 @@ impl LeadscaleDb {
         Ok(db)
     }
 
-    //postgresql urls should already be properly formatted
+    /// build a sea-orm compatible connection url from config.
     fn build_connection_url(config: &leadscale_types::DatabaseConfig) -> Result<String> {
         match config.db_type.as_str() {
             "sqlite" => {
@@ -113,7 +118,7 @@ impl LeadscaleDb {
         Ok(db)
     }
 
-    //user operations
+    /// run database migrations.
     pub async fn migrate(&self) -> Result<()> {
         migration::Migrator::up(&self.conn, None)
             .await
@@ -189,6 +194,18 @@ impl Database for LeadscaleDb {
 
     async fn get_node(&self, id: NodeId) -> Result<Option<Node>> {
         let result = entity::node::Entity::find_by_id(id.0 as i64)
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(Into::into))
+    }
+
+    async fn get_node_by_node_key(
+        &self,
+        node_key: &leadscale_types::NodeKey,
+    ) -> Result<Option<Node>> {
+        let result = entity::node::Entity::find()
+            .filter(entity::node::Column::NodeKey.eq(node_key.as_bytes()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
