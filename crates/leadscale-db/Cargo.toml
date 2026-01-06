@@ -1,0 +1,20 @@
+[package]
+name = "leadscale-db"
+description = "Database layer for Leadscale"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+leadscale-types = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+ipnet = { workspace = true }
+
+# Database - placeholder, user to decide on sqlx vs sea-orm vs diesel
+# sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres"] }
+
+[dev-dependencies]

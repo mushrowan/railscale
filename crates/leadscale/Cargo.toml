@@ -1,0 +1,28 @@
+[package]
+name = "leadscale"
+description = "Leadscale - Tailscale control server in Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "leadscale"
+path = "src/main.rs"
+
+[dependencies]
+leadscale-types = { workspace = true }
+leadscale-db = { workspace = true }
+leadscale-state = { workspace = true }
+leadscale-proto = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# CLI - user to decide on clap vs argh
+# clap = { version = "4", features = ["derive"] }
+
+# Web framework - user to decide on axum vs actix-web
+# axum = "0.8"
+
+[dev-dependencies]

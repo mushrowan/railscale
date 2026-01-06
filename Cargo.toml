@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/leadscale",
+    "crates/leadscale-types",
+    "crates/leadscale-db",
+    "crates/leadscale-state",
+    "crates/leadscale-proto",
+]
+
+[workspace.metadata.crane]
+name = "leadscale"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/mushrowan/railscale"
+authors = ["mushrowan"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Networking
+ipnet = { version = "2", features = ["serde"] }
+
+# Cryptography (for Noise protocol, keys)
+# Note: may need tailscale-specific crates - user to research
+
+# Database
+# Note: user to decide between sqlx, sea-orm, diesel
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Internal crates
+leadscale-types = { path = "crates/leadscale-types" }
+leadscale-db = { path = "crates/leadscale-db" }
+leadscale-state = { path = "crates/leadscale-state" }
+leadscale-proto = { path = "crates/leadscale-proto" }
