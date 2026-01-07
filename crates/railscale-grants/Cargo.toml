@@ -1,0 +1,17 @@
+[package]
+name = "railscale-grants"
+description = "Grants-based access control for railscale"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+railscale-types = { workspace = true }
+railscale-proto = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+ipnet = { workspace = true }
+
+[dev-dependencies]
+chrono = { workspace = true }

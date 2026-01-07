@@ -59,7 +59,7 @@
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
         # Build the actual package
-        leadscale = craneLib.buildPackage (commonArgs
+        railscale = craneLib.buildPackage (commonArgs
           // {
             inherit cargoArtifacts;
           });
@@ -70,7 +70,7 @@
         };
 
         checks = {
-          inherit leadscale;
+          inherit railscale;
 
           # Run clippy
           clippy = craneLib.cargoClippy (commonArgs
@@ -86,8 +86,8 @@
         };
 
         packages = {
-          default = leadscale;
-          inherit leadscale;
+          default = railscale;
+          inherit railscale;
         };
 
         devShells.default = craneLib.devShell {
@@ -100,7 +100,7 @@
             jq
           ];
 
-          RUST_LOG = "leadscale=debug";
+          RUST_LOG = "railscale=debug";
 
         };
       };

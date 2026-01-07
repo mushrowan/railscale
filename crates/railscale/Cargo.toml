@@ -1,0 +1,37 @@
+[package]
+name = "railscale"
+description = "railscale - Tailscale control server in Rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "railscale"
+path = "src/lib.rs"
+
+[[bin]]
+name = "railscale"
+path = "src/main.rs"
+
+[dependencies]
+railscale-types = { workspace = true }
+railscale-db = { workspace = true }
+railscale-state = { workspace = true }
+railscale-proto = { workspace = true }
+railscale-grants = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+axum = "0.8"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+
+# CLI - user to decide on clap vs argh
+# clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tower = "0.5"
+hyper = "1.5"
+chrono = { workspace = true }

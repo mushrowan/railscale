@@ -1298,93 +1298,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "leadscale"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "chrono",
- "hyper",
- "leadscale-db",
- "leadscale-grants",
- "leadscale-proto",
- "leadscale-state",
- "leadscale-types",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "leadscale-db"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "ipnet",
- "leadscale-types",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "leadscale-grants"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "ipnet",
- "leadscale-proto",
- "leadscale-types",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
-name = "leadscale-proto"
-version = "0.1.0"
-dependencies = [
- "leadscale-types",
- "serde",
- "serde_json",
- "snow",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "leadscale-state"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "leadscale-db",
- "leadscale-types",
- "thiserror",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "leadscale-types"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "ipnet",
- "serde",
- "serde_json",
- "thiserror",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.179"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1841,6 +1754,93 @@ name = "radium"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
+
+[[package]]
+name = "railscale"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "hyper",
+ "railscale-db",
+ "railscale-grants",
+ "railscale-proto",
+ "railscale-state",
+ "railscale-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "railscale-db"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "ipnet",
+ "railscale-types",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "railscale-grants"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ipnet",
+ "railscale-proto",
+ "railscale-types",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "railscale-proto"
+version = "0.1.0"
+dependencies = [
+ "railscale-types",
+ "serde",
+ "serde_json",
+ "snow",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "railscale-state"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "railscale-db",
+ "railscale-types",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "railscale-types"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ipnet",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "rand"

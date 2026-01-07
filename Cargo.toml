@@ -1,16 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/leadscale",
-    "crates/leadscale-types",
-    "crates/leadscale-db",
-    "crates/leadscale-state",
-    "crates/leadscale-proto",
-    "crates/leadscale-grants",
+    "crates/railscale",
+    "crates/railscale-types",
+    "crates/railscale-db",
+    "crates/railscale-state",
+    "crates/railscale-proto",
+    "crates/railscale-grants",
 ]
 
 [workspace.metadata.crane]
-name = "leadscale"
+name = "railscale"
 
 [workspace.package]
 version = "0.1.0"
@@ -48,8 +48,8 @@ ipnet = { version = "2", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Internal crates
-leadscale-types = { path = "crates/leadscale-types" }
-leadscale-db = { path = "crates/leadscale-db" }
-leadscale-state = { path = "crates/leadscale-state" }
-leadscale-proto = { path = "crates/leadscale-proto" }
-leadscale-grants = { path = "crates/leadscale-grants" }
+railscale-types = { path = "crates/railscale-types" }
+railscale-db = { path = "crates/railscale-db" }
+railscale-state = { path = "crates/railscale-state" }
+railscale-proto = { path = "crates/railscale-proto" }
+railscale-grants = { path = "crates/railscale-grants" }
