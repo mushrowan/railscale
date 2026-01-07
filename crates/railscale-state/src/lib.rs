@@ -1,4 +1,4 @@
-//! state management for railscale
+//! state management for railscale.
 //!
 //! this crate provides the central state coordinator that manages:
 //! - In-memory node cache (NodeStore) with copy-on-write semantics
@@ -15,7 +15,7 @@ pub use node_store::NodeStore;
 
 use std::sync::Arc;
 
-use railscale_db::railscaleDb;
+use railscale_db::RailscaleDb;
 use railscale_types::{Config, Node, NodeId, NodeView};
 
 /// result type for state operations.
@@ -32,7 +32,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// all methods are thread-safe.
 pub struct State {
     config: Arc<Config>,
-    db: Arc<railscaleDb>,
+    db: Arc<RailscaleDb>,
     node_store: NodeStore,
     // TODO: add ip allocator, policy manager, derp map, etc.
 }
@@ -42,7 +42,7 @@ impl State {
     pub async fn new(config: Config) -> Result<Self> {
         let config = Arc::new(config);
         let db = Arc::new(
-            railscaleDb::new(&config)
+            RailscaleDb::new(&config)
                 .await
                 .map_err(|e| Error::Database(e.to_string()))?,
         );

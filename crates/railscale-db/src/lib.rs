@@ -1,4 +1,4 @@
-//! database layer for railscale
+//! database layer for railscale.
 //!
 //! this crate provides persistent storage for:
 //! - Nodes
@@ -68,11 +68,11 @@ pub trait Database: Send + Sync {
 
 /// the main database implementation using sea-orm.
 #[derive(Clone)]
-pub struct railscaleDb {
+pub struct RailscaleDb {
     conn: DatabaseConnection,
 }
 
-impl railscaleDb {
+impl RailscaleDb {
     /// create a new database connection from config.
     pub async fn new(config: &Config) -> Result<Self> {
         let url = Self::build_connection_url(&config.database)?;
@@ -138,7 +138,7 @@ impl railscaleDb {
     }
 }
 
-impl Database for railscaleDb {
+impl Database for RailscaleDb {
     // user operations
 
     async fn create_user(&self, user: &User) -> Result<User> {
@@ -294,8 +294,8 @@ impl Database for railscaleDb {
 mod tests {
     use super::*;
 
-    async fn setup_test_db() -> railscaleDb {
-        railscaleDb::new_in_memory().await.unwrap()
+    async fn setup_test_db() -> RailscaleDb {
+        RailscaleDb::new_in_memory().await.unwrap()
     }
 
     #[tokio::test]

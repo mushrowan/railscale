@@ -1,4 +1,4 @@
-//! the actual cryptographic operations will be implemented in railscale-proto
+//! cryptographic key types for tailscale protocol.
 //!
 //! these types wrap the raw key bytes and provide serialization support.
 //! the actual cryptographic operations will be implemented in railscale-proto.
@@ -72,7 +72,7 @@ impl Default for NodeKey {
     }
 }
 
-/// disco key - used for peer discovery (stun/derp coordination).
+/// disco key - used for peer discovery (STUN/DERP coordination) or partying.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DiscoKey(Vec<u8>);
 

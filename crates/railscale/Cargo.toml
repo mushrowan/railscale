@@ -33,5 +33,5 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 tower = "0.5"
-hyper = "1.5"
+hyper = "1.8"
 chrono = { workspace = true }

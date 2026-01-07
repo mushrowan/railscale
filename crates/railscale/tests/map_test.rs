@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use railscale_db::{Database, railscaleDb};
+use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use railscale_proto::{MapRequest, MapResponse};
 use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
@@ -14,7 +14,7 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn test_map_request_returns_node() {
     // set up test database
-    let db = railscaleDb::new_in_memory().await.unwrap();
+    let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
     // create a user
@@ -116,7 +116,7 @@ async fn test_map_request_returns_node() {
 #[tokio::test]
 async fn test_map_request_returns_peers() {
     // set up test database
-    let db = railscaleDb::new_in_memory().await.unwrap();
+    let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
     // create a user

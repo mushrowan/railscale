@@ -1,20 +1,20 @@
-//! railscale library - http handlers and application setup
+//! railscale library - HTTP handlers and application setup.
 
 pub mod handlers;
 
 use axum::{routing::post, Router};
-use railscale_db::railscaleDb;
+use railscale_db::RailscaleDb;
 use railscale_grants::GrantsEngine;
 
 /// application state shared across handlers.
 #[derive(Clone)]
 pub struct AppState {
-    pub db: railscaleDb,
+    pub db: RailscaleDb,
     pub grants: GrantsEngine,
 }
 
 /// create the axum application with all routes.
-pub async fn create_app(db: railscaleDb, grants: GrantsEngine) -> Router {
+pub async fn create_app(db: RailscaleDb, grants: GrantsEngine) -> Router {
     let state = AppState { db, grants };
 
     Router::new()
