@@ -5,7 +5,7 @@ use std::sync::Arc;
 use railscale_proto::{FilterRule, PortRange};
 use railscale_types::Node;
 
-use crate::capability::{NetworkCapability, Protocol};
+use crate::capability::NetworkCapability;
 use crate::grant::Grant;
 use crate::policy::Policy;
 use crate::selector::{Autogroup, Selector};
