@@ -1306,6 +1306,7 @@ dependencies = [
  "chrono",
  "hyper",
  "leadscale-db",
+ "leadscale-grants",
  "leadscale-proto",
  "leadscale-state",
  "leadscale-types",
@@ -1332,6 +1333,19 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "leadscale-grants"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ipnet",
+ "leadscale-proto",
+ "leadscale-types",
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

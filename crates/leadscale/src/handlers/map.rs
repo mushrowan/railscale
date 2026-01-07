@@ -1,4 +1,4 @@
-//! handler for /machine/map endpoint
+//! handler for /machine/map endpoint.
 
 use axum::{extract::State, response::IntoResponse, Json};
 use leadscale_db::Database;
@@ -8,7 +8,7 @@ use leadscale_types::{Node, UserId};
 use super::{OptionExt, ResultExt};
 use crate::AppState;
 
-/// handle map requests from tailscale clients
+/// handle map requests from tailscale clients.
 ///
 /// clients send maprequests periodically to get:
 /// - their own node information
@@ -28,10 +28,12 @@ pub async fn map(
 
     let all_nodes = state.db.list_nodes().await.map_internal()?;
 
-    let peers: Vec<MapResponseNode> = all_nodes
+    // use grants engine to filter visible peers
+    let visible_peers = state.grants.get_visible_peers(&node, &all_nodes);
+
+    let peers: Vec<MapResponseNode> = visible_peers
         .iter()
-        .filter(|n| n.id != node.id)
-        .map(node_to_map_response_node)
+        .map(|n| node_to_map_response_node(n))
         .collect();
 
     let users = state.db.list_users().await.map_internal()?;
@@ -46,13 +48,16 @@ pub async fn map(
         })
         .collect();
 
+    // generate packet filter rules from grants
+    let packet_filter = state.grants.generate_filter_rules(&node, &all_nodes);
+
     let response = MapResponse {
         keep_alive: req.stream,
         node: Some(node_to_map_response_node(&node)),
         peers,
         dns_config: None,
         derp_map: None,
-        packet_filter: vec![],
+        packet_filter,
         user_profiles,
         control_time: Some(chrono::Utc::now().to_rfc3339()),
     };
@@ -60,7 +65,7 @@ pub async fn map(
     Ok(Json(response))
 }
 
-/// convert node to mapresponsenode
+/// convert a node to mapresponsenode.
 fn node_to_map_response_node(node: &Node) -> MapResponseNode {
     let mut addresses = Vec::new();
     if let Some(ipv4) = node.ipv4 {

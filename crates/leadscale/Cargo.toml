@@ -18,6 +18,7 @@ leadscale-types = { workspace = true }
 leadscale-db = { workspace = true }
 leadscale-state = { workspace = true }
 leadscale-proto = { workspace = true }
+leadscale-grants = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

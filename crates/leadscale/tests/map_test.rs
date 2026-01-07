@@ -1,10 +1,11 @@
-//! tests for /machine/map endpoint
+//! tests for /machine/map endpoint.
 
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
 use leadscale_db::{Database, LeadscaleDb};
+use leadscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use leadscale_proto::{MapRequest, MapResponse};
 use leadscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
 use serde_json;
@@ -63,8 +64,20 @@ async fn test_map_request_returns_node() {
         debug_flags: vec![],
     };
 
+    // create grants engine with wildcard policy (allow all)
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
     // create app
-    let app = leadscale::create_app(db).await;
+    let app = leadscale::create_app(db, grants).await;
 
     // send request
     let response = app
@@ -177,8 +190,20 @@ async fn test_map_request_returns_peers() {
         debug_flags: vec![],
     };
 
+    // create grants engine with wildcard policy (allow all)
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
     // create app
-    let app = leadscale::create_app(db).await;
+    let app = leadscale::create_app(db, grants).await;
 
     // send request
     let response = app

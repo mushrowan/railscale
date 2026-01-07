@@ -1,10 +1,11 @@
-//! tests for /machine/register endpoint
+//! tests for /machine/register endpoint.
 
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
 use leadscale_db::{Database, LeadscaleDb};
+use leadscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use leadscale_types::{MachineKey, NodeKey, PreAuthKey, User, UserId};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
@@ -51,8 +52,20 @@ async fn test_register_with_preauth_key() {
         preauth_key: preauth.key.clone(),
     };
 
-    // create app - will fail because we haven't implemented it yet
-    let app = leadscale::create_app(db).await;
+    // create grants engine with wildcard policy (allow all)
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
+    // create app
+    let app = leadscale::create_app(db, grants).await;
 
     // send request
     let response = app

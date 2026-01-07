@@ -6,6 +6,7 @@ members = [
     "crates/leadscale-db",
     "crates/leadscale-state",
     "crates/leadscale-proto",
+    "crates/leadscale-grants",
 ]
 
 [workspace.metadata.crane]
@@ -51,3 +52,4 @@ leadscale-types = { path = "crates/leadscale-types" }
 leadscale-db = { path = "crates/leadscale-db" }
 leadscale-state = { path = "crates/leadscale-state" }
 leadscale-proto = { path = "crates/leadscale-proto" }
+leadscale-grants = { path = "crates/leadscale-grants" }

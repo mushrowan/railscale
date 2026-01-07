@@ -11,7 +11,7 @@ mod map_request;
 mod noise;
 
 pub use error::Error;
-pub use map_request::{MapRequest, MapResponse, MapResponseNode, UserProfile};
+pub use map_request::{FilterRule, MapRequest, MapResponse, MapResponseNode, PortRange, UserProfile};
 pub use noise::{NoiseHandshake, NoiseTransport};
 
 /// result type for protocol operations.
