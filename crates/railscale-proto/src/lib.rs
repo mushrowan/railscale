@@ -12,8 +12,8 @@ mod noise;
 
 pub use error::Error;
 pub use map_request::{
-    DerpMap, DerpNode, DerpRegion, DnsConfig, FilterRule, MapRequest, MapResponse,
-    MapResponseNode, PortRange, UserProfile,
+    DerpMap, DerpNode, DerpRegion, DnsConfig, FilterRule, MapRequest, MapResponse, MapResponseNode,
+    PortRange, UserProfile,
 };
 pub use noise::{NoiseHandshake, NoiseTransport};
 

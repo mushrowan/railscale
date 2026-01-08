@@ -46,7 +46,9 @@ pub async fn map(
     let visible_peers = state.grants.get_visible_peers(&node, &all_nodes, &resolver);
 
     // generate packet filter rules from grants
-    let packet_filter = state.grants.generate_filter_rules(&node, &all_nodes, &resolver);
+    let packet_filter = state
+        .grants
+        .generate_filter_rules(&node, &all_nodes, &resolver);
 
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);

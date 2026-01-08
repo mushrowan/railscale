@@ -1,17 +1,17 @@
-use std::collections::HashMap;
 use railscale_grants::UserResolver;
 use railscale_types::{User, UserId};
+use std::collections::HashMap;
 
-/// a UserResolver that uses an in-memory map of users
+/// a userresolver that uses an in-memory map of users.
 ///
 /// this is typically constructed in the map handler where we already
-/// have the list of users loaded from the database
+/// have the list of users loaded from the database.
 pub struct MapUserResolver {
     users: HashMap<UserId, User>,
 }
 
 impl MapUserResolver {
-    /// create a new resolver from a list of users
+    /// create a new resolver from a list of users.
     pub fn new(users: Vec<User>) -> Self {
         let users = users.into_iter().map(|u| (u.id, u)).collect();
         Self { users }
