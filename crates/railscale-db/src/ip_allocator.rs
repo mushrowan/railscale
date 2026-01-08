@@ -1,4 +1,4 @@
-//! ip allocation for nodes
+//! ip address allocation for nodes.
 
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -7,9 +7,9 @@ use ipnet::IpNet;
 
 use crate::Error;
 
-/// allocates ips to new nodes
+/// allocates ip addresses for new nodes.
 ///
-/// /deleted/
+/// supports both ipv4 and ipv6 allocation from configured prefixes.
 pub struct IpAllocator {
     prefix_v4: Option<IpNet>,
     prefix_v6: Option<IpNet>,
@@ -18,7 +18,7 @@ pub struct IpAllocator {
 }
 
 impl IpAllocator {
-    /// create new ip allocator with prefixes
+    /// create a new ip allocator with the given prefixes.
     pub fn new(prefix_v4: Option<IpNet>, prefix_v6: Option<IpNet>) -> Self {
         Self {
             prefix_v4,
@@ -28,7 +28,7 @@ impl IpAllocator {
         }
     }
 
-    /// load already-allocated addresses from the database
+    /// load already-allocated addresses from the database.
     pub fn load_allocated(&mut self, addresses: impl IntoIterator<Item = IpAddr>) {
         for addr in addresses {
             match addr {
@@ -42,14 +42,14 @@ impl IpAllocator {
         }
     }
 
-    /// allocate a new ipv4 address
+    /// allocate a new ipv4 address.
     pub fn allocate_v4(&mut self) -> Result<Option<IpAddr>, Error> {
         let Some(prefix) = &self.prefix_v4 else {
             return Ok(None);
         };
 
-        // sequential allocation
-        // TODO: implement better allocation strategy
+        // simple sequential allocation
+        // TODO: implement more sophisticated allocation strategy
         for addr in prefix.hosts() {
             let ip = IpAddr::V4(match addr {
                 IpAddr::V4(v4) => v4,
@@ -61,22 +61,26 @@ impl IpAllocator {
             }
         }
 
-        Err(Error::InvalidData("IPv4 address pool exhausted".to_string()))
+        Err(Error::InvalidData(
+            "IPv4 address pool exhausted".to_string(),
+        ))
     }
 
-    /// allocate a new ipv6 address
+    /// allocate a new ipv6 address.
     pub fn allocate_v6(&mut self) -> Result<Option<IpAddr>, Error> {
         let Some(prefix) = &self.prefix_v6 else {
             return Ok(None);
         };
 
-        // for ipv6 we typically use the last 64 bits for host addressing
-        // simplified
-        // TODO: implement node id embedding
+        // for ipv6, we typically use the last 64 bits for host addressing
+        // this is a simplified implementation
+        // TODO: implement proper ipv6 allocation with node id embedding
         let mut count: u64 = 1;
         loop {
             if count > 1_000_000 {
-                return Err(Error::InvalidData("IPv6 address pool exhausted".to_string()));
+                return Err(Error::InvalidData(
+                    "IPv6 address pool exhausted".to_string(),
+                ));
             }
 
             // get base address and add count
@@ -107,14 +111,14 @@ impl IpAllocator {
         }
     }
 
-    /// allocate ip addresses for a new node
+    /// allocate both ipv4 and ipv6 addresses for a new node.
     pub fn allocate(&mut self) -> Result<(Option<IpAddr>, Option<IpAddr>), Error> {
         let v4 = self.allocate_v4()?;
         let v6 = self.allocate_v6()?;
         Ok((v4, v6))
     }
 
-    /// release an ip back to the pool
+    /// release an ip address back to the pool.
     pub fn release(&mut self, addr: IpAddr) {
         match addr {
             IpAddr::V4(_) => {

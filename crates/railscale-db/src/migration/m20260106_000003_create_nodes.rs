@@ -1,4 +1,4 @@
-//! create nodes table migration
+//! create nodes table migration.
 
 use sea_orm_migration::prelude::*;
 
@@ -44,12 +44,7 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default("authkey"),
                     )
-                    .col(
-                        ColumnDef::new(Nodes::Tags)
-                            .text()
-                            .not_null()
-                            .default("[]"),
-                    )
+                    .col(ColumnDef::new(Nodes::Tags).text().not_null().default("[]"))
                     .col(ColumnDef::new(Nodes::AuthKeyId).big_integer())
                     .col(ColumnDef::new(Nodes::Expiry).timestamp_with_time_zone())
                     .col(ColumnDef::new(Nodes::LastSeen).timestamp_with_time_zone())

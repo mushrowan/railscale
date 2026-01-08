@@ -102,10 +102,11 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for Node {
     fn from(model: Model) -> Self {
-        let endpoints: Vec<SocketAddr> =
-            serde_json::from_str(&model.endpoints).unwrap_or_default();
-        let hostinfo: Option<HostInfo> =
-            model.hostinfo.as_ref().and_then(|s| serde_json::from_str(s).ok());
+        let endpoints: Vec<SocketAddr> = serde_json::from_str(&model.endpoints).unwrap_or_default();
+        let hostinfo: Option<HostInfo> = model
+            .hostinfo
+            .as_ref()
+            .and_then(|s| serde_json::from_str(s).ok());
         let tags: Vec<String> = serde_json::from_str(&model.tags).unwrap_or_default();
         let approved_routes: Vec<IpNet> =
             serde_json::from_str(&model.approved_routes).unwrap_or_default();

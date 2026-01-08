@@ -206,9 +206,7 @@ mod tests {
         // test encryption/decryption: client -> server
         let plaintext = b"hello from client";
         let mut buf = vec![0u8; plaintext.len() + 16];
-        let len = client_transport
-            .write_message(plaintext, &mut buf)
-            .unwrap();
+        let len = client_transport.write_message(plaintext, &mut buf).unwrap();
         let ciphertext = &buf[..len];
 
         let decrypted = server_transport.decrypt(ciphertext).unwrap();
