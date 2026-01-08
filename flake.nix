@@ -18,6 +18,7 @@
   }:
     flake-parts.lib.mkFlake {inherit inputs;} {
       systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
+      debug = true; # <--- Add this line temporarily
 
       perSystem = {
         config,
@@ -25,6 +26,7 @@
         inputs',
         pkgs,
         system,
+        
         ...
       }: let
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
@@ -62,6 +64,7 @@
         railscale = craneLib.buildPackage (commonArgs
           // {
             inherit cargoArtifacts;
+              # meta.mainProgram = name;
           });
       in {
         _module.args.pkgs = import inputs.nixpkgs {
@@ -69,21 +72,31 @@
           overlays = [(import inputs.rust-overlay)];
         };
 
-        checks = {
-          inherit railscale;
+        checks =
+          {
+            inherit railscale;
 
-          # Run clippy
-          clippy = craneLib.cargoClippy (commonArgs
-            // {
-              inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-            });
+            # Run clippy
+            clippy = craneLib.cargoClippy (commonArgs
+              // {
+                inherit cargoArtifacts;
+                # cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+                cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+              });
 
-          # Check formatting
-          fmt = craneLib.cargoFmt {
-            inherit src;
+            # Check formatting
+            fmt = craneLib.cargoFmt {
+              inherit src;
+            };
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            # NixOS integration tests (Linux only)
+            nixos-test = import ./tests.nix {
+              inherit pkgs;
+              inherit (pkgs) lib;
+              railscale = railscale;
+            };
           };
-        };
 
         packages = {
           default = railscale;
@@ -101,7 +114,6 @@
           ];
 
           RUST_LOG = "railscale=debug";
-
         };
       };
     };

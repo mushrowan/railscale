@@ -57,7 +57,8 @@ pub trait Database: Send + Sync {
         &self,
         key: &PreAuthKey,
     ) -> impl Future<Output = Result<PreAuthKey>> + Send;
-    fn get_preauth_key(&self, key: &str) -> impl Future<Output = Result<Option<PreAuthKey>>> + Send;
+    fn get_preauth_key(&self, key: &str)
+    -> impl Future<Output = Result<Option<PreAuthKey>>> + Send;
     fn list_preauth_keys(
         &self,
         user_id: UserId,
@@ -89,11 +90,17 @@ impl RailscaleDb {
     fn build_connection_url(config: &railscale_types::DatabaseConfig) -> Result<String> {
         match config.db_type.as_str() {
             "sqlite" => {
-                // for sqlite, prefix with "sqlite:" if not already present
-                if config.connection_string.starts_with("sqlite:") {
-                    Ok(config.connection_string.clone())
+                // for sqlite, build the connection url with create mode
+                let path = if config.connection_string.starts_with("sqlite:") {
+                    config.connection_string.clone()
                 } else {
-                    Ok(format!("sqlite:{}", config.connection_string))
+                    format!("sqlite:{}", config.connection_string)
+                };
+                // add ?mode=rwc to create file if it doesn't exist
+                if path.contains('?') {
+                    Ok(path)
+                } else {
+                    Ok(format!("{}?mode=rwc", path))
                 }
             }
             "postgres" | "postgresql" => {

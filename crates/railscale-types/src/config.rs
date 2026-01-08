@@ -1,4 +1,4 @@
-//! configuration types for railscale
+//! configuration types for railscale.
 
 use std::net::IpAddr;
 use std::path::PathBuf;
@@ -220,8 +220,8 @@ impl Default for TuningConfig {
         Self {
             node_store_batch_size: 100,
             node_store_batch_timeout_ms: 500,
-            register_cache_expiration_secs: 900,  // 15 minutes
-            register_cache_cleanup_secs: 1200,    // 20 minutes
+            register_cache_expiration_secs: 900, // 15 minutes
+            register_cache_cleanup_secs: 1200,   // 20 minutes
         }
     }
 }

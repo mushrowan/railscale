@@ -1,4 +1,4 @@
-//! nodes are the core entity in railscale - they represent devices
+//! node type representing a tailscale client/device.
 //!
 //! nodes are the core entity in railscale - they represent devices
 //! connected to the tailnet.
@@ -273,9 +273,10 @@ impl NodeView {
     pub fn valid(&self) -> bool {
         true // Always valid if we have an Arc
     }
+}
 
-    /// get the underlying node reference.
-    pub fn as_ref(&self) -> &Node {
+impl AsRef<Node> for NodeView {
+    fn as_ref(&self) -> &Node {
         &self.inner
     }
 }

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// this key is stable across node key rotations and is used
 /// for machine-level authentication.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct MachineKey(Vec<u8>);
 
 impl MachineKey {
@@ -33,16 +33,10 @@ impl MachineKey {
     }
 }
 
-impl Default for MachineKey {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
-
 /// node key - identifies a node's current session.
 ///
 /// this key can be rotated and is used for the noise protocol handshake.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct NodeKey(Vec<u8>);
 
 impl NodeKey {
@@ -66,14 +60,8 @@ impl NodeKey {
     }
 }
 
-impl Default for NodeKey {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
-}
-
-/// disco key - used for peer discovery (STUN/DERP coordination) or partying.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// disco key - used for peer discovery (STUN/DERP coordination) or alternatively partying
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct DiscoKey(Vec<u8>);
 
 impl DiscoKey {
@@ -94,12 +82,6 @@ impl DiscoKey {
         } else {
             "discokey:???".to_string()
         }
-    }
-}
-
-impl Default for DiscoKey {
-    fn default() -> Self {
-        Self(Vec::new())
     }
 }
 

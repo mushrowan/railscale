@@ -27,9 +27,10 @@ axum = "0.8"
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
+ipnet = { workspace = true }
 
-# CLI - user to decide on clap vs argh
-# clap = { version = "4", features = ["derive"] }
+# CLI
+clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 tower = "0.5"
