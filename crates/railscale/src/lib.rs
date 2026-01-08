@@ -1,7 +1,9 @@
 //! railscale library - HTTP handlers and application setup.
 
 pub mod handlers;
+pub mod resolver;
 mod dns;
+mod derp;
 
 use axum::{Router, routing::post};
 use railscale_db::RailscaleDb;

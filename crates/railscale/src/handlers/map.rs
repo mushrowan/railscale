@@ -28,14 +28,6 @@ pub async fn map(
 
     let all_nodes = state.db.list_nodes().await.map_internal()?;
 
-    // use grants engine to filter visible peers
-    let visible_peers = state.grants.get_visible_peers(&node, &all_nodes);
-
-    let peers: Vec<MapResponseNode> = visible_peers
-        .iter()
-        .map(|n| node_to_map_response_node(n))
-        .collect();
-
     let users = state.db.list_users().await.map_internal()?;
 
     let user_profiles: Vec<UserProfile> = users
@@ -48,18 +40,35 @@ pub async fn map(
         })
         .collect();
 
-    // generate dns configuration
-    let packet_filter = state.grants.generate_filter_rules(&node, &all_nodes);
+    let resolver = crate::resolver::MapUserResolver::new(users);
+
+    // use grants engine to filter visible peers
+    let visible_peers = state.grants.get_visible_peers(&node, &all_nodes, &resolver);
+
+    // generate packet filter rules from grants
+    let packet_filter = state.grants.generate_filter_rules(&node, &all_nodes, &resolver);
 
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);
 
+    // generate derp map
+    let derp_map = crate::derp::generate_derp_map(&state.config);
+    let preferred_derp = derp_map
+        .regions
+        .keys()
+        .next()
+        .map(|id| id.to_string())
+        .unwrap_or_default();
+
     let response = MapResponse {
         keep_alive: req.stream,
-        node: Some(node_to_map_response_node(&node)),
-        peers,
+        node: Some(node_to_map_response_node(&node, &preferred_derp)),
+        peers: visible_peers
+            .iter()
+            .map(|n| node_to_map_response_node(n, &preferred_derp))
+            .collect(),
         dns_config,
-        derp_map: None,
+        derp_map: Some(derp_map),
         packet_filter,
         user_profiles,
         control_time: Some(chrono::Utc::now().to_rfc3339()),
@@ -69,7 +78,7 @@ pub async fn map(
 }
 
 /// convert a node to mapresponsenode.
-fn node_to_map_response_node(node: &Node) -> MapResponseNode {
+fn node_to_map_response_node(node: &Node, preferred_derp: &str) -> MapResponseNode {
     let mut addresses = Vec::new();
     if let Some(ipv4) = node.ipv4 {
         addresses.push(ipv4.to_string());
@@ -95,7 +104,7 @@ fn node_to_map_response_node(node: &Node) -> MapResponseNode {
         addresses,
         allowed_ips,
         endpoints: node.endpoints.iter().map(|e| e.to_string()).collect(),
-        derp: String::new(),
+        derp: preferred_derp.to_string(),
         hostinfo: node.hostinfo.clone(),
         online: node.is_online,
         tags: node.tags.clone(),

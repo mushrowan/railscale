@@ -1,4 +1,4 @@
-//! grants-based access control for railscale
+//! grants-based access control for railscale.
 //!
 //! this crate implements tailscale's grants system for controlling network
 //! access and application capabilities. Grants use deny-by-default semantics
@@ -12,7 +12,7 @@ pub mod policy;
 pub mod selector;
 
 pub use capability::{AppCapability, NetworkCapability, Protocol};
-pub use engine::GrantsEngine;
+pub use engine::{GrantsEngine, UserResolver};
 pub use error::{Error, ParseError, Result, ValidationError};
 pub use grant::Grant;
 pub use policy::Policy;

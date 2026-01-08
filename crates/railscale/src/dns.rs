@@ -1,11 +1,11 @@
-//! dns configuration generation for MagicDNS
+//! dns configuration generation for magicdns.
 
 use ipnet::IpNet;
 use railscale_proto::DnsConfig;
 use railscale_types::Config;
 use std::collections::HashMap;
 
-/// generate dns configuration for a client
+/// generate dns configuration for a client.
 pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
     if !config.dns.magic_dns {
         return None;
@@ -48,10 +48,10 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
     })
 }
 
-/// generate ipv4 reverse dns routes (e.g., "64.100.in-addr.arpa.")
+/// generate ipv4 reverse dns routes (e.g., "64.100.in-addr.arpa.").
 ///
 /// for 100.64.0.0/10, this generates:
-/// - 64.100.in-addr.arpa. through 127.100.in-addr.arpa
+/// - 64.100.in-addr.arpa. through 127.100.in-addr.arpa.
 fn generate_ipv4_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
     if !prefix.addr().is_ipv4() {
         return vec![];
@@ -78,11 +78,13 @@ fn generate_ipv4_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
 
     let mut routes = Vec::new();
 
-    // build base domain from the octets before last_octet
-    let mut base_parts = Vec::new();
-    for i in (0..last_octet).rev() {
-        base_parts.push(octets[i].to_string());
-    }
+    let mut base_parts: Vec<String> = octets
+        .iter()
+        .take(last_octet)
+        .map(|o| o.to_string())
+        .collect();
+    base_parts.reverse();
+
     let base = if base_parts.is_empty() {
         "in-addr.arpa.".to_string()
     } else {
@@ -96,9 +98,9 @@ fn generate_ipv4_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
     routes
 }
 
-/// generate ipv6 reverse dns routes (e.g., "0.e.1.a.c.5.1.1.a.7.d.f.ip6.arpa.")
+/// generate ipv6 reverse dns routes (e.g., "0.e.1.a.c.5.1.1.a.7.d.f.ip6.arpa.").
 ///
-/// for fd7a:115c:a1e0::/48, this generates the appropriate ip6.arpa entries
+/// for fd7a:115c:a1e0::/48, this generates the appropriate ip6.arpa entries.
 fn generate_ipv6_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
     if !prefix.addr().is_ipv6() {
         return vec![];
@@ -123,10 +125,11 @@ fn generate_ipv6_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
 
     // build the constant part (nibbles covered by the mask)
     let constant_nibbles = mask_bits / nibble_len;
-    let mut prefix_parts = Vec::new();
-    for i in 0..constant_nibbles {
-        prefix_parts.push(hex_str.chars().nth(i).unwrap().to_string());
-    }
+    let mut prefix_parts: Vec<String> = hex_str
+        .chars()
+        .take(constant_nibbles)
+        .map(|c| c.to_string())
+        .collect();
     prefix_parts.reverse();
 
     let base = if prefix_parts.is_empty() {
@@ -136,7 +139,7 @@ fn generate_ipv6_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
     };
 
     // if mask is aligned to nibble boundary, return single entry
-    if mask_bits % nibble_len == 0 {
+    if mask_bits.is_multiple_of(nibble_len) {
         return vec![base];
     }
 

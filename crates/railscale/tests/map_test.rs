@@ -235,15 +235,12 @@ async fn test_map_request_returns_peers() {
 
 #[tokio::test]
 async fn test_map_request_returns_dns_config() {
-    // set up test database
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    // create a user
     let user = User::new(UserId(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    // create a node
     let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
     let node_key = NodeKey::from_bytes(vec![2u8; 32]);
     let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
@@ -271,12 +268,14 @@ async fn test_map_request_returns_dns_config() {
         updated_at: now,
         is_online: None,
     };
+    db.create_node(&node).await.unwrap();
 
-    let _node = db.create_node(&node).await.unwrap();
+    let config = railscale_types::Config::default();
+    let grants = GrantsEngine::new(Policy::default());
+    let app = railscale::create_app(db.clone(), grants, config).await;
 
-    // build maprequest
-    let map_request = MapRequest {
-        version: railscale_proto::CapabilityVersion(100),
+    let map_req = MapRequest {
+        version: railscale_proto::CapabilityVersion::CURRENT,
         node_key: node_key.clone(),
         disco_key: Some(disco_key.as_bytes().to_vec()),
         endpoints: vec![],
@@ -286,63 +285,237 @@ async fn test_map_request_returns_dns_config() {
         debug_flags: vec![],
     };
 
-    // create grants engine with wildcard policy (allow all)
+    let response = Request::builder()
+        .method("POST")
+        .uri("/machine/map")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&map_req).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(response).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024)
+        .await
+        .unwrap();
+    let response: MapResponse = serde_json::from_slice(&body).unwrap();
+
+    // verify dns config
+    let dns = response.dns_config.expect("Missing DNS config");
+    assert!(dns.nameservers.contains(&"100.100.100.100".to_string()));
+    assert!(dns.domains.contains(&"railscale.net".to_string()));
+    assert!(dns.routes.contains_key("railscale.net"));
+}
+
+#[tokio::test]
+async fn test_map_request_returns_derp_map() {
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
+    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+
+    let now = chrono::Utc::now();
+    let node = Node {
+        id: NodeId(0),
+        machine_key: machine_key.clone(),
+        node_key: node_key.clone(),
+        disco_key: disco_key.clone(),
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "test-node".to_string(),
+        given_name: "test-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+    db.create_node(&node).await.unwrap();
+
+    let config = railscale_types::Config::default();
+    let grants = GrantsEngine::new(Policy::default());
+    let app = railscale::create_app(db.clone(), grants, config).await;
+
+    let map_req = MapRequest {
+        version: railscale_proto::CapabilityVersion::CURRENT,
+        node_key: node_key.clone(),
+        disco_key: Some(disco_key.as_bytes().to_vec()),
+        endpoints: vec![],
+        hostinfo: None,
+        omit_peers: false,
+        stream: false,
+        debug_flags: vec![],
+    };
+
+    let response = Request::builder()
+        .method("POST")
+        .uri("/machine/map")
+        .header("Content-Type", "application/json")
+        .body(Body::from(serde_json::to_vec(&map_req).unwrap()))
+        .unwrap();
+
+    let resp = app.oneshot(response).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024)
+        .await
+        .unwrap();
+    let response: MapResponse = serde_json::from_slice(&body).unwrap();
+
+    // verify derp map
+    let derp = response.derp_map.expect("Missing DERP map");
+    assert!(!derp.regions.is_empty());
+}
+
+#[tokio::test]
+async fn test_map_request_respects_user_grants() {
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create users
+    let alice = db.create_user(&User::new(UserId(1), "alice@example.com".to_string())).await.unwrap();
+    let bob = db.create_user(&User::new(UserId(2), "bob@example.com".to_string())).await.unwrap();
+    let charlie = db.create_user(&User::new(UserId(3), "charlie@example.com".to_string())).await.unwrap();
+
+    // create nodes
+    let now = chrono::Utc::now();
+    let alice_node = db.create_node(&Node {
+        id: NodeId(0),
+        machine_key: MachineKey::from_bytes(vec![1u8; 32]),
+        node_key: NodeKey::from_bytes(vec![11u8; 32]),
+        disco_key: DiscoKey::from_bytes(vec![21u8; 32]),
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: None,
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "alice-node".to_string(),
+        given_name: "alice-node".to_string(),
+        user_id: Some(alice.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    }).await.unwrap();
+
+    let bob_node = db.create_node(&Node {
+        id: NodeId(0),
+        machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+        node_key: NodeKey::from_bytes(vec![12u8; 32]),
+        disco_key: DiscoKey::from_bytes(vec![22u8; 32]),
+        ipv4: Some("100.64.0.2".parse().unwrap()),
+        ipv6: None,
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "bob-node".to_string(),
+        given_name: "bob-node".to_string(),
+        user_id: Some(bob.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    }).await.unwrap();
+
+    let _charlie_node = db.create_node(&Node {
+        id: NodeId(0),
+        machine_key: MachineKey::from_bytes(vec![3u8; 32]),
+        node_key: NodeKey::from_bytes(vec![13u8; 32]),
+        disco_key: DiscoKey::from_bytes(vec![23u8; 32]),
+        ipv4: Some("100.64.0.3".parse().unwrap()),
+        ipv6: None,
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "charlie-node".to_string(),
+        given_name: "charlie-node".to_string(),
+        user_id: Some(charlie.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    }).await.unwrap();
+
+    // define policy: alice can see bob
     let mut policy = Policy::empty();
     policy.grants.push(Grant {
-        src: vec![Selector::Wildcard],
-        dst: vec![Selector::Wildcard],
+        src: vec![Selector::User("alice@example.com".to_string())],
+        dst: vec![Selector::User("bob@example.com".to_string())],
         ip: vec![NetworkCapability::Wildcard],
         app: vec![],
         src_posture: vec![],
         via: vec![],
     });
+    
     let grants = GrantsEngine::new(policy);
-
-    // create app with default config
     let config = railscale_types::Config::default();
     let app = railscale::create_app(db, grants, config).await;
 
-    // send request
-    let response = app
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/machine/map")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    // helper to request map
+    let request_map = |node_key: NodeKey| {
+        let app = app.clone();
+        async move {
+            let req = MapRequest {
+                version: railscale_proto::CapabilityVersion::CURRENT,
+                node_key,
+                disco_key: None,
+                endpoints: vec![],
+                hostinfo: None,
+                omit_peers: false,
+                stream: false,
+                debug_flags: vec![],
+            };
+            
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/machine/map")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_string(&req).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice::<MapResponse>(&body).unwrap()
+        }
+    };
 
-    // verify response
-    assert_eq!(response.status(), StatusCode::OK);
+    // alice should see bob
+    let alice_map = request_map(alice_node.node_key).await;
+    assert_eq!(alice_map.peers.len(), 1);
+    assert_eq!(alice_map.peers[0].id, bob_node.id.0);
 
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
-
-    // should have dns configuration
-    assert!(map_response.dns_config.is_some(), "DNS config should be present");
-    let dns_config = map_response.dns_config.unwrap();
-
-    // should have the base domain as a search domain
-    assert!(
-        dns_config.domains.contains(&"railscale.net".to_string()),
-        "base domain should be in search domains"
-    );
-
-    // should have reverse dns routes for the ip prefixes
-    // for 100.64.0.0/10, we expect routes like "64.100.in-addr.arpa." to "127.100.in-addr.arpa."
-    assert!(
-        !dns_config.routes.is_empty(),
-        "should have reverse DNS routes"
-    );
-
-    // should have the magic dns resolver (100.100.100.100)
-    assert!(
-        dns_config.nameservers.contains(&"100.100.100.100".to_string()),
-        "should include magic DNS resolver"
-    );
+    // bob should not see anyone (directional grant)
+    let bob_map = request_map(bob_node.node_key).await;
+    assert_eq!(bob_map.peers.len(), 0);
 }
