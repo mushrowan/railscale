@@ -1,24 +1,24 @@
-//! selector types for matching sources and destinations in grants
+//! selector types for matching sources and destinations in grants.
 
 use ipnet::IpNet;
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::error::ParseError;
 
-/// a selector that can match nodes in src or dst fields
+/// a selector that can match nodes in src or dst fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Selector {
-    /// wildcard - matches all nodes in the tailnet
+    /// wildcard - matches all nodes in the tailnet.
     Wildcard,
-    /// user email (e.g., "user@example.com")
+    /// user email (e.g., "user@example.com").
     User(String),
-    /// group reference (e.g., "group:engineering")
+    /// group reference (e.g., "group:engineering").
     Group(String),
-    /// tag reference (e.g., "tag:server")
+    /// tag reference (e.g., "tag:server").
     Tag(String),
-    /// autogroup (e.g., "autogroup:admin", "autogroup:tagged")
+    /// autogroup (e.g., "autogroup:admin", "autogroup:tagged").
     Autogroup(Autogroup),
-    /// cIDR range (e.g., "192.168.1.0/24")
+    /// cidr range (e.g., "192.168.1.0/24").
     Cidr(IpNet),
 }
 
@@ -27,15 +27,16 @@ impl Serialize for Selector {
     where
         S: Serializer,
     {
-        let s = match self {
-            Selector::Wildcard => "*".to_string(),
-            Selector::User(u) => u.clone(),
-            Selector::Group(g) => format!("group:{}", g),
-            Selector::Tag(t) => format!("tag:{}", t),
-            Selector::Autogroup(ag) => format!("autogroup:{}", autogroup_name(*ag)),
-            Selector::Cidr(net) => net.to_string(),
-        };
-        serializer.serialize_str(&s)
+        match self {
+            Selector::Wildcard => serializer.serialize_str("*"),
+            Selector::User(u) => serializer.serialize_str(u),
+            Selector::Group(g) => serializer.serialize_str(&format!("group:{}", g)),
+            Selector::Tag(t) => serializer.serialize_str(&format!("tag:{}", t)),
+            Selector::Autogroup(ag) => {
+                serializer.serialize_str(&format!("autogroup:{}", autogroup_name(*ag)))
+            }
+            Selector::Cidr(net) => serializer.serialize_str(&net.to_string()),
+        }
     }
 }
 
@@ -61,40 +62,36 @@ fn autogroup_name(ag: Autogroup) -> &'static str {
     }
 }
 
-/// built-in autogroups
+/// built-in autogroups.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Autogroup {
-    /// all admin users
+    /// all admin users.
     Admin,
-    /// all member users
+    /// all member users.
     Member,
-    /// all owner users
+    /// all owner users.
     Owner,
-    /// all tagged devices
+    /// all tagged devices.
     Tagged,
-    /// all shared device users
+    /// all shared device users.
     Shared,
-    /// internet via exit nodes (dst only)
+    /// internet via exit nodes (dst only).
     Internet,
-    /// user's own devices (dst only)
+    /// user's own devices (dst only).
     #[serde(rename = "self")]
     SelfDevices,
 }
 
 impl Selector {
-    /// parse a selector from a string
+    /// parse a selector from a string.
     pub fn parse(s: &str) -> Result<Self, ParseError> {
         match s {
             "*" => Ok(Selector::Wildcard),
-            s if s.starts_with("tag:") => {
-                Ok(Selector::Tag(s.strip_prefix("tag:").unwrap().to_string()))
-            }
-            s if s.starts_with("group:") => {
-                Ok(Selector::Group(s.strip_prefix("group:").unwrap().to_string()))
-            }
+            s if s.starts_with("tag:") => Ok(Selector::Tag(s[4..].to_string())),
+            s if s.starts_with("group:") => Ok(Selector::Group(s[6..].to_string())),
             s if s.starts_with("autogroup:") => {
-                let name = s.strip_prefix("autogroup:").unwrap();
+                let name = &s[10..];
                 let autogroup = match name {
                     "admin" => Autogroup::Admin,
                     "member" => Autogroup::Member,
@@ -110,7 +107,9 @@ impl Selector {
             s if s.contains('@') => Ok(Selector::User(s.to_string())),
             s if s.contains('/') => {
                 // try to parse as cidr
-                let net: IpNet = s.parse().map_err(|_| ParseError::InvalidCidr(s.to_string()))?;
+                let net: IpNet = s
+                    .parse()
+                    .map_err(|_| ParseError::InvalidCidr(s.to_string()))?;
                 Ok(Selector::Cidr(net))
             }
             other => Err(ParseError::UnknownSelector(other.to_string())),

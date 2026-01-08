@@ -1,27 +1,27 @@
-//! network and application capability types
+//! network and application capability types.
 
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::error::ParseError;
 
-/// network capability - what ports/protocols are allowed
+/// network capability - what ports/protocols are allowed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkCapability {
-    /// wildcard - all tcp, udp, icmp
+    /// wildcard - all tcp, udp, icmp.
     Wildcard,
-    /// single port (any protocol)
+    /// single port (any protocol).
     Port(u16),
-    /// port range (any protocol)
+    /// port range (any protocol).
     PortRange { start: u16, end: u16 },
-    /// protocol-specific port
+    /// protocol-specific port.
     ProtocolPort { protocol: Protocol, port: u16 },
-    /// protocol-specific port range
+    /// protocol-specific port range.
     ProtocolPortRange {
         protocol: Protocol,
         start: u16,
         end: u16,
     },
-    /// protocol wildcard (all ports)
+    /// protocol wildcard (all ports).
     ProtocolWildcard { protocol: Protocol },
 }
 
@@ -30,23 +30,26 @@ impl Serialize for NetworkCapability {
     where
         S: Serializer,
     {
-        let s = match self {
-            NetworkCapability::Wildcard => "*".to_string(),
-            NetworkCapability::Port(p) => p.to_string(),
-            NetworkCapability::PortRange { start, end } => format!("{}-{}", start, end),
+        match self {
+            NetworkCapability::Wildcard => serializer.serialize_str("*"),
+            NetworkCapability::Port(p) => serializer.serialize_str(&p.to_string()),
+            NetworkCapability::PortRange { start, end } => {
+                serializer.serialize_str(&format!("{}-{}", start, end))
+            }
             NetworkCapability::ProtocolPort { protocol, port } => {
-                format!("{}:{}", protocol_name(*protocol), port)
+                serializer.serialize_str(&format!("{}:{}", protocol_name(*protocol), port))
             }
             NetworkCapability::ProtocolPortRange {
                 protocol,
                 start,
                 end,
-            } => format!("{}:{}-{}", protocol_name(*protocol), start, end),
-            NetworkCapability::ProtocolWildcard { protocol } => {
-                format!("{}:*", protocol_name(*protocol))
+            } => {
+                serializer.serialize_str(&format!("{}:{}-{}", protocol_name(*protocol), start, end))
             }
-        };
-        serializer.serialize_str(&s)
+            NetworkCapability::ProtocolWildcard { protocol } => {
+                serializer.serialize_str(&format!("{}:*", protocol_name(*protocol)))
+            }
+        }
     }
 }
 
@@ -74,7 +77,7 @@ fn protocol_name(proto: Protocol) -> &'static str {
     }
 }
 
-/// network protocol
+/// network protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
@@ -90,7 +93,7 @@ pub enum Protocol {
 }
 
 impl Protocol {
-    /// get the IANA protocol number
+    /// get the iana protocol number.
     pub fn number(&self) -> u8 {
         match self {
             Protocol::Icmp => 1,
@@ -107,7 +110,7 @@ impl Protocol {
 }
 
 impl NetworkCapability {
-    /// parse from string like "*", "443", "80-443", "tcp:443", "tcp:80-443"
+    /// parse from string like "*", "443", "80-443", "tcp:443", "tcp:80-443".
     pub fn parse(s: &str) -> Result<Self, ParseError> {
         if s == "*" {
             return Ok(NetworkCapability::Wildcard);
@@ -141,16 +144,15 @@ impl NetworkCapability {
         Ok(NetworkCapability::Port(port))
     }
 
-    /// check if this capability allows a given protocol/port combination
+    /// check if this capability allows a given protocol/port combination.
     pub fn allows(&self, proto: Protocol, port: u16) -> bool {
         match self {
             NetworkCapability::Wildcard => true,
             NetworkCapability::Port(p) => port == *p,
             NetworkCapability::PortRange { start, end } => port >= *start && port <= *end,
-            NetworkCapability::ProtocolPort {
-                protocol,
-                port: p,
-            } => *protocol == proto && port == *p,
+            NetworkCapability::ProtocolPort { protocol, port: p } => {
+                *protocol == proto && port == *p
+            }
             NetworkCapability::ProtocolPortRange {
                 protocol,
                 start,
@@ -176,12 +178,12 @@ fn parse_protocol(s: &str) -> Result<Protocol, ParseError> {
     }
 }
 
-/// application capability - opaque json parameters
+/// application capability - opaque json parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppCapability {
-    /// capability name (e.g., "tailscale.com/cap/drive")
+    /// capability name (e.g., "tailscale.com/cap/drive").
     pub name: String,
-    /// parameters - opaque json values
+    /// parameters - opaque json values.
     pub params: Vec<serde_json::Value>,
 }
 

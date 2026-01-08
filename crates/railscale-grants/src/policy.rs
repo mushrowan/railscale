@@ -1,40 +1,38 @@
-//! policy container holding all grants
+//! policy container holding all grants.
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 use crate::grant::Grant;
 
-/// the complete policy document
+/// the complete policy document.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Policy {
-    /// all grants in this policy
+    /// all grants in this policy.
     #[serde(default)]
     pub grants: Vec<Grant>,
-
     // future: postures, hosts, groups definitions
 }
 
 impl Policy {
-    /// create an empty policy
+    /// create an empty policy.
     pub fn empty() -> Self {
         Self::default()
     }
 
-    /// parse policy from json string
+    /// parse policy from json string.
     pub fn from_json(json: &str) -> Result<Self, Error> {
         let policy: Policy = serde_json::from_str(json)?;
         policy.validate()?;
         Ok(policy)
     }
 
-    /// validate all grants in the policy
+    /// validate all grants in the policy.
     pub fn validate(&self) -> Result<(), Error> {
         for (i, grant) in self.grants.iter().enumerate() {
-            grant.validate().map_err(|e| Error::InvalidGrant {
-                index: i,
-                cause: e,
-            })?;
+            grant
+                .validate()
+                .map_err(|e| Error::InvalidGrant { index: i, cause: e })?;
         }
         Ok(())
     }

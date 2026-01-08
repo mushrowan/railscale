@@ -53,11 +53,7 @@ impl GrantsEngine {
     /// get network capabilities that src has when accessing dst.
     ///
     /// returns the union of all `ip` fields from matching grants.
-    pub fn get_network_capabilities(
-        &self,
-        src: &Node,
-        dst: &Node,
-    ) -> Vec<NetworkCapability> {
+    pub fn get_network_capabilities(&self, src: &Node, dst: &Node) -> Vec<NetworkCapability> {
         let mut caps = Vec::new();
         for grant in self.matching_grants(src, dst) {
             caps.extend(grant.ip.iter().cloned());
