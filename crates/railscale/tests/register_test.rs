@@ -64,8 +64,9 @@ async fn test_register_with_preauth_key() {
     });
     let grants = GrantsEngine::new(policy);
 
-    // create app
-    let app = railscale::create_app(db, grants).await;
+    // create app with default config
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(db, grants, config).await;
 
     // send request
     let response = app

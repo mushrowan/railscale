@@ -8,7 +8,6 @@ use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use railscale_proto::{MapRequest, MapResponse};
 use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
-use serde_json;
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -76,8 +75,9 @@ async fn test_map_request_returns_node() {
     });
     let grants = GrantsEngine::new(policy);
 
-    // create app
-    let app = railscale::create_app(db, grants).await;
+    // create app with default config
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(db, grants, config).await;
 
     // send request
     let response = app
@@ -202,8 +202,9 @@ async fn test_map_request_returns_peers() {
     });
     let grants = GrantsEngine::new(policy);
 
-    // create app
-    let app = railscale::create_app(db, grants).await;
+    // create app with default config
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(db, grants, config).await;
 
     // send request
     let response = app
@@ -230,4 +231,118 @@ async fn test_map_request_returns_peers() {
     assert_eq!(map_response.peers.len(), 1);
     let peer = &map_response.peers[0];
     assert_eq!(peer.node_key, node2_key.as_bytes());
+}
+
+#[tokio::test]
+async fn test_map_request_returns_dns_config() {
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create a user
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    // create a node
+    let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
+    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+
+    let now = chrono::Utc::now();
+    let node = Node {
+        id: NodeId(0),
+        machine_key: machine_key.clone(),
+        node_key: node_key.clone(),
+        disco_key: disco_key.clone(),
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "test-node".to_string(),
+        given_name: "test-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+
+    let _node = db.create_node(&node).await.unwrap();
+
+    // build maprequest
+    let map_request = MapRequest {
+        version: railscale_proto::CapabilityVersion(100),
+        node_key: node_key.clone(),
+        disco_key: Some(disco_key.as_bytes().to_vec()),
+        endpoints: vec![],
+        hostinfo: None,
+        omit_peers: false,
+        stream: false,
+        debug_flags: vec![],
+    };
+
+    // create grants engine with wildcard policy (allow all)
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
+    // create app with default config
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(db, grants, config).await;
+
+    // send request
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // verify response
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+
+    // should have dns configuration
+    assert!(map_response.dns_config.is_some(), "DNS config should be present");
+    let dns_config = map_response.dns_config.unwrap();
+
+    // should have the base domain as a search domain
+    assert!(
+        dns_config.domains.contains(&"railscale.net".to_string()),
+        "base domain should be in search domains"
+    );
+
+    // should have reverse dns routes for the ip prefixes
+    // for 100.64.0.0/10, we expect routes like "64.100.in-addr.arpa." to "127.100.in-addr.arpa."
+    assert!(
+        !dns_config.routes.is_empty(),
+        "should have reverse DNS routes"
+    );
+
+    // should have the magic dns resolver (100.100.100.100)
+    assert!(
+        dns_config.nameservers.contains(&"100.100.100.100".to_string()),
+        "should include magic DNS resolver"
+    );
 }

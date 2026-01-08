@@ -1,4 +1,4 @@
-//! tailscale protocol implementation for railscale
+//! tailscale protocol implementation for railscale.
 //!
 //! this crate handles:
 //! - noise protocol for secure communication
@@ -11,7 +11,10 @@ mod map_request;
 mod noise;
 
 pub use error::Error;
-pub use map_request::{FilterRule, MapRequest, MapResponse, MapResponseNode, PortRange, UserProfile};
+pub use map_request::{
+    DerpMap, DerpNode, DerpRegion, DnsConfig, FilterRule, MapRequest, MapResponse,
+    MapResponseNode, PortRange, UserProfile,
+};
 pub use noise::{NoiseHandshake, NoiseTransport};
 
 /// result type for protocol operations.

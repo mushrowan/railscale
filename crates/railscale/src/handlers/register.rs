@@ -1,6 +1,6 @@
 //! handler for /machine/register endpoint.
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{Json, extract::State, response::IntoResponse};
 use railscale_db::Database;
 use railscale_types::{MachineKey, Node, NodeId, NodeKey};
 use serde::{Deserialize, Serialize};
@@ -38,7 +38,9 @@ pub async fn register(
         .or_unauthorized("invalid preauth key")?;
 
     if !preauth_key.is_valid() {
-        return Err(ApiError::unauthorized("preauth key expired or already used"));
+        return Err(ApiError::unauthorized(
+            "preauth key expired or already used",
+        ));
     }
 
     let now = chrono::Utc::now();

@@ -1,6 +1,6 @@
 //! handler for /machine/map endpoint.
 
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{Json, extract::State, response::IntoResponse};
 use railscale_db::Database;
 use railscale_proto::{MapRequest, MapResponse, MapResponseNode, UserProfile};
 use railscale_types::{Node, UserId};
@@ -48,14 +48,17 @@ pub async fn map(
         })
         .collect();
 
-    // generate packet filter rules from grants
+    // generate dns configuration
     let packet_filter = state.grants.generate_filter_rules(&node, &all_nodes);
+
+    // generate dns configuration
+    let dns_config = crate::dns::generate_dns_config(&state.config);
 
     let response = MapResponse {
         keep_alive: req.stream,
         node: Some(node_to_map_response_node(&node)),
         peers,
-        dns_config: None,
+        dns_config,
         derp_map: None,
         packet_filter,
         user_profiles,
