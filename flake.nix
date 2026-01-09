@@ -17,7 +17,9 @@
     ...
   }:
     flake-parts.lib.mkFlake {inherit inputs;} {
-      systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
+      # For now only build for current arch, to silence `nix flake check` warnings
+      systems = ["x86_64-linux"];
+      # systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
 
       perSystem = {
         config,
@@ -62,7 +64,7 @@
         railscale = craneLib.buildPackage (commonArgs
           // {
             inherit cargoArtifacts;
-            # meta.mainProgram = name;
+            meta.mainProgram = "railscale";
           });
       in {
         _module.args.pkgs = import inputs.nixpkgs {
@@ -71,10 +73,12 @@
         };
 
         checks = let
-          clippyBase = x: craneLib.cargoClippy (commonArgs
-            // {
-              inherit cargoArtifacts;
-            }) // x;
+          clippyBase = x:
+            craneLib.cargoClippy (commonArgs
+              // {
+                inherit cargoArtifacts;
+              })
+            // x;
         in
           {
             inherit railscale;
@@ -87,6 +91,7 @@
             fmt = craneLib.cargoFmt {
               inherit src;
             };
+            cargoTest = craneLib.cargoTest (commonArgs // {inherit cargoArtifacts;});
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             # NixOS integration tests (Linux only)
