@@ -20,16 +20,16 @@ pub struct RegistrationInfo {
     pub pkce_verifier: Option<String>,
 }
 
-/// to avoid complex type-state issues with the openidconnect crate
-///provider metadata from oidc discovery
+/// oidc authentication provider.
+///
 /// stores OIDC configuration and provider metadata, building the client on demand
-/// oAuth2 client id
+/// to avoid complex type-state issues with the openidconnect crate.
 pub struct AuthProviderOidc {
-    /// oAuth2 client secret
+    /// provider metadata from OIDC discovery.
     provider_metadata: CoreProviderMetadata,
-    /// redirect url for OAuth callbacks
+    /// oauth2 client id.
     client_id: ClientId,
-    /// http client for async requests
+    /// oauth2 client secret.
     client_secret: ClientSecret,
     /// redirect URL for OAuth callbacks.
     redirect_url: RedirectUrl,
@@ -44,8 +44,8 @@ pub struct AuthProviderOidc {
 
 impl AuthProviderOidc {
     /// create a new OIDC provider from configuration.
-    //create http client for async requests
-    //disable redirects to prevent SSRF vulnerabilities
+    ///
+    /// this will perform OIDC discovery to fetch the provider metadata.
     pub async fn new(config: OidcConfig, server_url: &str) -> Result<Self, String> {
         // create HTTP client for async requests
         // disable redirects to prevent ssrf vulnerabilities
@@ -224,8 +224,7 @@ pub fn validate_oidc_claims(config: &OidcConfig, claims: &OidcClaims) -> Result<
     }
 
     // check allowed users
-    if !config.allowed_users.is_empty()
-        && !config.allowed_users.iter().any(|u| u == &claims.email)
+    if !config.allowed_users.is_empty() && !config.allowed_users.iter().any(|u| u == &claims.email)
     {
         return Err(format!("email '{}' is not in allowed users", claims.email));
     }
