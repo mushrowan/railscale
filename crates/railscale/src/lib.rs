@@ -3,6 +3,7 @@
 mod derp;
 mod dns;
 pub mod handlers;
+mod oidc;
 pub mod resolver;
 
 use axum::{Router, routing::post};
