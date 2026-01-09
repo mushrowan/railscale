@@ -195,7 +195,7 @@ pub struct OidcConfig {
     /// scopes to request.
     pub scope: Vec<String>,
 
-    /// pKCE configuration
+    /// whether email must be verified.
     pub email_verified_required: bool,
 
     /// pkce configuration.
@@ -231,7 +231,7 @@ fn default_expiry_secs() -> u64 {
     180 * 24 * 3600 // 180 days in seconds
 }
 
-/// whether PKCE is enabled
+/// pkce (proof key for code exchange) configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PkceConfig {
     /// whether pkce is enabled.
@@ -252,10 +252,10 @@ impl Default for PkceConfig {
     }
 }
 
-/// sHA256 challenge method (recommended)
+/// pkce challenge method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PkceMethod {
-    /// plain text challenge method
+    /// sha256 challenge method (recommended).
     #[default]
     S256,
     /// plain text challenge method.
@@ -307,7 +307,11 @@ mod tests {
             issuer: "https://sso.example.com".to_string(),
             client_id: "railscale".to_string(),
             client_secret: "secret".to_string(),
-            scope: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+            scope: vec![
+                "openid".to_string(),
+                "profile".to_string(),
+                "email".to_string(),
+            ],
             email_verified_required: true,
             pkce: PkceConfig {
                 enabled: true,
@@ -357,6 +361,9 @@ mod tests {
         let oidc: OidcConfig = serde_json::from_str(json).unwrap();
         assert_eq!(oidc.issuer, "https://sso.example.com");
         assert!(oidc.pkce.enabled);
-        assert_eq!(oidc.extra_params.get("domain_hint"), Some(&"example.com".to_string()));
+        assert_eq!(
+            oidc.extra_params.get("domain_hint"),
+            Some(&"example.com".to_string())
+        );
     }
 }

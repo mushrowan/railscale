@@ -4,27 +4,27 @@ use std::time::Duration;
 
 use moka::sync::Cache;
 use openidconnect::{
-    core::{CoreClient, CoreProviderMetadata, CoreResponseType, CoreTokenResponse},
-    reqwest::async_http_client,
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
+    core::{CoreClient, CoreProviderMetadata, CoreResponseType, CoreTokenResponse},
+    reqwest::async_http_client,
 };
 use railscale_types::{OidcClaims, OidcConfig, PkceMethod, RegistrationId};
 
 /// information stored in the registration cache during OIDC flow.
 #[derive(Clone, Debug)]
 pub struct RegistrationInfo {
-    /// pKCE verifier (if PKCE is enabled)
+    /// the registration ID from the tailscale client.
     pub registration_id: RegistrationId,
     /// pkce verifier (if pkce is enabled).
     pub pkce_verifier: Option<String>,
 }
 
-/// oidc client configuration
+/// oidc authentication provider.
 pub struct AuthProviderOidc {
-    /// configuration from the user
+    /// oidc client configuration.
     client: CoreClient,
-    /// cache for in-flight registration sessions
+    /// configuration from the user.
     config: OidcConfig,
     /// cache for in-flight registration sessions.
     /// maps CSRF state -> registration info.
@@ -32,9 +32,9 @@ pub struct AuthProviderOidc {
 }
 
 impl AuthProviderOidc {
-    /// this will perform oidc discovery to fetch the provider metadata
+    /// create a new OIDC provider from configuration.
     ///
-    //parse the issuer url
+    /// this will perform OIDC discovery to fetch the provider metadata.
     pub async fn new(config: OidcConfig, server_url: &str) -> Result<Self, String> {
         // parse the issuer url
         let issuer_url =
@@ -52,8 +52,11 @@ impl AuthProviderOidc {
             Some(ClientSecret::new(config.client_secret.clone())),
         )
         .set_redirect_uri(
-            RedirectUrl::new(format!("{}/oidc/callback", server_url.trim_end_matches('/')))
-                .map_err(|e| format!("invalid redirect URL: {}", e))?,
+            RedirectUrl::new(format!(
+                "{}/oidc/callback",
+                server_url.trim_end_matches('/')
+            ))
+            .map_err(|e| format!("invalid redirect URL: {}", e))?,
         );
 
         // create registration cache with 15 minute TTL
@@ -68,8 +71,8 @@ impl AuthProviderOidc {
         })
     }
 
-    /// this stores the registration info in the cache and returns the url
-    ///to redirect the user to for authentication
+    /// generate an authorization URL for a registration session.
+    ///
     /// this stores the registration info in the cache and returns the URL
     /// to redirect the user to for authentication.
     pub fn authorization_url(
@@ -96,7 +99,7 @@ impl AuthProviderOidc {
         let reg_info = if self.config.pkce.enabled {
             let (challenge, verifier) = match self.config.pkce.method {
                 PkceMethod::S256 => PkceCodeChallenge::new_random_sha256(),
-                // so we'll just use SHA256 for now (most secure anyway)
+                // plain method is handled by not applying sha256 transformation
                 // the openidconnect crate doesn't have a direct "plain" method,
                 // so we'll just use SHA256 for now (most secure anyway)
                 PkceMethod::Plain => PkceCodeChallenge::new_random_sha256(),
@@ -192,10 +195,7 @@ pub fn validate_oidc_claims(config: &OidcConfig, claims: &OidcClaims) -> Result<
     // check allowed users
     if !config.allowed_users.is_empty() {
         if !config.allowed_users.iter().any(|u| u == &claims.email) {
-            return Err(format!(
-                "email '{}' is not in allowed users",
-                claims.email
-            ));
+            return Err(format!("email '{}' is not in allowed users", claims.email));
         }
     }
 
