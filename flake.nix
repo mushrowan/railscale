@@ -25,7 +25,6 @@
         inputs',
         pkgs,
         system,
-        
         ...
       }: let
         rustToolchain = pkgs.rust-bin.stable.latest.default.override {
@@ -63,7 +62,7 @@
         railscale = craneLib.buildPackage (commonArgs
           // {
             inherit cargoArtifacts;
-              # meta.mainProgram = name;
+            # meta.mainProgram = name;
           });
       in {
         _module.args.pkgs = import inputs.nixpkgs {
@@ -71,17 +70,18 @@
           overlays = [(import inputs.rust-overlay)];
         };
 
-        checks =
+        checks = let
+          clippyBase = x: craneLib.cargoClippy (commonArgs
+            // {
+              inherit cargoArtifacts;
+            }) // x;
+        in
           {
             inherit railscale;
 
             # Run clippy
-            clippy = craneLib.cargoClippy (commonArgs
-              // {
-                inherit cargoArtifacts;
-                # cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-                cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-              });
+            clippy = clippyBase {cargoClippyExtraArgs = "--all-targets";};
+            clippyDenyWarnings = clippyBase {cargoClippyExtraArgs = "--all-targets -- --deny warnings";};
 
             # Check formatting
             fmt = craneLib.cargoFmt {

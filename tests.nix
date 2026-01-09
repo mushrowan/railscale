@@ -62,20 +62,20 @@ pkgs.testers.runNixOSTest {
   testScript = ''
     start_all()
 
-    # Wait for server to start
+    # wait for server to start
     server.wait_for_unit("railscale.service")
     server.wait_for_open_port(8080)
 
-    # Check server is responding
+    # check server is responding
     client.succeed("curl -f http://server:8080/ || true")
 
-    # Create a preauth key directly in the database
+    # create a preauth key directly in the database
     server.succeed("sqlite3 /var/lib/railscale/db.sqlite \"INSERT INTO users (id, name, created_at, updated_at) VALUES (1, 'testuser', datetime('now'), datetime('now'));\"")
     server.succeed("sqlite3 /var/lib/railscale/db.sqlite \"INSERT INTO preauth_keys (id, key, user_id, reusable, ephemeral, used, created_at, expiration) VALUES (1, 'test-preauth-key-12345', 1, 1, 0, 0, datetime('now'), datetime('now', '+1 day'));\"")
 
 
-    # Test registration endpoint
-    # Note: This is a simplified test - real registration requires Noise protocol
+    # test registration endpoint
+    # real registration requires Noise protocol but that's not ready yet
     client.succeed("""
       curl -X POST http://server:8080/machine/register \
         -H 'Content-Type: application/json' \
@@ -88,10 +88,10 @@ pkgs.testers.runNixOSTest {
             "osVersion": "NixOS"
           },
           "key": "test-preauth-key-12345"
-        }' | jq -e '.node.id' || echo "Registration test (expected to work with full Noise implementation)"
+        }' | jq -e '.node.id' || echo "registration test (expected to work with full Noise implementation)"
     """)
 
-    # Check server logs
+    # check server logs
     server.succeed("journalctl -u railscale.service --no-pager | grep -i 'Starting HTTP server'")
   '';
 }
