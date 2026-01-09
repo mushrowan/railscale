@@ -9,10 +9,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use axum::Router;
 use clap::Parser;
-use railscale::AppState;
-use railscale::handlers::{map, register};
 use railscale_db::RailscaleDb;
 use railscale_grants::{GrantsEngine, Policy};
 use railscale_types::Config;
@@ -20,7 +17,7 @@ use tokio::net::TcpListener;
 use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
-/// database url (sqlite:// or postgres://)
+/// railscale - Tailscale control server in Rust
 #[derive(Parser, Debug)]
 #[command(name = "railscale")]
 #[command(about = "Self-hosted Tailscale control server", long_about = None)]
@@ -146,9 +143,9 @@ async fn main() -> Result<()> {
     let config = cli.into_config()?;
     info!("Database: {}", config.database.connection_string);
     info!("Listen address: {}", config.listen_addr);
-    info!("Database initialized successfully", config.server_url);
+    info!("Server URL: {}", config.server_url);
 
-    // create application state
+    // initialize database
     let db = RailscaleDb::new(&config)
         .await
         .context("failed to initialize database")?;
@@ -160,18 +157,8 @@ async fn main() -> Result<()> {
 
     info!("Database initialized successfully");
 
-    // create application state
-    let state = AppState {
-        db,
-        grants,
-        config: config.clone(),
-    };
-
     // build router
-    let app = Router::new()
-        .route("/machine/register", axum::routing::post(register))
-        .route("/machine/map", axum::routing::post(map))
-        .with_state(state);
+    let app = railscale::create_app(db, grants, config.clone(), None).await;
 
     // parse listen address
     let addr: SocketAddr = config

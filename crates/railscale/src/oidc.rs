@@ -1,4 +1,4 @@
-//TODO: Remove once handlers are wired up
+//! oidc authentication provider.
 
 // TODO: remove once handlers are wired up
 #![allow(dead_code)]
@@ -27,6 +27,7 @@ pub struct RegistrationInfo {
 ///
 /// stores OIDC configuration and provider metadata, building the client on demand
 /// to avoid complex type-state issues with the openidconnect crate.
+#[derive(Clone)]
 pub struct AuthProviderOidc {
     /// provider metadata from OIDC discovery.
     provider_metadata: CoreProviderMetadata,
