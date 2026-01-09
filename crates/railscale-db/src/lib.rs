@@ -38,6 +38,10 @@ pub trait Database: Send + Sync {
     fn create_user(&self, user: &User) -> impl Future<Output = Result<User>> + Send;
     fn get_user(&self, id: UserId) -> impl Future<Output = Result<Option<User>>> + Send;
     fn get_user_by_name(&self, name: &str) -> impl Future<Output = Result<Option<User>>> + Send;
+    fn get_user_by_oidc_identifier(
+        &self,
+        identifier: &str,
+    ) -> impl Future<Output = Result<Option<User>>> + Send;
     fn list_users(&self) -> impl Future<Output = Result<Vec<User>>> + Send;
     fn delete_user(&self, id: UserId) -> impl Future<Output = Result<()>> + Send;
 
@@ -165,6 +169,15 @@ impl Database for RailscaleDb {
     async fn get_user_by_name(&self, name: &str) -> Result<Option<User>> {
         let result = entity::user::Entity::find()
             .filter(entity::user::Column::Name.eq(name))
+            .filter(entity::user::Column::DeletedAt.is_null())
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(Into::into))
+    }
+
+    async fn get_user_by_oidc_identifier(&self, identifier: &str) -> Result<Option<User>> {
+        let result = entity::user::Entity::find()
+            .filter(entity::user::Column::ProviderIdentifier.eq(identifier))
             .filter(entity::user::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -363,6 +376,45 @@ mod tests {
         // delete
         db.delete_preauth_key(created.id).await.unwrap();
         let deleted = db.get_preauth_key("test-key-123").await.unwrap();
+        assert!(deleted.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_user_by_oidc_identifier() {
+        let db = setup_test_db().await;
+
+        // create user with OIDC identifier
+        let mut user = User::new(UserId(0), "oidc-user".to_string());
+        user.provider = Some("oidc".to_string());
+        user.provider_identifier = Some("https://accounts.google.com:12345678".to_string());
+        user.email = Some("test@example.com".to_string());
+
+        let created = db.create_user(&user).await.unwrap();
+        assert!(created.id.0 > 0);
+
+        // get by OIDC identifier
+        let fetched = db
+            .get_user_by_oidc_identifier("https://accounts.google.com:12345678")
+            .await
+            .unwrap();
+        assert!(fetched.is_some());
+        let fetched = fetched.unwrap();
+        assert_eq!(fetched.email, Some("test@example.com".to_string()));
+        assert_eq!(
+            fetched.provider_identifier,
+            Some("https://accounts.google.com:12345678".to_string())
+        );
+
+        // non-existent identifier returns none
+        let not_found = db.get_user_by_oidc_identifier("nonexistent").await.unwrap();
+        assert!(not_found.is_none());
+
+        // soft-deleted users are not returned
+        db.delete_user(created.id).await.unwrap();
+        let deleted = db
+            .get_user_by_oidc_identifier("https://accounts.google.com:12345678")
+            .await
+            .unwrap();
         assert!(deleted.is_none());
     }
 

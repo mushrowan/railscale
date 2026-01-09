@@ -1,4 +1,7 @@
-//! oidc authentication provider.
+//TODO: Remove once handlers are wired up
+
+// TODO: remove once handlers are wired up
+#![allow(dead_code)]
 
 use std::time::Duration;
 
