@@ -1,10 +1,9 @@
 {
   pkgs,
   railscale,
-  lib,
 }:
 pkgs.testers.runNixOSTest {
-  name = "railscale-basic";
+  name = "railscale-curl-test";
 
   nodes = {
     server = {
@@ -41,7 +40,7 @@ pkgs.testers.runNixOSTest {
         };
 
         serviceConfig = {
-          ExecStart = "${lib.getExe railscale}";
+          ExecStart = "${pkgs.lib.getExe railscale}";
           StateDirectory = "railscale";
           Restart = "on-failure";
         };

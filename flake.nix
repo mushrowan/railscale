@@ -18,7 +18,6 @@
   }:
     flake-parts.lib.mkFlake {inherit inputs;} {
       systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
-      debug = true; # <--- Add this line temporarily
 
       perSystem = {
         config,
@@ -93,7 +92,6 @@
             # NixOS integration tests (Linux only)
             nixos-test = import ./tests.nix {
               inherit pkgs;
-              inherit (pkgs) lib;
               railscale = railscale;
             };
           };
