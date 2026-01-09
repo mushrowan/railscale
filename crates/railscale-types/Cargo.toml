@@ -11,5 +11,6 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 ipnet = { workspace = true }
+base64 = "0.22"
 
 [dev-dependencies]
