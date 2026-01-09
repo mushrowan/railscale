@@ -32,6 +32,12 @@ ipnet = { workspace = true }
 # CLI
 clap = { version = "4", features = ["derive"] }
 
+# OIDC
+openidconnect = { workspace = true }
+moka = { workspace = true }
+axum-extra = { version = "0.10", features = ["cookie"] }
+rand = "0.9"
+
 [dev-dependencies]
 tower = "0.5"
 hyper = "1.8"

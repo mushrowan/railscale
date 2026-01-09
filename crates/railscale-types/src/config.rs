@@ -195,8 +195,71 @@ pub struct OidcConfig {
     /// scopes to request.
     pub scope: Vec<String>,
 
-    /// whether email must be verified.
+    /// pKCE configuration
     pub email_verified_required: bool,
+
+    /// pkce configuration.
+    #[serde(default)]
+    pub pkce: PkceConfig,
+
+    /// allowed email domains.
+    #[serde(default)]
+    pub allowed_domains: Vec<String>,
+
+    /// allowed email addresses.
+    #[serde(default)]
+    pub allowed_users: Vec<String>,
+
+    /// allowed groups.
+    #[serde(default)]
+    pub allowed_groups: Vec<String>,
+
+    /// node expiry in seconds (default: 180 days).
+    #[serde(default = "default_expiry_secs")]
+    pub expiry_secs: u64,
+
+    /// use expiry from the id token instead of expiry_secs.
+    #[serde(default)]
+    pub use_expiry_from_token: bool,
+
+    /// extra oauth2 parameters.
+    #[serde(default)]
+    pub extra_params: std::collections::HashMap<String, String>,
+}
+
+fn default_expiry_secs() -> u64 {
+    180 * 24 * 3600 // 180 days in seconds
+}
+
+/// whether PKCE is enabled
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkceConfig {
+    /// whether pkce is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// pkce challenge method (s256 or plain).
+    #[serde(default)]
+    pub method: PkceMethod,
+}
+
+impl Default for PkceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            method: PkceMethod::S256,
+        }
+    }
+}
+
+/// sHA256 challenge method (recommended)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum PkceMethod {
+    /// plain text challenge method
+    #[default]
+    S256,
+    /// plain text challenge method.
+    Plain,
 }
 
 /// performance tuning configuration.
@@ -236,5 +299,64 @@ mod tests {
         assert_eq!(config.database.db_type, "sqlite");
         assert!(config.prefix_v4.is_some());
         assert!(config.prefix_v6.is_some());
+    }
+
+    #[test]
+    fn test_oidc_config_full() {
+        let oidc = OidcConfig {
+            issuer: "https://sso.example.com".to_string(),
+            client_id: "railscale".to_string(),
+            client_secret: "secret".to_string(),
+            scope: vec!["openid".to_string(), "profile".to_string(), "email".to_string()],
+            email_verified_required: true,
+            pkce: PkceConfig {
+                enabled: true,
+                method: PkceMethod::S256,
+            },
+            allowed_domains: vec!["example.com".to_string()],
+            allowed_users: vec!["alice@example.com".to_string()],
+            allowed_groups: vec!["headscale_users".to_string()],
+            expiry_secs: 180 * 24 * 3600, // 180 days in seconds
+            use_expiry_from_token: false,
+            extra_params: std::collections::HashMap::new(),
+        };
+
+        assert!(oidc.pkce.enabled);
+        assert_eq!(oidc.allowed_domains.len(), 1);
+        assert_eq!(oidc.allowed_users.len(), 1);
+        assert_eq!(oidc.allowed_groups.len(), 1);
+    }
+
+    #[test]
+    fn test_pkce_method_default() {
+        let pkce = PkceConfig::default();
+        assert!(!pkce.enabled);
+        assert_eq!(pkce.method, PkceMethod::S256);
+    }
+
+    #[test]
+    fn test_oidc_config_serde() {
+        let json = r#"{
+            "issuer": "https://sso.example.com",
+            "client_id": "railscale",
+            "client_secret": "secret",
+            "scope": ["openid", "profile"],
+            "email_verified_required": false,
+            "pkce": {
+                "enabled": true,
+                "method": "S256"
+            },
+            "allowed_domains": ["example.com"],
+            "allowed_users": [],
+            "allowed_groups": [],
+            "expiry_secs": 15552000,
+            "use_expiry_from_token": false,
+            "extra_params": {"domain_hint": "example.com"}
+        }"#;
+
+        let oidc: OidcConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(oidc.issuer, "https://sso.example.com");
+        assert!(oidc.pkce.enabled);
+        assert_eq!(oidc.extra_params.get("domain_hint"), Some(&"example.com".to_string()));
     }
 }
