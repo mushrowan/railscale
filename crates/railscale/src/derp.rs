@@ -4,6 +4,18 @@ use railscale_proto::{DerpMap, DerpNode, DerpRegion};
 use railscale_types::Config;
 use std::collections::HashMap;
 
+/// extract hostname from a url, stripping scheme and port.
+///
+/// e.g. "https://example.com:443" -> "example.com"
+fn extract_hostname(url: &str) -> &str {
+    url.split("://")
+        .nth(1)
+        .unwrap_or(url)
+        .split(':')
+        .next()
+        .unwrap_or("localhost")
+}
+
 /// generate the derp map for clients.
 pub fn generate_derp_map(config: &Config) -> DerpMap {
     let mut regions = HashMap::new();
@@ -11,15 +23,7 @@ pub fn generate_derp_map(config: &Config) -> DerpMap {
     // if embedded derp is enabled, add it to the map
     if config.derp.embedded_derp.enabled {
         let region_id = config.derp.embedded_derp.region_id;
-        let host_name = config
-            .server_url
-            .split("://")
-            .nth(1)
-            .unwrap_or("localhost")
-            .split(':')
-            .next()
-            .unwrap_or("localhost")
-            .to_string();
+        let host_name = extract_hostname(&config.server_url).to_string();
 
         let region = DerpRegion {
             region_id,

@@ -544,128 +544,88 @@ mod tests {
     }
 
     #[test]
-
     fn test_group_selector() {
         let mut policy = Policy::empty();
-
         policy.grants.push(Grant {
             src: vec![Selector::Group("engineering".to_string())],
-
             dst: vec![Selector::Wildcard],
-
             ip: vec![NetworkCapability::Wildcard],
-
             app: vec![],
-
             src_posture: vec![],
-
             via: vec![],
         });
 
         let engine = GrantsEngine::new(policy);
-
         let mut resolver = MockResolver::new();
-
         resolver
             .groups
             .insert(UserId(1), vec!["engineering".to_string()]);
-
         resolver.groups.insert(UserId(2), vec!["sales".to_string()]);
 
         let engineer_node = test_node(1, vec![]);
-
         let sales_node = test_node(2, vec![]);
 
         // engineer can see sales
-
         assert!(engine.can_see(&engineer_node, &sales_node, &resolver));
 
-        // user node (member) can see tagged server
-
+        // sales cannot see engineer
         assert!(!engine.can_see(&sales_node, &engineer_node, &resolver));
     }
 
     #[test]
-
     fn test_autogroup_member() {
         let mut policy = Policy::empty();
-
         policy.grants.push(Grant {
             src: vec![Selector::Autogroup(Autogroup::Member)],
-
             dst: vec![Selector::Tag("server".to_string())],
-
             ip: vec![NetworkCapability::Wildcard],
-
             app: vec![],
-
             src_posture: vec![],
-
             via: vec![],
         });
 
         let engine = GrantsEngine::new(policy);
-
         let resolver = EmptyResolver;
-
         let user_node = test_node(1, vec![]);
-
         let tagged_node = test_node(2, vec!["tag:server".to_string()]);
-
         let other_tagged_node = test_node(3, vec!["tag:client".to_string()]);
 
         // user node (member) can see tagged server
-
         assert!(engine.can_see(&user_node, &tagged_node, &resolver));
 
         // tagged node (not member) cannot see tagged server (unless separate grant)
-
         assert!(!engine.can_see(&other_tagged_node, &tagged_node, &resolver));
     }
 
     #[test]
-
     fn test_autogroup_self() {
         let mut policy = Policy::empty();
-
         policy.grants.push(Grant {
             src: vec![Selector::Autogroup(Autogroup::Member)],
-
             dst: vec![Selector::Autogroup(Autogroup::SelfDevices)],
-
             ip: vec![NetworkCapability::Wildcard],
-
             app: vec![],
-
             src_posture: vec![],
-
             via: vec![],
         });
 
         let engine = GrantsEngine::new(policy);
-
         let resolver = EmptyResolver;
 
         // two nodes for user 1
-
         let node1_u1 = test_node(1, vec![]); // User 1
 
         // we need to override user_id to simulate same user
-
         let mut node2_u1 = test_node(2, vec![]);
-
         node2_u1.user_id = Some(UserId(1));
 
         // node for user 2
-
         let node3_u2 = test_node(3, vec![]); // User 3
 
         // user 1 can see their own device
-
         assert!(engine.can_see(&node1_u1, &node2_u1, &resolver));
 
         // user 1 cannot see user 3's device
-
         assert!(!engine.can_see(&node1_u1, &node3_u2, &resolver));
     }
 }

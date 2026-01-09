@@ -53,17 +53,12 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
 /// for 100.64.0.0/10, this generates:
 /// - 64.100.in-addr.arpa. through 127.100.in-addr.arpa.
 fn generate_ipv4_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
-    if !prefix.addr().is_ipv4() {
+    let IpNet::V4(v4_prefix) = prefix else {
         return vec![];
-    }
-
-    let addr = prefix.addr();
-    let octets = match addr {
-        std::net::IpAddr::V4(v4) => v4.octets(),
-        _ => return vec![],
     };
 
-    let prefix_len = prefix.prefix_len();
+    let octets = v4_prefix.addr().octets();
+    let prefix_len = v4_prefix.prefix_len();
     let mask_bits = prefix_len as usize;
 
     // determine which octet we're working with
@@ -102,17 +97,12 @@ fn generate_ipv4_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
 ///
 /// for fd7a:115c:a1e0::/48, this generates the appropriate ip6.arpa entries.
 fn generate_ipv6_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
-    if !prefix.addr().is_ipv6() {
+    let IpNet::V6(v6_prefix) = prefix else {
         return vec![];
-    }
-
-    let addr = prefix.addr();
-    let segments = match addr {
-        std::net::IpAddr::V6(v6) => v6.segments(),
-        _ => return vec![],
     };
 
-    let prefix_len = prefix.prefix_len() as usize;
+    let segments = v6_prefix.addr().segments();
+    let prefix_len = v6_prefix.prefix_len() as usize;
     let nibble_len = 4;
     let mask_bits = prefix_len;
 
