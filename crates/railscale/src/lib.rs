@@ -44,5 +44,6 @@ pub async fn create_app(
             "/register/{registration_id}",
             get(handlers::oidc::register_redirect),
         )
+        .route("/oidc/callback", get(handlers::oidc::oidc_callback))
         .with_state(state)
 }

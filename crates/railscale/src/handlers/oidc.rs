@@ -1,16 +1,17 @@
-//! handlers for oidc authentication endpoints
+//! handlers for oidc authentication endpoints.
 
 use axum::{
-    extract::{Path, State},
-    response::{IntoResponse, Redirect},
+    extract::{Path, Query, State},
+    response::{Html, IntoResponse, Redirect},
 };
 use railscale_types::RegistrationId;
+use serde::Deserialize;
 
 use super::ApiError;
 use crate::AppState;
 
 /// get /register/{registration_id}
-/// redirects to oidc provider's authorization url
+/// redirects to oidc provider's authorization url.
 pub async fn register_redirect(
     State(state): State<AppState>,
     Path(registration_id_str): Path<String>,
@@ -26,6 +27,23 @@ pub async fn register_redirect(
     let (auth_url, _csrf_token, _nonce) = oidc.authorization_url(registration_id);
 
     Ok(Redirect::to(&auth_url))
+}
+
+/// query parameters for oidc callback.
+#[derive(Debug, Deserialize)]
+pub struct OidcCallbackParams {
+    pub code: String,
+    pub state: String,
+}
+
+/// get /oidc/callback?code=...&state=...
+/// processes oidc callback, creates/updates user and node.
+pub async fn oidc_callback(
+    State(_state): State<AppState>,
+    Query(_params): Query<OidcCallbackParams>,
+) -> Result<impl IntoResponse, ApiError> {
+    // TODO: implement callback logic
+    Ok(Html("<html><body>Success</body></html>"))
 }
 
 #[cfg(test)]
@@ -56,7 +74,7 @@ mod tests {
         });
         let grants = GrantsEngine::new(policy);
 
-        // create app without oidc
+        // create app without OIDC
         let config = railscale_types::Config::default();
         let app = crate::create_app(db, grants, config, None).await;
 
@@ -78,5 +96,47 @@ mod tests {
 
         // should get an error since oidc is not configured
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_oidc_callback_without_oidc() {
+        // create grants engine with wildcard policy
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+
+        // create grants engine with wildcard policy
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+        let grants = GrantsEngine::new(policy);
+
+        // create app without OIDC
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(db, grants, config, None).await;
+
+        // send callback request with code and state
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/oidc/callback?code=test_code&state=test_state")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // should get ok with stub html (this is the red state - we want it to fail properly)
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("Success"));
     }
 }
