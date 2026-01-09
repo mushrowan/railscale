@@ -21,6 +21,8 @@ pub struct RegistrationInfo {
     pub registration_id: RegistrationId,
     /// pkce verifier (if pkce is enabled).
     pub pkce_verifier: Option<String>,
+    /// nonce for ID token verification.
+    pub nonce: String,
 }
 
 /// oidc authentication provider.
@@ -122,7 +124,7 @@ impl AuthProviderOidc {
         }
 
         // handle pkce if enabled
-        let reg_info = if self.config.pkce.enabled {
+        let pkce_verifier = if self.config.pkce.enabled {
             let (challenge, verifier) = match self.config.pkce.method {
                 PkceMethod::S256 => PkceCodeChallenge::new_random_sha256(),
                 // plain method is handled by not applying sha256 transformation
@@ -132,19 +134,18 @@ impl AuthProviderOidc {
             };
 
             auth_req = auth_req.set_pkce_challenge(challenge);
-
-            RegistrationInfo {
-                registration_id,
-                pkce_verifier: Some(verifier.secret().to_string()),
-            }
+            Some(verifier.secret().to_string())
         } else {
-            RegistrationInfo {
-                registration_id,
-                pkce_verifier: None,
-            }
+            None
         };
 
         let (url, csrf_token, nonce) = auth_req.url();
+
+        let reg_info = RegistrationInfo {
+            registration_id,
+            pkce_verifier,
+            nonce: nonce.secret().to_string(),
+        };
 
         // store registration info in cache
         self.registration_cache
@@ -183,6 +184,46 @@ impl AuthProviderOidc {
             .request_async(&self.http_client)
             .await
             .map_err(|e| format!("token exchange failed: {}", e))
+    }
+
+    /// get the OIDC configuration.
+    pub fn config(&self) -> &OidcConfig {
+        &self.config
+    }
+
+    /// verify an ID token and extract claims.
+    pub fn verify_id_token(
+        &self,
+        id_token: &openidconnect::IdToken<
+            openidconnect::EmptyAdditionalClaims,
+            openidconnect::core::CoreGenderClaim,
+            openidconnect::core::CoreJweContentEncryptionAlgorithm,
+            openidconnect::core::CoreJwsSigningAlgorithm,
+        >,
+        nonce: &str,
+    ) -> Result<OidcClaims, String> {
+        use openidconnect::Nonce;
+        use openidconnect::core::CoreIdTokenVerifier;
+
+        // create verifier for ID token validation
+        let verifier = CoreIdTokenVerifier::new_confidential_client(
+            self.client_id.clone(),
+            self.client_secret.clone(),
+            self.provider_metadata.issuer().clone(),
+            self.provider_metadata.jwks().clone(),
+        );
+
+        // verify the id token with the nonce
+        let verified_claims = id_token
+            .claims(&verifier, &Nonce::new(nonce.to_string()))
+            .map_err(|e| format!("ID token verification failed: {}", e))?;
+
+        // convert to our oidcclaims type
+        serde_json::from_value(
+            serde_json::to_value(verified_claims)
+                .map_err(|e| format!("failed to serialize claims: {}", e))?,
+        )
+        .map_err(|e| format!("failed to parse claims: {}", e))
     }
 }
 

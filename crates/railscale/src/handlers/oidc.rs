@@ -7,7 +7,7 @@ use axum::{
 use railscale_types::RegistrationId;
 use serde::Deserialize;
 
-use super::ApiError;
+use super::{ApiError, ResultExt};
 use crate::AppState;
 
 /// get /register/{registration_id}
@@ -39,11 +39,87 @@ pub struct OidcCallbackParams {
 /// get /oidc/callback?code=...&state=...
 /// processes oidc callback, creates/updates user and node.
 pub async fn oidc_callback(
-    State(_state): State<AppState>,
-    Query(_params): Query<OidcCallbackParams>,
+    State(state): State<AppState>,
+    Query(params): Query<OidcCallbackParams>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // TODO: implement callback logic
-    Ok(Html("<html><body>Success</body></html>"))
+    use openidconnect::{AuthorizationCode, TokenResponse};
+    use railscale_db::Database;
+
+    let oidc = state
+        .oidc
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("OIDC not configured"))?;
+
+    // retrieve registration info from cache
+    let reg_info = oidc
+        .get_registration_info(&params.state)
+        .ok_or_else(|| ApiError::bad_request("invalid or expired state"))?;
+
+    // exchange authorization code for tokens
+    let token_response = oidc
+        .exchange_code(
+            AuthorizationCode::new(params.code),
+            reg_info.pkce_verifier,
+        )
+        .await
+        .map_err(ApiError::internal)?;
+
+    // extract id token and verify it
+    let id_token = token_response
+        .id_token()
+        .ok_or_else(|| ApiError::internal("no ID token in response"))?;
+
+    // verify the id token and extract claims
+    let claims = oidc
+        .verify_id_token(id_token, &reg_info.nonce)
+        .map_err(ApiError::unauthorized)?;
+
+    // get or create user
+    crate::oidc::validate_oidc_claims(oidc.config(), &claims)
+        .map_err(|e| ApiError::unauthorized(format!("authorization failed: {}", e)))?;
+
+    // get or create user
+    let provider_identifier = claims.identifier();
+    let user = state
+        .db
+        .get_user_by_oidc_identifier(&provider_identifier)
+        .await
+        .map_internal()?;
+
+    let _user = if let Some(user) = user {
+        // user exists, return it
+        user
+    } else {
+        // create new user
+        use railscale_types::{User, UserId};
+        let new_user = User {
+            id: UserId(0), // Will be assigned by database
+            name: claims.preferred_username.clone(),
+            display_name: Some(claims.display_name().to_string()),
+            email: Some(claims.email.clone()),
+            provider_identifier: Some(provider_identifier),
+            provider: Some("oidc".to_string()),
+            profile_pic_url: if claims.picture.is_empty() {
+                None
+            } else {
+                Some(claims.picture.clone())
+            },
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        state.db.create_user(&new_user).await.map_internal()?
+    };
+
+    // return success html
+    Ok(Html(
+        r#"<html>
+<head><title>Authentication Successful</title></head>
+<body>
+<h1>Authentication Successful</h1>
+<p>You have successfully authenticated. You can close this window and return to the Tailscale client.</p>
+</body>
+</html>"#,
+    ))
 }
 
 #[cfg(test)]
@@ -100,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_oidc_callback_without_oidc() {
-        // create grants engine with wildcard policy
+        // set up test database
         let db = RailscaleDb::new_in_memory().await.unwrap();
 
         // create grants engine with wildcard policy
@@ -131,12 +207,7 @@ mod tests {
             .await
             .unwrap();
 
-        // should get ok with stub html (this is the red state - we want it to fail properly)
-        assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        let html = String::from_utf8(body.to_vec()).unwrap();
-        assert!(html.contains("Success"));
+        // should get an error since oidc is not configured
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 }
