@@ -7,7 +7,7 @@ use openidconnect::{
     AuthenticationFlow, AuthorizationCode, ClientId, ClientSecret, CsrfToken, IssuerUrl, Nonce,
     PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, Scope,
     core::{CoreClient, CoreProviderMetadata, CoreResponseType, CoreTokenResponse},
-    reqwest::async_http_client,
+    reqwest,
 };
 use railscale_types::{OidcClaims, OidcConfig, PkceMethod, RegistrationId};
 
@@ -20,10 +20,21 @@ pub struct RegistrationInfo {
     pub pkce_verifier: Option<String>,
 }
 
-/// oidc authentication provider.
+/// to avoid complex type-state issues with the openidconnect crate
+///provider metadata from oidc discovery
+/// stores OIDC configuration and provider metadata, building the client on demand
+/// oAuth2 client id
 pub struct AuthProviderOidc {
-    /// oidc client configuration.
-    client: CoreClient,
+    /// oAuth2 client secret
+    provider_metadata: CoreProviderMetadata,
+    /// redirect url for OAuth callbacks
+    client_id: ClientId,
+    /// http client for async requests
+    client_secret: ClientSecret,
+    /// redirect URL for OAuth callbacks.
+    redirect_url: RedirectUrl,
+    /// http client for async requests.
+    http_client: reqwest::Client,
     /// configuration from the user.
     config: OidcConfig,
     /// cache for in-flight registration sessions.
@@ -33,31 +44,31 @@ pub struct AuthProviderOidc {
 
 impl AuthProviderOidc {
     /// create a new OIDC provider from configuration.
-    ///
-    /// this will perform OIDC discovery to fetch the provider metadata.
+    //create http client for async requests
+    //disable redirects to prevent SSRF vulnerabilities
     pub async fn new(config: OidcConfig, server_url: &str) -> Result<Self, String> {
+        // create HTTP client for async requests
+        // disable redirects to prevent ssrf vulnerabilities
+        let http_client = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("failed to build HTTP client: {}", e))?;
+
         // parse the issuer url
         let issuer_url =
             IssuerUrl::new(config.issuer.clone()).map_err(|e| format!("invalid issuer: {}", e))?;
 
+        // parse the redirect url
+        let redirect_url = RedirectUrl::new(format!(
+            "{}/oidc/callback",
+            server_url.trim_end_matches('/')
+        ))
+        .map_err(|e| format!("invalid redirect URL: {}", e))?;
+
         // perform oidc discovery
-        let provider_metadata = CoreProviderMetadata::discover_async(issuer_url, async_http_client)
+        let provider_metadata = CoreProviderMetadata::discover_async(issuer_url, &http_client)
             .await
             .map_err(|e| format!("OIDC discovery failed: {}", e))?;
-
-        // set up the oauth2 client
-        let client = CoreClient::from_provider_metadata(
-            provider_metadata,
-            ClientId::new(config.client_id.clone()),
-            Some(ClientSecret::new(config.client_secret.clone())),
-        )
-        .set_redirect_uri(
-            RedirectUrl::new(format!(
-                "{}/oidc/callback",
-                server_url.trim_end_matches('/')
-            ))
-            .map_err(|e| format!("invalid redirect URL: {}", e))?,
-        );
 
         // create registration cache with 15 minute TTL
         let registration_cache = Cache::builder()
@@ -65,7 +76,11 @@ impl AuthProviderOidc {
             .build();
 
         Ok(Self {
-            client,
+            provider_metadata,
+            client_id: ClientId::new(config.client_id.clone()),
+            client_secret: ClientSecret::new(config.client_secret.clone()),
+            redirect_url,
+            http_client,
             config,
             registration_cache,
         })
@@ -79,7 +94,14 @@ impl AuthProviderOidc {
         &self,
         registration_id: RegistrationId,
     ) -> (String, CsrfToken, Option<Nonce>) {
-        let mut auth_req = self.client.authorize_url(
+        let client = CoreClient::from_provider_metadata(
+            self.provider_metadata.clone(),
+            self.client_id.clone(),
+            Some(self.client_secret.clone()),
+        )
+        .set_redirect_uri(self.redirect_url.clone());
+
+        let mut auth_req = client.authorize_url(
             AuthenticationFlow::<CoreResponseType>::AuthorizationCode,
             CsrfToken::new_random,
             Nonce::new_random,
@@ -138,14 +160,23 @@ impl AuthProviderOidc {
         code: AuthorizationCode,
         pkce_verifier: Option<String>,
     ) -> Result<CoreTokenResponse, String> {
-        let mut token_req = self.client.exchange_code(code);
+        let client = CoreClient::from_provider_metadata(
+            self.provider_metadata.clone(),
+            self.client_id.clone(),
+            Some(self.client_secret.clone()),
+        )
+        .set_redirect_uri(self.redirect_url.clone());
+
+        let mut token_req = client
+            .exchange_code(code)
+            .map_err(|e| format!("token endpoint not configured: {:?}", e))?;
 
         if let Some(verifier) = pkce_verifier {
             token_req = token_req.set_pkce_verifier(PkceCodeVerifier::new(verifier));
         }
 
         token_req
-            .request_async(async_http_client)
+            .request_async(&self.http_client)
             .await
             .map_err(|e| format!("token exchange failed: {}", e))
     }
@@ -193,10 +224,10 @@ pub fn validate_oidc_claims(config: &OidcConfig, claims: &OidcClaims) -> Result<
     }
 
     // check allowed users
-    if !config.allowed_users.is_empty() {
-        if !config.allowed_users.iter().any(|u| u == &claims.email) {
-            return Err(format!("email '{}' is not in allowed users", claims.email));
-        }
+    if !config.allowed_users.is_empty()
+        && !config.allowed_users.iter().any(|u| u == &claims.email)
+    {
+        return Err(format!("email '{}' is not in allowed users", claims.email));
     }
 
     Ok(())

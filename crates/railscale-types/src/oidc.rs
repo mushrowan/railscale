@@ -1,21 +1,21 @@
-//! oidc authentication types
+//! oidc authentication types.
 
 use serde::{Deserialize, Serialize};
 
-/// unique identifier for an oidc registration session
+/// unique identifier for an OIDC registration session.
 ///
 /// the registration id is used to correlate the oidc callback with the
-/// initial registration request from a tailscale client
+/// initial registration request from a tailscale client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RegistrationId([u8; 32]);
 
 impl RegistrationId {
-    /// create a new registration id from random bytes
+    /// create a new registration ID from random bytes.
     pub fn new(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 
-    /// create a registration id from a base64url-encoded string
+    /// create a registration ID from a base64url-encoded string.
     pub fn from_string(s: &str) -> Result<Self, String> {
         use base64::Engine;
         let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -31,13 +31,13 @@ impl RegistrationId {
         Ok(Self(arr))
     }
 
-    /// convert to a base64url-encoded string
-    pub fn to_string(&self) -> String {
+    /// encode as a base64url string.
+    pub fn encode(&self) -> String {
         use base64::Engine;
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(self.0)
     }
 
-    /// get the raw bytes
+    /// get the raw bytes.
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
@@ -45,54 +45,54 @@ impl RegistrationId {
 
 impl std::fmt::Display for RegistrationId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.encode())
     }
 }
 
-/// oidc claims from the id token and userinfo endpoint
+/// oidc claims from the id token and userinfo endpoint.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OidcClaims {
-    /// subject - unique identifier for the user from the provider
+    /// subject - unique identifier for the user from the provider.
     pub sub: String,
 
-    /// issuer - the oidc provider url
+    /// issuer - the OIDC provider URL.
     pub iss: String,
 
-    /// email address
+    /// email address.
     #[serde(default)]
     pub email: String,
 
-    /// whether the email has been verified by the provider
+    /// whether the email has been verified by the provider.
     #[serde(default)]
     pub email_verified: bool,
 
-    /// preferred username
+    /// preferred username.
     #[serde(default)]
     pub preferred_username: String,
 
-    /// display name
+    /// display name.
     #[serde(default)]
     pub name: String,
 
-    /// profile picture url
+    /// profile picture URL.
     #[serde(default)]
     pub picture: String,
 
-    /// group memberships
+    /// group memberships.
     #[serde(default)]
     pub groups: Vec<String>,
 }
 
 impl OidcClaims {
-    /// get a unique identifier for this user
+    /// get a unique identifier for this user.
     ///
     /// this combines the issuer and subject to create a stable identifier
-    /// that won't change even if the user's email or username changes
+    /// that won't change even if the user's email or username changes.
     pub fn identifier(&self) -> String {
         format!("{}:{}", self.iss, self.sub)
     }
 
-    /// get a display name, falling back to email or username
+    /// get a display name, falling back to email or username.
     pub fn display_name(&self) -> &str {
         if !self.name.is_empty() {
             &self.name
@@ -114,7 +114,7 @@ mod tests {
     fn test_registration_id_roundtrip() {
         let bytes = [1u8; 32];
         let id = RegistrationId::new(bytes);
-        let s = id.to_string();
+        let s = id.encode();
         let id2 = RegistrationId::from_string(&s).unwrap();
         assert_eq!(id, id2);
     }
