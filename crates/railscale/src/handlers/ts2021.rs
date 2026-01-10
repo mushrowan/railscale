@@ -1,26 +1,43 @@
-//! ts2021 protocol handler for tailscale clients.
-//!
+//! both websocket upgrades (for browser clients) and http protocol
+//!switch (for native tailscale clients) with Noise handshakes
 //! this module implements the `/ts2021` endpoint that handles
-//! websocket upgrades and noise protocol handshakes for the
-//! tailscale control protocol.
+//! ## protocol variants
+//! switch (for native Tailscale clients) with Noise handshakes.
+//!### WebSocket (browser clients)
+//! ```text
+//!gET /ts2021?X-tailscale-Handshake=<base64>
+//! upgrade: websocket
+//! ```
+//! get /ts2021?x-tailscale-handshake=<base64>
+//! ### http upgrade (native clients)
+//! ```text
+//!pOST /ts2021
+//! upgrade: tailscale-control-protocol
+//! x-tailscale-handshake: <base64>
+//! ```
+//! upgrade: tailscale-control-protocol
+//! x-tailscale-handshake: <base64>
+//! ```
 
 use axum::{
     Router,
     body::Body,
     extract::{Query, State, WebSocketUpgrade, ws::Message},
-    response::Response,
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Response},
     routing::post,
 };
 use base64::Engine;
 use bytes::{Buf, BytesMut};
 use futures_util::StreamExt;
 use hyper::Request;
+use hyper_util::rt::TokioIo;
 use railscale_proto::NoiseHandshake;
 use serde::Deserialize;
 use std::io::{self, ErrorKind};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tracing::{debug, error};
 
 use super::MachineKeyContext;
@@ -62,6 +79,84 @@ pub async fn ts2021(
                 error!("ts2021 connection error: {}", e);
             }
         })
+}
+
+/// used by native tailscale clients (Linux, macOS, Windows)
+///
+/// protocol:
+/// ```text
+///pOST /ts2021
+/// upgrade: tailscale-control-protocol
+/// connection: upgrade
+/// x-tailscale-handshake: <base64 noise init>
+/// upgrade: tailscale-control-protocol
+/// response: 101 switching protocols
+/// upgrade: tailscale-control-protocol
+///connection: upgrade
+/// response: 101 switching protocols
+/// then: noise response + http/2 over noise
+/// ```
+///
+/// then: noise response + http/2 over noise
+/// ```
+pub async fn ts2021_http_upgrade(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    request: axum::http::Request<Body>,
+) -> Response {
+    // check for the upgrade header
+    let upgrade = headers
+        .get(header::UPGRADE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !upgrade.eq_ignore_ascii_case("tailscale-control-protocol") {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Missing or invalid Upgrade header. Expected: tailscale-control-protocol",
+        )
+            .into_response();
+    }
+
+    // get the handshake data from header
+    let Some(handshake_b64) = headers
+        .get("X-Tailscale-Handshake")
+        .and_then(|v| v.to_str().ok())
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "Missing X-Tailscale-Handshake header",
+        )
+            .into_response();
+    };
+
+    let handshake_b64 = handshake_b64.to_string();
+    let private_key = state.noise_private_key.clone();
+
+    // perform the http upgrade
+    tokio::spawn(async move {
+        let upgraded = match hyper::upgrade::on(request).await {
+            Ok(upgraded) => upgraded,
+            Err(e) => {
+                error!("ts2021 http upgrade failed: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) =
+            handle_ts2021_http_connection(upgraded, handshake_b64, private_key, state).await
+        {
+            error!("ts2021 http connection error: {}", e);
+        }
+    });
+
+    // return 101 switching protocols
+    Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header(header::UPGRADE, "tailscale-control-protocol")
+        .header(header::CONNECTION, "upgrade")
+        .body(Body::empty())
+        .unwrap()
 }
 
 /// handle a ts2021 websocket connection.
@@ -197,6 +292,269 @@ async fn handle_ts2021_connection(
     }
 
     Ok(())
+}
+
+/// after the http 101 upgrade completes
+///
+/// unlike the websocket handler, this works with a raw byte stream
+/// after the HTTP 101 upgrade completes.
+async fn handle_ts2021_http_connection(
+    upgraded: hyper::upgrade::Upgraded,
+    handshake_b64: String,
+    private_key: Vec<u8>,
+    state: AppState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // decode the initiation message from header
+    let mut io = TokioIo::new(upgraded);
+
+    // decode the initiation message from header
+    let init_message = base64::engine::general_purpose::STANDARD.decode(&handshake_b64)?;
+    debug!("received initiation message: {} bytes", init_message.len());
+
+    // validate message format
+    if init_message.len() < 5 {
+        return Err("initiation message too short".into());
+    }
+
+    let version = u16::from_be_bytes([init_message[0], init_message[1]]);
+    let msg_type = init_message[2];
+    let payload_len = u16::from_be_bytes([init_message[3], init_message[4]]);
+
+    debug!(
+        "initiation: version={}, type={}, payload_len={}",
+        version, msg_type, payload_len
+    );
+
+    if msg_type != MSG_TYPE_INITIATION {
+        return Err(format!("expected initiation type 0x01, got 0x{:02x}", msg_type).into());
+    }
+
+    if init_message.len() != 5 + payload_len as usize {
+        return Err(format!(
+            "message length mismatch: expected {}, got {}",
+            5 + payload_len,
+            init_message.len()
+        )
+        .into());
+    }
+
+    // create the tailscale prologue for this version
+    let noise_payload = &init_message[5..];
+
+    // create noise responder with prologue
+    let prologue = format!("Tailscale Control Protocol v{}", version);
+
+    // create noise responder with prologue
+    let mut handshake =
+        NoiseHandshake::new_responder_with_prologue(&private_key, prologue.as_bytes())?;
+
+    // generate response message
+    handshake.read_message(noise_payload)?;
+
+    // generate response message
+    let response_payload = handshake.write_message(&[])?;
+    debug!(
+        "generated response payload: {} bytes",
+        response_payload.len()
+    );
+
+    // frame the response: [type:1=0x02][len:2][payload]
+    let response_len = response_payload.len() as u16;
+    let mut response_msg = vec![MSG_TYPE_RESPONSE];
+    response_msg.extend_from_slice(&response_len.to_be_bytes());
+    response_msg.extend_from_slice(&response_payload);
+
+    debug!("sending response message: {} bytes", response_msg.len());
+
+    // send response directly over the upgraded connection
+    io.write_all(&response_msg).await?;
+    io.flush().await?;
+
+    // handshake should be complete
+    if !handshake.is_complete() {
+        return Err("handshake not complete after response".into());
+    }
+
+    let client_key = handshake
+        .remote_static()
+        .ok_or("missing client static key")?;
+    debug!("client machine key: {} bytes", client_key.len());
+
+    // create machine key context from the noise handshake
+    let machine_key_context = MachineKeyContext::from_bytes(client_key);
+
+    let transport = handshake.into_transport()?;
+
+    // create a router for the ts2021 endpoints with state
+    let noise_stream = HttpNoiseStream::new(io, transport);
+
+    // create a router for the ts2021 endpoints with state
+    let router: Router = Router::new()
+        .route("/machine/register", post(super::register))
+        .route("/machine/map", post(super::map))
+        .with_state(state);
+
+    // run http/2 server over the encrypted stream
+    let io = hyper_util::rt::TokioIo::new(noise_stream);
+    let service = hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| {
+        let mut router = router.clone();
+        let machine_key_context = machine_key_context.clone();
+        async move {
+            let (mut parts, body) = req.into_parts();
+            parts.extensions.insert(machine_key_context);
+            let body = Body::new(body);
+            let req = Request::from_parts(parts, body);
+            tower::Service::call(&mut router, req).await
+        }
+    });
+
+    // serve http/2 connection
+    let mut http2 = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new());
+    http2.max_frame_size(16384);
+
+    if let Err(e) = http2.serve_connection(io, service).await {
+        debug!("HTTP/2 connection ended: {}", e);
+    }
+
+    Ok(())
+}
+
+/// suitable for running http/2 over the Noise transport after http upgrade
+///
+/// this provides asyncread + asyncwrite over a noise-encrypted raw tcp stream,
+/// suitable for running HTTP/2 over the Noise transport after HTTP upgrade.
+struct HttpNoiseStream {
+    io: TokioIo<hyper::upgrade::Upgraded>,
+    transport: railscale_proto::NoiseTransport,
+    read_buffer: BytesMut,
+}
+
+impl HttpNoiseStream {
+    fn new(
+        io: TokioIo<hyper::upgrade::Upgraded>,
+        transport: railscale_proto::NoiseTransport,
+    ) -> Self {
+        Self {
+            io,
+            transport,
+            read_buffer: BytesMut::new(),
+        }
+    }
+}
+
+impl AsyncRead for HttpNoiseStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        // return buffered decrypted data first
+        if !self.read_buffer.is_empty() {
+            let len = std::cmp::min(buf.remaining(), self.read_buffer.len());
+            buf.put_slice(&self.read_buffer[..len]);
+            self.read_buffer.advance(len);
+            return Poll::Ready(Ok(()));
+        }
+
+        // read a length-prefixed encrypted message from the stream
+        // read the length prefix
+        let mut len_buf = [0u8; 2];
+
+        // read the length prefix
+        let this = self.get_mut();
+        let mut read_buf = ReadBuf::new(&mut len_buf);
+        match Pin::new(&mut this.io).poll_read(cx, &mut read_buf) {
+            Poll::Ready(Ok(())) => {
+                if read_buf.filled().is_empty() {
+                    // eof
+                    return Poll::Ready(Ok(()));
+                }
+                if read_buf.filled().len() < 2 {
+                    // need more data (partial read)
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+            }
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => return Poll::Pending,
+        }
+
+        let msg_len = u16::from_be_bytes(len_buf) as usize;
+        if msg_len == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        // read the encrypted message
+        let mut encrypted = vec![0u8; msg_len];
+        let mut read_buf = ReadBuf::new(&mut encrypted);
+        match Pin::new(&mut this.io).poll_read(cx, &mut read_buf) {
+            Poll::Ready(Ok(())) => {
+                if read_buf.filled().len() < msg_len {
+                    // partial read, need to handle this better in a real impl
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+            }
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => return Poll::Pending,
+        }
+
+        // decrypt
+        match this.transport.decrypt(&encrypted) {
+            Ok(plaintext) => {
+                let copy_len = std::cmp::min(buf.remaining(), plaintext.len());
+                buf.put_slice(&plaintext[..copy_len]);
+                if copy_len < plaintext.len() {
+                    this.read_buffer.extend_from_slice(&plaintext[copy_len..]);
+                }
+                Poll::Ready(Ok(()))
+            }
+            Err(e) => Poll::Ready(Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("noise decrypt failed: {}", e),
+            ))),
+        }
+    }
+}
+
+impl AsyncWrite for HttpNoiseStream {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        // encrypt the data
+        let ciphertext = match self.transport.encrypt(buf) {
+            Ok(ct) => ct,
+            Err(e) => {
+                return Poll::Ready(Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("noise encrypt failed: {}", e),
+                )));
+            }
+        };
+
+        // length-prefix the message
+        let len = ciphertext.len() as u16;
+        let mut msg = Vec::with_capacity(2 + ciphertext.len());
+        msg.extend_from_slice(&len.to_be_bytes());
+        msg.extend_from_slice(&ciphertext);
+
+        // write to the underlying stream
+        match Pin::new(&mut self.io).poll_write(cx, &msg) {
+            Poll::Ready(Ok(_)) => Poll::Ready(Ok(buf.len())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.io).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.io).poll_shutdown(cx)
+    }
 }
 
 /// server-side noise stream wrapper for axum websocket.

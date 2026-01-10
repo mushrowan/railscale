@@ -112,7 +112,10 @@ pub async fn create_app(
 
     Router::new()
         .route("/key", get(handlers::key))
-        .route("/ts2021", get(handlers::ts2021))
+        .route(
+            "/ts2021",
+            get(handlers::ts2021).post(handlers::ts2021_http_upgrade),
+        )
         .route("/machine/register", post(handlers::register))
         .route("/machine/map", post(handlers::map))
         .route(

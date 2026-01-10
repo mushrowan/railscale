@@ -645,6 +645,199 @@ async fn test_ts2021_machine_key_from_noise_context() {
     server_handle.abort();
 }
 
+/// of WebSocket. This test verifies that path works
+///
+/// protocol:
+/// ```text
+///pOST /ts2021 http/1.1
+/// upgrade: tailscale-control-protocol
+/// connection: upgrade
+/// x-tailscale-handshake: <base64 noise init>
+/// upgrade: tailscale-control-protocol
+/// response: 101 switching protocols
+/// upgrade: tailscale-control-protocol
+///connection: upgrade
+/// ```
+/// upgrade: tailscale-control-protocol
+/// connection: upgrade
+/// ```
+#[tokio::test]
+async fn test_ts2021_http_upgrade_protocol() {
+    use snow::Builder;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    const PROTOCOL_VERSION: u16 = 1;
+    const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+
+    // create server keypair
+    let server_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate server keypair");
+
+    // create client keypair
+    let client_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate client keypair");
+
+    // create app with the server keypair
+    let db = RailscaleDb::new_in_memory()
+        .await
+        .expect("failed to create in-memory database");
+    let grants = GrantsEngine::new(Policy::empty());
+    let config = Config::default();
+    let notifier = StateNotifier::new();
+
+    let keypair = railscale::Keypair {
+        private: server_keypair.private.clone(),
+        public: server_keypair.public.clone(),
+    };
+
+    let app = railscale::create_app(db, grants, config, None, notifier, Some(keypair)).await;
+
+    // bind to a random port
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind");
+    let addr = listener.local_addr().expect("failed to get local addr");
+
+    // spawn the server
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("failed to accept");
+        let io = hyper_util::rt::TokioIo::new(stream);
+        hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+            .serve_connection_with_upgrades(
+                io,
+                hyper::service::service_fn(move |req| {
+                    let app = app.clone();
+                    async move {
+                        use tower::ServiceExt;
+                        app.oneshot(req).await
+                    }
+                }),
+            )
+            .await
+            .ok();
+    });
+
+    // build client initiator
+    let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
+
+    // build client initiator
+    let params: snow::params::NoiseParams = NOISE_PATTERN.parse().expect("valid pattern");
+    let mut client_handshake = Builder::new(params)
+        .local_private_key(&client_keypair.private)
+        .expect("valid key")
+        .remote_public_key(&server_keypair.public)
+        .expect("valid key")
+        .prologue(prologue.as_bytes())
+        .expect("valid prologue")
+        .build_initiator()
+        .expect("build initiator");
+
+    // generate the first message
+    let mut noise_payload = vec![0u8; 65535];
+    let len = client_handshake
+        .write_message(&[], &mut noise_payload)
+        .expect("write message");
+    noise_payload.truncate(len);
+
+    // build framed initiation message
+    let payload_len = noise_payload.len() as u16;
+    let mut init_msg = Vec::with_capacity(5 + noise_payload.len());
+    init_msg.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    init_msg.push(0x01); // msgTypeInitiation
+    init_msg.extend_from_slice(&payload_len.to_be_bytes());
+    init_msg.extend_from_slice(&noise_payload);
+
+    let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
+
+    // connect via raw tcp and send http upgrade request
+    let mut stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("failed to connect");
+
+    // send http upgrade request (NOT WebSocket - using tailscale-control-protocol)
+    let request = format!(
+        "POST /ts2021 HTTP/1.1\r\n\
+         Host: {}\r\n\
+         Upgrade: tailscale-control-protocol\r\n\
+         Connection: upgrade\r\n\
+         X-Tailscale-Handshake: {}\r\n\
+         \r\n",
+        addr, init_b64
+    );
+
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("failed to send request");
+
+    // read the response
+    let mut response_buf = vec![0u8; 4096];
+    let n = stream
+        .read(&mut response_buf)
+        .await
+        .expect("failed to read response");
+    let response_str = String::from_utf8_lossy(&response_buf[..n]);
+
+    // should get 101 switching protocols with tailscale-control-protocol
+    assert!(
+        response_str.starts_with("HTTP/1.1 101"),
+        "expected 101 Switching Protocols, got: {}",
+        response_str.lines().next().unwrap_or(&response_str)
+    );
+    assert!(
+        response_str
+            .to_lowercase()
+            .contains("upgrade: tailscale-control-protocol"),
+        "expected Upgrade: tailscale-control-protocol header, got: {}",
+        response_str
+    );
+
+    // after 101, the noise response should follow
+    // read more data for the noise response (it may come in the same read or separately)
+    let header_end = response_str.find("\r\n\r\n").expect("no header end") + 4;
+    let remaining = &response_buf[header_end..n];
+
+    // the noise response should be: [type:1][len:2][payload:48] = 51 bytes
+    let noise_response = if remaining.len() >= 51 {
+        remaining[..51].to_vec()
+    } else {
+        // need to read more
+        let mut full_response = remaining.to_vec();
+        while full_response.len() < 51 {
+            let mut more = vec![0u8; 1024];
+            let n = stream.read(&mut more).await.expect("failed to read more");
+            if n == 0 {
+                panic!(
+                    "connection closed before receiving full Noise response, got {} bytes",
+                    full_response.len()
+                );
+            }
+            full_response.extend_from_slice(&more[..n]);
+        }
+        full_response[..51].to_vec()
+    };
+
+    // verify noise response format
+    assert_eq!(noise_response[0], 0x02, "response type should be 0x02");
+    let response_payload_len = u16::from_be_bytes([noise_response[1], noise_response[2]]);
+    assert_eq!(response_payload_len, 48, "payload length should be 48");
+
+    // complete the handshake on client side
+    let response_payload = &noise_response[3..];
+    let mut buf = vec![0u8; 65535];
+    client_handshake
+        .read_message(response_payload, &mut buf)
+        .expect("failed to read server response");
+
+    assert!(
+        client_handshake.is_handshake_finished(),
+        "handshake should be complete"
+    );
+
+    server_handle.abort();
+}
+
 /// create a valid noise ik initiation message with tailscale framing.
 ///
 /// uses the snow crate for cryptographic operations to ensure compatibility
