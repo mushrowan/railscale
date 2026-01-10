@@ -3,7 +3,7 @@
   railscale,
 }:
 pkgs.testers.runNixOSTest {
-  name = "railscale-curl-test";
+  name = "railscale-tailscale-integration";
 
   nodes = {
     server = {
@@ -11,10 +11,9 @@ pkgs.testers.runNixOSTest {
       pkgs,
       ...
     }: {
-      # Server node running railscale
       environment.systemPackages = [railscale pkgs.sqlite];
 
-      # Create a simple policy file
+      # Allow-all policy for testing
       environment.etc."railscale/policy.json".text = builtins.toJSON {
         grants = [
           {
@@ -25,7 +24,6 @@ pkgs.testers.runNixOSTest {
         ];
       };
 
-      # Create systemd service
       systemd.services.railscale = {
         description = "Railscale Control Server";
         wantedBy = ["multi-user.target"];
@@ -49,49 +47,83 @@ pkgs.testers.runNixOSTest {
       networking.firewall.allowedTCPPorts = [8080];
     };
 
-    client = {
+    client1 = {
       config,
       pkgs,
       ...
     }: {
-      # Client node for testing
-      environment.systemPackages = [pkgs.curl pkgs.jq];
+      services.tailscale = {
+        enable = true;
+        extraDaemonFlags = ["--verbose=2"];
+      };
+
+      environment.systemPackages = [pkgs.tailscale];
+    };
+
+    client2 = {
+      config,
+      pkgs,
+      ...
+    }: {
+      services.tailscale = {
+        enable = true;
+        extraDaemonFlags = ["--verbose=2"];
+      };
+
+      environment.systemPackages = [pkgs.tailscale];
     };
   };
 
   testScript = ''
     start_all()
 
-    # wait for server to start
+    # Wait for railscale server to start
     server.wait_for_unit("railscale.service")
     server.wait_for_open_port(8080)
 
-    # check server is responding
-    client.succeed("curl -f http://server:8080/ || true")
-
-    # create a preauth key directly in the database
+    # Create a user and two preauth keys
     server.succeed("sqlite3 /var/lib/railscale/db.sqlite \"INSERT INTO users (id, name, created_at, updated_at) VALUES (1, 'testuser', datetime('now'), datetime('now'));\"")
-    server.succeed("sqlite3 /var/lib/railscale/db.sqlite \"INSERT INTO preauth_keys (id, key, user_id, reusable, ephemeral, used, created_at, expiration) VALUES (1, 'test-preauth-key-12345', 1, 1, 0, 0, datetime('now'), datetime('now', '+1 day'));\"")
+    server.succeed("sqlite3 /var/lib/railscale/db.sqlite \"INSERT INTO preauth_keys (id, key, user_id, reusable, ephemeral, used, created_at, expiration) VALUES (1, 'preauth-key-client1', 1, 0, 0, 0, datetime('now'), datetime('now', '+1 day'));\"")
+    server.succeed("sqlite3 /var/lib/railscale/db.sqlite \"INSERT INTO preauth_keys (id, key, user_id, reusable, ephemeral, used, created_at, expiration) VALUES (2, 'preauth-key-client2', 1, 0, 0, 0, datetime('now'), datetime('now', '+1 day'));\"")
 
+    # Wait for tailscaled to be running on both clients
+    client1.wait_for_unit("tailscaled.service")
+    client2.wait_for_unit("tailscaled.service")
 
-    # test registration endpoint
-    # real registration requires Noise protocol but that's not ready yet
-    client.succeed("""
-      curl -X POST http://server:8080/machine/register \
-        -H 'Content-Type: application/json' \
-        -d '{
-          "nodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000001",
-          "oldNodeKey": null,
-          "hostinfo": {
-            "hostname": "test-node",
-            "os": "linux",
-            "osVersion": "NixOS"
-          },
-          "key": "test-preauth-key-12345"
-        }' | jq -e '.node.id' || echo "registration test (expected to work with full Noise implementation)"
-    """)
+    # Connect client1 to railscale (10 second timeout) with verbose output
+    client1.execute("timeout 10 tailscale up --login-server=http://server:8080 --authkey=preauth-key-client1 --hostname=client1 2>&1 || true")
 
-    # check server logs
-    server.succeed("journalctl -u railscale.service --no-pager | grep -i 'Starting HTTP server'")
+    # Show client1 daemon logs for debugging
+    client1.execute("journalctl -u tailscaled.service --no-pager -n 50 || true")
+
+    # Show server logs
+    server.execute("journalctl -u railscale.service --no-pager -n 50 || true")
+
+    # Check that both clients are connected
+    client1.succeed("tailscale status")
+    client2.succeed("tailscale status")
+
+    # Get the tailscale IPs (should be instant after successful up)
+    client1_ip = client1.succeed("tailscale ip -4").strip()
+    client2_ip = client2.succeed("tailscale ip -4").strip()
+
+    # Verify we got IPs
+    assert client1_ip.startswith("100."), f"Expected 100.x.x.x IP for client1, got {client1_ip}"
+    assert client2_ip.startswith("100."), f"Expected 100.x.x.x IP for client2, got {client2_ip}"
+
+    # Print IPs for debugging
+    print(f"Client1 Tailscale IP: {client1_ip}")
+    print(f"Client2 Tailscale IP: {client2_ip}")
+
+    # Test connectivity: client1 pings client2's tailscale IP (3 pings, 5 second timeout)
+    client1.succeed(f"timeout 5 ping -c 3 {client2_ip}")
+
+    # Test connectivity: client2 pings client1's tailscale IP (3 pings, 5 second timeout)
+    client2.succeed(f"timeout 5 ping -c 3 {client1_ip}")
+
+    # Check server logs to verify registrations
+    server.succeed("journalctl -u railscale.service --no-pager | grep -i 'register'")
+
+    print("SUCCESS: Both clients connected and can ping each other via Tailscale!")
   '';
 }
