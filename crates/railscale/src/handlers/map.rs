@@ -4,7 +4,7 @@ use axum::{
     Json,
     body::Body,
     extract::State,
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use railscale_db::Database;
