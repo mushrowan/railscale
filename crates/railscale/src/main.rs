@@ -158,7 +158,8 @@ async fn main() -> Result<()> {
     info!("Database initialized successfully");
 
     // build router
-    let app = railscale::create_app(db, grants, config.clone(), None).await;
+    let notifier = railscale::StateNotifier::new();
+    let app = railscale::create_app(db, grants, config.clone(), None, notifier).await;
 
     // parse listen address
     let addr: SocketAddr = config

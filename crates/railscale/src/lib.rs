@@ -3,8 +3,11 @@
 mod derp;
 mod dns;
 pub mod handlers;
+mod notifier;
 pub mod oidc;
 pub mod resolver;
+
+pub use notifier::StateNotifier;
 
 use axum::{
     Router,
@@ -21,6 +24,7 @@ pub struct AppState {
     pub grants: GrantsEngine,
     pub config: Config,
     pub oidc: Option<oidc::AuthProviderOidc>,
+    pub notifier: StateNotifier,
 }
 
 /// create the axum application with all routes.
@@ -29,12 +33,14 @@ pub async fn create_app(
     grants: GrantsEngine,
     config: Config,
     oidc: Option<oidc::AuthProviderOidc>,
+    notifier: StateNotifier,
 ) -> Router {
     let state = AppState {
         db,
         grants,
         config,
         oidc,
+        notifier,
     };
 
     Router::new()

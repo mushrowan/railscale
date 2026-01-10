@@ -201,7 +201,7 @@ async fn test_register_redirect_with_mock_oidc() {
 
     // create app with OIDC
     let config = Config::default();
-    let app = railscale::create_app(db, default_grants(), config, Some(oidc)).await;
+    let app = railscale::create_app(db, default_grants(), config, Some(oidc), railscale::StateNotifier::default()).await;
 
     // generate a test registration id
     let reg_id = RegistrationId::new([42u8; 32]);
@@ -287,7 +287,7 @@ async fn test_oidc_callback_with_invalid_state() {
 
     // create app with OIDC
     let config = Config::default();
-    let app = railscale::create_app(db, default_grants(), config, Some(oidc)).await;
+    let app = railscale::create_app(db, default_grants(), config, Some(oidc), railscale::StateNotifier::default()).await;
 
     // call callback with invalid state (not in cache)
     let response = app
@@ -367,7 +367,7 @@ async fn test_oidc_callback_full_flow_creates_user() {
 
     // create app with the same OIDC provider (shares the cache)
     let config = Config::default();
-    let app = railscale::create_app(db.clone(), default_grants(), config, Some(oidc)).await;
+    let app = railscale::create_app(db.clone(), default_grants(), config, Some(oidc), railscale::StateNotifier::default()).await;
 
     // call callback with valid state from cache
     let response = app

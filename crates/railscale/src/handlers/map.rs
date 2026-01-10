@@ -7,9 +7,12 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
+use bytes::Bytes;
+use futures_util::stream::{self, StreamExt};
 use railscale_db::Database;
 use railscale_proto::{MapRequest, MapResponse, MapResponseNode, UserProfile};
-use railscale_types::{Node, UserId};
+use railscale_types::{Node, NodeKey, UserId};
+use std::convert::Infallible;
 
 use super::{OptionExt, ResultExt};
 use crate::AppState;
@@ -19,12 +22,16 @@ use crate::AppState;
 /// clients send maprequests periodically to get:
 /// - their own node information
 /// - list of peer nodes
-/// - dns configuration
-/// - derp relay information
+/// when `stream: true`, the connection stays open and updates are pushed
+/// when state changes (nodes added/removed/updated)
+//validate the node exists
+/// when `stream: true`, the connection stays open and updates are pushed
+/// when state changes (nodes added/removed/updated).
 pub async fn map(
     State(state): State<AppState>,
     Json(req): Json<MapRequest>,
 ) -> Result<impl IntoResponse, super::ApiError> {
+    // validate the node exists
     let node = state
         .db
         .get_node_by_node_key(&req.node_key)
@@ -32,8 +39,87 @@ pub async fn map(
         .map_internal()?
         .or_unauthorized("node not found")?;
 
-    let all_nodes = state.db.list_nodes().await.map_internal()?;
+    if req.stream {
+        // non-streaming mode: return single json response
+        Ok(streaming_response(state, node.node_key).into_response())
+    } else {
+        // non-streaming mode: return single json response
+        let mut response = build_map_response(&state, &req.node_key).await?;
+        response.keep_alive = false;
+        Ok(Json(response).into_response())
+    }
+}
 
+/// build a streaming response that pushes updates when state changes.
+fn streaming_response(state: AppState, node_key: NodeKey) -> Response {
+    // create a stream that yields length-prefixed responses
+    let receiver = state.notifier.subscribe();
+
+    // create a stream that yields length-prefixed responses
+    let stream = stream::unfold(
+        (state, node_key, receiver, true),
+        |(state, node_key, mut receiver, is_first)| async move {
+            if is_first {
+                // send initial response immediately
+                let response = match build_map_response(&state, &node_key).await {
+                    Ok(r) => r,
+                    Err(_) => return None,
+                };
+                let bytes = encode_length_prefixed(&response)?;
+                Some((bytes, (state, node_key, receiver, false)))
+            } else {
+                // state changed, build and send new response
+                match receiver.recv().await {
+                    Ok(_) => {
+                        // state changed, build and send new response
+                        let response = match build_map_response(&state, &node_key).await {
+                            Ok(r) => r,
+                            Err(_) => return None,
+                        };
+                        let bytes = encode_length_prefixed(&response)?;
+                        Some((bytes, (state, node_key, receiver, false)))
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                        // missed some messages, still send update
+                        let response = match build_map_response(&state, &node_key).await {
+                            Ok(r) => r,
+                            Err(_) => return None,
+                        };
+                        let bytes = encode_length_prefixed(&response)?;
+                        Some((bytes, (state, node_key, receiver, false)))
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // channel closed, end stream
+                        None
+                    }
+                }
+            }
+        },
+    );
+
+    // convert to a stream of result<bytes, infallible> for axum
+    let body_stream = stream.map(Ok::<_, Infallible>);
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .body(Body::from_stream(body_stream))
+        .expect("valid status and headers")
+}
+
+/// build a mapresponse for the given node.
+async fn build_map_response(
+    state: &AppState,
+    node_key: &NodeKey,
+) -> Result<MapResponse, super::ApiError> {
+    let node = state
+        .db
+        .get_node_by_node_key(node_key)
+        .await
+        .map_internal()?
+        .or_unauthorized("node not found")?;
+
+    let all_nodes = state.db.list_nodes().await.map_internal()?;
     let users = state.db.list_users().await.map_internal()?;
 
     let user_profiles: Vec<UserProfile> = users
@@ -68,8 +154,8 @@ pub async fn map(
         .map(|id| id.to_string())
         .unwrap_or_default();
 
-    let response = MapResponse {
-        keep_alive: req.stream,
+    Ok(MapResponse {
+        keep_alive: true,
         node: Some(node_to_map_response_node(&node, &preferred_derp)),
         peers: visible_peers
             .iter()
@@ -80,49 +166,19 @@ pub async fn map(
         packet_filter,
         user_profiles,
         control_time: Some(chrono::Utc::now().to_rfc3339()),
-    };
-
-    if req.stream {
-        // streaming mode: return length-prefixed binary response
-        // format: 4-byte little-endian length + json body
-        Ok(LengthPrefixedResponse(response).into_response())
-    } else {
-        // non-streaming mode: return plain json
-        Ok(Json(response).into_response())
-    }
+    })
 }
 
-/// response wrapper that serializes mapresponse with a 4-byte length prefix.
-///
-/// format: [u32 little-endian length] [json bytes]
-///
-/// this is the tailscale control protocol format for streaming map responses.
-struct LengthPrefixedResponse(MapResponse);
+/// encode a mapresponse with a 4-byte little-endian length prefix.
+fn encode_length_prefixed(response: &MapResponse) -> Option<Bytes> {
+    let json_bytes = serde_json::to_vec(response).ok()?;
+    let len = u32::try_from(json_bytes.len()).unwrap_or(u32::MAX);
 
-impl IntoResponse for LengthPrefixedResponse {
-    fn into_response(self) -> Response {
-        let json_bytes = match serde_json::to_vec(&self.0) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                return Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(Body::empty())
-                    .expect("empty body response is valid");
-            }
-        };
+    let mut body = Vec::with_capacity(4 + json_bytes.len());
+    body.extend_from_slice(&len.to_le_bytes());
+    body.extend_from_slice(&json_bytes);
 
-        // create length-prefixed message: 4-byte LE length + JSON body
-        let len = u32::try_from(json_bytes.len()).unwrap_or(u32::MAX);
-        let mut body = Vec::with_capacity(4 + json_bytes.len());
-        body.extend_from_slice(&len.to_le_bytes());
-        body.extend_from_slice(&json_bytes);
-
-        Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "application/octet-stream")
-            .body(Body::from(body))
-            .expect("valid status and headers")
-    }
+    Some(Bytes::from(body))
 }
 
 /// convert a node to mapresponsenode.

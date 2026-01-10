@@ -66,7 +66,7 @@ async fn test_register_with_preauth_key() {
 
     // create app with default config
     let config = railscale_types::Config::default();
-    let app = railscale::create_app(db, grants, config, None).await;
+    let app = railscale::create_app(db, grants, config, None, railscale::StateNotifier::default()).await;
 
     // send request
     let response = app

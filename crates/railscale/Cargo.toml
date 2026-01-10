@@ -38,6 +38,11 @@ moka = { workspace = true }
 axum-extra = { version = "0.10", features = ["cookie"] }
 rand = "0.9"
 
+# Streaming
+futures-util = "0.3"
+bytes = { workspace = true }
+hyper = "1.8"
+
 [dev-dependencies]
 tower = "0.5"
 hyper = "1.8"
@@ -46,3 +51,5 @@ wiremock = "0.6"
 jsonwebtoken = "9"
 bytes = { workspace = true }
 http-body-util = "0.1"
+reqwest = { version = "0.12", features = ["stream"] }
+futures-util = "0.3"

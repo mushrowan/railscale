@@ -15,21 +15,23 @@ use axum::{
     http::{Request, StatusCode},
 };
 use bytes::Buf;
+use railscale::StateNotifier;
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use railscale_proto::{MapRequest, MapResponse};
 use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
+use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tower::ServiceExt;
 
 /// test fixture containing database, node, and app for map tests.
 struct MapTestFixture {
-    #[allow(dead_code)] // May be needed for future tests adding nodes
     db: RailscaleDb,
     node: Node,
     node_key: NodeKey,
     disco_key: DiscoKey,
     app: Router,
+    notifier: StateNotifier,
 }
 
 impl MapTestFixture {
@@ -82,7 +84,8 @@ impl MapTestFixture {
         let grants = GrantsEngine::new(policy);
 
         let config = railscale_types::Config::default();
-        let app = railscale::create_app(db.clone(), grants, config, None).await;
+        let notifier = StateNotifier::new();
+        let app = railscale::create_app(db.clone(), grants, config, None, notifier.clone()).await;
 
         Self {
             db,
@@ -90,6 +93,7 @@ impl MapTestFixture {
             node_key,
             disco_key,
             app,
+            notifier,
         }
     }
 
@@ -145,20 +149,20 @@ async fn test_streaming_map_request_returns_length_prefixed_response() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    // read the body with a timeout (streaming would hang forever otherwise)
-    let body_result = timeout(
-        Duration::from_secs(2),
-        axum::body::to_bytes(response.into_body(), 1024 * 1024),
-    )
-    .await;
+    // read the first frame from the body stream (streaming never completes)
+    use http_body_util::BodyExt;
+    let mut body = response.into_body();
+    let frame = timeout(Duration::from_secs(2), body.frame())
+        .await
+        .expect("timeout waiting for first frame")
+        .expect("error reading frame")
+        .expect("body ended without data");
 
-    let body = body_result
-        .expect("timeout waiting for response")
-        .expect("failed to read body");
+    let data = frame.into_data().expect("frame is not data");
 
     // parse length-prefixed response
     let (map_response, remaining) =
-        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
+        read_length_prefixed_response(&data).expect("failed to parse length-prefixed response");
 
     // should have node info
     assert!(map_response.node.is_some());
@@ -206,4 +210,96 @@ async fn test_non_streaming_map_request_returns_plain_json() {
 
     // keep_alive should be false for non-streaming
     assert!(!map_response.keep_alive);
+}
+
+#[tokio::test]
+async fn test_streaming_map_receives_updates_on_state_change() {
+    let fixture = MapTestFixture::new().await;
+    let map_request = fixture.map_request(true);
+
+    // start a server for true streaming (can't use oneshot for long-polling)
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let app = fixture.app.clone();
+    let server_handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    // make streaming request using reqwest
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // make streaming request using reqwest
+    let client = reqwest::Client::new();
+    let mut response = client
+        .post(format!("http://{}/machine/map", addr))
+        .header("content-type", "application/json")
+        .body(serde_json::to_string(&map_request).unwrap())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    // read first response (initial state)
+    let first_chunk = timeout(Duration::from_secs(2), response.chunk())
+        .await
+        .expect("timeout waiting for first chunk")
+        .expect("error reading first chunk")
+        .expect("no data in first chunk");
+
+    let (first_response, _) =
+        read_length_prefixed_response(&first_chunk).expect("failed to parse first response");
+    assert!(first_response.node.is_some());
+    assert!(first_response.keep_alive, "streaming response should have keep_alive=true");
+
+    // now add a second node to trigger a state update
+    let second_node_key = NodeKey::from_bytes(vec![4u8; 32]);
+    let second_disco_key = DiscoKey::from_bytes(vec![5u8; 32]);
+    let now = chrono::Utc::now();
+    let second_node = Node {
+        id: NodeId(0),
+        machine_key: MachineKey::from_bytes(vec![6u8; 32]),
+        node_key: second_node_key.clone(),
+        disco_key: second_disco_key.clone(),
+        ipv4: Some("100.64.0.2".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::2".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "second-node".to_string(),
+        given_name: "second-node".to_string(),
+        user_id: Some(fixture.node.user_id.unwrap()),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+    fixture.db.create_node(&second_node).await.unwrap();
+
+    // read second response (should include the new node as a peer)
+    fixture.notifier.notify_state_changed();
+
+    // read second response (should include the new node as a peer)
+    let second_chunk = timeout(Duration::from_secs(2), response.chunk())
+        .await
+        .expect("timeout waiting for second chunk - server didn't push update")
+        .expect("error reading second chunk")
+        .expect("no data in second chunk");
+
+    let (second_response, _) =
+        read_length_prefixed_response(&second_chunk).expect("failed to parse second response");
+
+    // the second response should have the new node as a peer
+    assert!(
+        !second_response.peers.is_empty(),
+        "should have at least one peer after state change"
+    );
+
+    // clean up
+    server_handle.abort();
 }
