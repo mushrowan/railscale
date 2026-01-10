@@ -77,7 +77,14 @@ async fn test_map_request_returns_node() {
 
     // create app with default config
     let config = railscale_types::Config::default();
-    let app = railscale::create_app(db, grants, config, None, railscale::StateNotifier::default()).await;
+    let app = railscale::create_app(
+        db,
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+    )
+    .await;
 
     // send request
     let response = app
@@ -204,7 +211,14 @@ async fn test_map_request_returns_peers() {
 
     // create app with default config
     let config = railscale_types::Config::default();
-    let app = railscale::create_app(db, grants, config, None, railscale::StateNotifier::default()).await;
+    let app = railscale::create_app(
+        db,
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+    )
+    .await;
 
     // send request
     let response = app
@@ -272,7 +286,14 @@ async fn test_map_request_returns_dns_config() {
 
     let config = railscale_types::Config::default();
     let grants = GrantsEngine::new(Policy::default());
-    let app = railscale::create_app(db.clone(), grants, config, None, railscale::StateNotifier::default()).await;
+    let app = railscale::create_app(
+        db.clone(),
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+    )
+    .await;
 
     let map_req = MapRequest {
         version: railscale_proto::CapabilityVersion::CURRENT,
@@ -346,7 +367,14 @@ async fn test_map_request_returns_derp_map() {
 
     let config = railscale_types::Config::default();
     let grants = GrantsEngine::new(Policy::default());
-    let app = railscale::create_app(db.clone(), grants, config, None, railscale::StateNotifier::default()).await;
+    let app = railscale::create_app(
+        db.clone(),
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+    )
+    .await;
 
     let map_req = MapRequest {
         version: railscale_proto::CapabilityVersion::CURRENT,
@@ -492,7 +520,14 @@ async fn test_map_request_respects_user_grants() {
 
     let grants = GrantsEngine::new(policy);
     let config = railscale_types::Config::default();
-    let app = railscale::create_app(db, grants, config, None, railscale::StateNotifier::default()).await;
+    let app = railscale::create_app(
+        db,
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+    )
+    .await;
 
     // helper to request map
     let request_map = |node_key: NodeKey| {

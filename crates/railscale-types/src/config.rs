@@ -274,8 +274,12 @@ pub struct TuningConfig {
     /// registration cache expiration in seconds.
     pub register_cache_expiration_secs: u64,
 
-    /// registration cache cleanup interval in seconds.
+    /// interval between keep-alive messages for streaming map connections (in seconds)
     pub register_cache_cleanup_secs: u64,
+
+    /// interval between keep-alive messages for streaming map connections (in seconds).
+    /// tailscale uses ~60 seconds. set to 0 to disable keep-alives.
+    pub map_keepalive_interval_secs: u64,
 }
 
 impl Default for TuningConfig {
@@ -285,6 +289,7 @@ impl Default for TuningConfig {
             node_store_batch_timeout_ms: 500,
             register_cache_expiration_secs: 900, // 15 minutes
             register_cache_cleanup_secs: 1200,   // 20 minutes
+            map_keepalive_interval_secs: 60,     // 60 seconds
         }
     }
 }

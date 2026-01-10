@@ -1,5 +1,8 @@
 //! handler for /machine/map endpoint.
 
+use std::convert::Infallible;
+use std::time::Duration;
+
 use axum::{
     Json,
     body::Body,
@@ -12,7 +15,7 @@ use futures_util::stream::{self, StreamExt};
 use railscale_db::Database;
 use railscale_proto::{MapRequest, MapResponse, MapResponseNode, UserProfile};
 use railscale_types::{Node, NodeKey, UserId};
-use std::convert::Infallible;
+use tokio::sync::broadcast;
 
 use super::{OptionExt, ResultExt};
 use crate::AppState;
@@ -22,9 +25,9 @@ use crate::AppState;
 /// clients send maprequests periodically to get:
 /// - their own node information
 /// - list of peer nodes
-/// when `stream: true`, the connection stays open and updates are pushed
-/// when state changes (nodes added/removed/updated)
-//validate the node exists
+/// - dns configuration
+/// - derp relay information
+///
 /// when `stream: true`, the connection stays open and updates are pushed
 /// when state changes (nodes added/removed/updated).
 pub async fn map(
@@ -40,7 +43,7 @@ pub async fn map(
         .or_unauthorized("node not found")?;
 
     if req.stream {
-        // non-streaming mode: return single json response
+        // streaming mode: keep connection open and push updates
         Ok(streaming_response(state, node.node_key).into_response())
     } else {
         // non-streaming mode: return single json response
@@ -50,49 +53,61 @@ pub async fn map(
     }
 }
 
+/// what type of message to send next in the streaming response.
+enum StreamMessage {
+    /// full state update (initial or after state change).
+    FullUpdate,
+    /// keep-alive message (no state change, just preventing timeout).
+    KeepAlive,
+    /// end the stream.
+    End,
+}
+
 /// build a streaming response that pushes updates when state changes.
 fn streaming_response(state: AppState, node_key: NodeKey) -> Response {
-    // create a stream that yields length-prefixed responses
+    // subscribe to state changes before building initial response
     let receiver = state.notifier.subscribe();
+
+    // get keep-alive interval from config (0 means disabled)
+    let keepalive_secs = state.config.tuning.map_keepalive_interval_secs;
+    let keepalive_interval = if keepalive_secs > 0 {
+        Some(Duration::from_secs(keepalive_secs))
+    } else {
+        None
+    };
 
     // create a stream that yields length-prefixed responses
     let stream = stream::unfold(
-        (state, node_key, receiver, true),
-        |(state, node_key, mut receiver, is_first)| async move {
-            if is_first {
-                // send initial response immediately
-                let response = match build_map_response(&state, &node_key).await {
-                    Ok(r) => r,
-                    Err(_) => return None,
-                };
-                let bytes = encode_length_prefixed(&response)?;
-                Some((bytes, (state, node_key, receiver, false)))
+        (state, node_key, receiver, true, keepalive_interval),
+        |(state, node_key, mut receiver, is_first, keepalive_interval)| async move {
+            // determine what message to send
+            let message_type = if is_first {
+                StreamMessage::FullUpdate
             } else {
-                // state changed, build and send new response
-                match receiver.recv().await {
-                    Ok(_) => {
-                        // state changed, build and send new response
-                        let response = match build_map_response(&state, &node_key).await {
-                            Ok(r) => r,
-                            Err(_) => return None,
-                        };
-                        let bytes = encode_length_prefixed(&response)?;
-                        Some((bytes, (state, node_key, receiver, false)))
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                        // missed some messages, still send update
-                        let response = match build_map_response(&state, &node_key).await {
-                            Ok(r) => r,
-                            Err(_) => return None,
-                        };
-                        let bytes = encode_length_prefixed(&response)?;
-                        Some((bytes, (state, node_key, receiver, false)))
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        // channel closed, end stream
-                        None
-                    }
+                wait_for_next_message(&mut receiver, keepalive_interval).await
+            };
+
+            match message_type {
+                StreamMessage::FullUpdate => {
+                    let response = match build_map_response(&state, &node_key).await {
+                        Ok(r) => r,
+                        Err(_) => return None,
+                    };
+                    let bytes = encode_length_prefixed(&response)?;
+                    Some((
+                        bytes,
+                        (state, node_key, receiver, false, keepalive_interval),
+                    ))
                 }
+                StreamMessage::KeepAlive => {
+                    let response = MapResponse::keepalive();
+                    let bytes = encode_length_prefixed(&response)?;
+                    Some((
+                        bytes,
+                        (state, node_key, receiver, false, keepalive_interval),
+                    ))
+                }
+                StreamMessage::End => None,
             }
         },
     );
@@ -105,6 +120,39 @@ fn streaming_response(state: AppState, node_key: NodeKey) -> Response {
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .body(Body::from_stream(body_stream))
         .expect("valid status and headers")
+}
+
+/// wait for either a state change notification or a keep-alive timeout.
+async fn wait_for_next_message(
+    receiver: &mut broadcast::Receiver<crate::notifier::StateChanged>,
+    keepalive_interval: Option<Duration>,
+) -> StreamMessage {
+    match keepalive_interval {
+        Some(interval) => {
+            tokio::select! {
+                result = receiver.recv() => {
+                    match result {
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {
+                            StreamMessage::FullUpdate
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            StreamMessage::End
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(interval) => {
+                    StreamMessage::KeepAlive
+                }
+            }
+        }
+        None => {
+            // no keep-alive configured, just wait for state changes
+            match receiver.recv().await {
+                Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => StreamMessage::FullUpdate,
+                Err(broadcast::error::RecvError::Closed) => StreamMessage::End,
+            }
+        }
+    }
 }
 
 /// build a mapresponse for the given node.

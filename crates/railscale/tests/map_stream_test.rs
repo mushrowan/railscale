@@ -37,6 +37,11 @@ struct MapTestFixture {
 impl MapTestFixture {
     /// create a new test fixture with a single node and wildcard grants.
     async fn new() -> Self {
+        Self::with_config(railscale_types::Config::default()).await
+    }
+
+    /// create a new test fixture with custom config.
+    async fn with_config(config: railscale_types::Config) -> Self {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
@@ -83,7 +88,6 @@ impl MapTestFixture {
         });
         let grants = GrantsEngine::new(policy);
 
-        let config = railscale_types::Config::default();
         let notifier = StateNotifier::new();
         let app = railscale::create_app(db.clone(), grants, config, None, notifier.clone()).await;
 
@@ -226,7 +230,7 @@ async fn test_streaming_map_receives_updates_on_state_change() {
         axum::serve(listener, app).await.unwrap();
     });
 
-    // make streaming request using reqwest
+    // give the server a moment to start
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // make streaming request using reqwest
@@ -251,7 +255,10 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     let (first_response, _) =
         read_length_prefixed_response(&first_chunk).expect("failed to parse first response");
     assert!(first_response.node.is_some());
-    assert!(first_response.keep_alive, "streaming response should have keep_alive=true");
+    assert!(
+        first_response.keep_alive,
+        "streaming response should have keep_alive=true"
+    );
 
     // now add a second node to trigger a state update
     let second_node_key = NodeKey::from_bytes(vec![4u8; 32]);
@@ -281,7 +288,7 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     };
     fixture.db.create_node(&second_node).await.unwrap();
 
-    // read second response (should include the new node as a peer)
+    // notify subscribers that state has changed
     fixture.notifier.notify_state_changed();
 
     // read second response (should include the new node as a peer)
@@ -298,6 +305,79 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     assert!(
         !second_response.peers.is_empty(),
         "should have at least one peer after state change"
+    );
+
+    // clean up
+    server_handle.abort();
+}
+
+#[tokio::test]
+async fn test_streaming_map_sends_keepalive_on_timeout() {
+    // create a fixture with a 1-second keep-alive interval
+    let mut config = railscale_types::Config::default();
+    config.tuning.map_keepalive_interval_secs = 1;
+    let fixture = MapTestFixture::with_config(config).await;
+    let map_request = fixture.map_request(true);
+
+    // start server
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let app = fixture.app.clone();
+    let server_handle = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // make streaming request
+    let client = reqwest::Client::new();
+    let mut response = client
+        .post(format!("http://{}/machine/map", addr))
+        .header("content-type", "application/json")
+        .body(serde_json::to_string(&map_request).unwrap())
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    // read first response (initial full state)
+    let first_chunk = timeout(Duration::from_secs(2), response.chunk())
+        .await
+        .expect("timeout waiting for first chunk")
+        .expect("error reading first chunk")
+        .expect("no data in first chunk");
+
+    let (first_response, _) =
+        read_length_prefixed_response(&first_chunk).expect("failed to parse first response");
+    assert!(
+        first_response.node.is_some(),
+        "first response should have node"
+    );
+
+    // wait for keep-alive (should arrive after ~1 second, without any state change notification)
+    let keepalive_chunk = timeout(Duration::from_secs(3), response.chunk())
+        .await
+        .expect("timeout waiting for keep-alive - keep-alive not sent")
+        .expect("error reading keep-alive chunk")
+        .expect("no data in keep-alive chunk");
+
+    let (keepalive_response, _) = read_length_prefixed_response(&keepalive_chunk)
+        .expect("failed to parse keep-alive response");
+
+    // keep-alive should have keep_alive=true but no node data
+    assert!(
+        keepalive_response.keep_alive,
+        "keep-alive response should have keep_alive=true"
+    );
+    assert!(
+        keepalive_response.node.is_none(),
+        "keep-alive response should not have node data"
+    );
+    assert!(
+        keepalive_response.peers.is_empty(),
+        "keep-alive response should not have peers"
     );
 
     // clean up
