@@ -4,22 +4,23 @@
 
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
+use tracing::info;
 
 use crate::AppState;
 
 /// a zero-valued 32-byte key (all zeros).
 const ZERO_KEY: [u8; 32] = [0u8; 32];
 
-/// legacy NaCl crypto_box machine key
-///zero-valued for modern clients using Noise protocol
-/// must still be formatted as "mkey:" + hex(32 zero bytes)
+/// response for the `/key` endpoint.
+///
+/// this matches tailscale's `overtlspublickeyresponse` structure.
 /// keys are serialized as strings with the `mkey:` prefix followed by hex-encoded bytes.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyResponse {
     /// legacy nacl crypto_box machine key.
     /// zero-valued for modern clients using noise protocol.
-    /// format a public key as a tailscale machine key string
+    /// must still be formatted as "mkey:" + hex(32 zero bytes).
     pub legacy_public_key: String,
 
     /// server's noise public key (32 bytes, curve25519).
@@ -37,11 +38,16 @@ fn format_machine_public_key(key: &[u8]) -> String {
 /// get /key - return the server's noise public key.
 ///
 /// this endpoint is used by tailscale clients to obtain the server's
-//legacy key is zero-valued (must still have mkey: prefix + 64 hex zeros)
+/// static public key before initiating the TS2021 Noise handshake.
 pub async fn key(State(state): State<AppState>) -> Json<KeyResponse> {
+    let public_key = format_machine_public_key(&state.noise_public_key);
+    info!(
+        public_key = %public_key,
+        "GET /key - returning server's Noise public key"
+    );
     Json(KeyResponse {
         // legacy key is zero-valued (must still have mkey: prefix + 64 hex zeros)
         legacy_public_key: format_machine_public_key(&ZERO_KEY),
-        public_key: format_machine_public_key(&state.noise_public_key),
+        public_key,
     })
 }

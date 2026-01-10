@@ -34,7 +34,7 @@ pkgs.testers.runNixOSTest {
           RAILSCALE_LISTEN_ADDR = "0.0.0.0:8080";
           RAILSCALE_SERVER_URL = "http://server:8080";
           RAILSCALE_POLICY_FILE = "/etc/railscale/policy.json";
-          RAILSCALE_LOG_LEVEL = "debug";
+          RAILSCALE_LOG_LEVEL = "trace";
         };
 
         serviceConfig = {

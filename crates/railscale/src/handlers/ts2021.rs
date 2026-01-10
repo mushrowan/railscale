@@ -1,20 +1,20 @@
-//! both websocket upgrades (for browser clients) and http protocol
-//!switch (for native tailscale clients) with Noise handshakes
+//! ts2021 protocol handler for tailscale clients.
+//!
 //! this module implements the `/ts2021` endpoint that handles
-//! ## protocol variants
+//! both websocket upgrades (for browser clients) and http protocol
 //! switch (for native Tailscale clients) with Noise handshakes.
-//!### WebSocket (browser clients)
+//!
+//! ## protocol variants
+//!
+//! ### WebSocket (browser clients)
 //! ```text
-//!gET /ts2021?X-tailscale-Handshake=<base64>
+//! get /ts2021?x-tailscale-handshake=<base64>
 //! upgrade: websocket
 //! ```
-//! get /ts2021?x-tailscale-handshake=<base64>
+//!
 //! ### http upgrade (native clients)
 //! ```text
-//!pOST /ts2021
-//! upgrade: tailscale-control-protocol
-//! x-tailscale-handshake: <base64>
-//! ```
+//! post /ts2021
 //! upgrade: tailscale-control-protocol
 //! x-tailscale-handshake: <base64>
 //! ```
@@ -38,7 +38,7 @@ use std::io::{self, ErrorKind};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
-use tracing::{debug, error};
+use tracing::{debug, error, info, trace};
 
 use super::MachineKeyContext;
 use crate::AppState;
@@ -81,21 +81,21 @@ pub async fn ts2021(
         })
 }
 
-/// used by native tailscale clients (Linux, macOS, Windows)
+/// handle ts2021 http protocol upgrade requests (native tailscale clients).
+///
+/// this endpoint handles the `upgrade: tailscale-control-protocol` header
+/// used by native Tailscale clients (Linux, macOS, Windows).
 ///
 /// protocol:
 /// ```text
-///pOST /ts2021
+/// post /ts2021
 /// upgrade: tailscale-control-protocol
 /// connection: upgrade
 /// x-tailscale-handshake: <base64 noise init>
-/// upgrade: tailscale-control-protocol
+///
 /// response: 101 switching protocols
 /// upgrade: tailscale-control-protocol
-///connection: upgrade
-/// response: 101 switching protocols
-/// then: noise response + http/2 over noise
-/// ```
+/// connection: upgrade
 ///
 /// then: noise response + http/2 over noise
 /// ```
@@ -104,6 +104,9 @@ pub async fn ts2021_http_upgrade(
     headers: HeaderMap,
     request: axum::http::Request<Body>,
 ) -> Response {
+    info!("POST /ts2021 - HTTP upgrade request received");
+    trace!("headers: {:?}", headers);
+
     // check for the upgrade header
     let upgrade = headers
         .get(header::UPGRADE)
@@ -111,6 +114,7 @@ pub async fn ts2021_http_upgrade(
         .unwrap_or("");
 
     if !upgrade.eq_ignore_ascii_case("tailscale-control-protocol") {
+        info!(upgrade = %upgrade, "Invalid Upgrade header");
         return (
             StatusCode::BAD_REQUEST,
             "Missing or invalid Upgrade header. Expected: tailscale-control-protocol",
@@ -123,12 +127,18 @@ pub async fn ts2021_http_upgrade(
         .get("X-Tailscale-Handshake")
         .and_then(|v| v.to_str().ok())
     else {
+        info!("Missing X-Tailscale-Handshake header");
         return (
             StatusCode::BAD_REQUEST,
             "Missing X-Tailscale-Handshake header",
         )
             .into_response();
     };
+
+    info!(
+        handshake_len = handshake_b64.len(),
+        "Got X-Tailscale-Handshake, sending 101 Switching Protocols"
+    );
 
     let handshake_b64 = handshake_b64.to_string();
     let private_key = state.noise_private_key.clone();
@@ -294,7 +304,7 @@ async fn handle_ts2021_connection(
     Ok(())
 }
 
-/// after the http 101 upgrade completes
+/// handle a ts2021 http upgraded connection (raw tcp stream).
 ///
 /// unlike the websocket handler, this works with a raw byte stream
 /// after the HTTP 101 upgrade completes.
@@ -304,7 +314,7 @@ async fn handle_ts2021_http_connection(
     private_key: Vec<u8>,
     state: AppState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // decode the initiation message from header
+    // wrap the upgraded connection for tokio compatibility
     let mut io = TokioIo::new(upgraded);
 
     // decode the initiation message from header
@@ -338,17 +348,17 @@ async fn handle_ts2021_http_connection(
         .into());
     }
 
-    // create the tailscale prologue for this version
+    // extract the noise payload
     let noise_payload = &init_message[5..];
 
-    // create noise responder with prologue
+    // create the tailscale prologue for this version
     let prologue = format!("Tailscale Control Protocol v{}", version);
 
     // create noise responder with prologue
     let mut handshake =
         NoiseHandshake::new_responder_with_prologue(&private_key, prologue.as_bytes())?;
 
-    // generate response message
+    // process the initiation message
     handshake.read_message(noise_payload)?;
 
     // generate response message
@@ -364,7 +374,7 @@ async fn handle_ts2021_http_connection(
     response_msg.extend_from_slice(&response_len.to_be_bytes());
     response_msg.extend_from_slice(&response_payload);
 
-    debug!("sending response message: {} bytes", response_msg.len());
+    info!("sending Noise response: {} bytes", response_msg.len());
 
     // send response directly over the upgraded connection
     io.write_all(&response_msg).await?;
@@ -372,20 +382,25 @@ async fn handle_ts2021_http_connection(
 
     // handshake should be complete
     if !handshake.is_complete() {
+        error!("Noise handshake not complete after response!");
         return Err("handshake not complete after response".into());
     }
 
     let client_key = handshake
         .remote_static()
         .ok_or("missing client static key")?;
-    debug!("client machine key: {} bytes", client_key.len());
+    info!(
+        client_key = %hex::encode(&client_key),
+        "Noise handshake complete, client machine key authenticated"
+    );
 
     // create machine key context from the noise handshake
     let machine_key_context = MachineKeyContext::from_bytes(client_key);
 
     let transport = handshake.into_transport()?;
+    info!("Starting HTTP/2 server over Noise transport");
 
-    // create a router for the ts2021 endpoints with state
+    // create the encrypted stream for HTTP/2
     let noise_stream = HttpNoiseStream::new(io, transport);
 
     // create a router for the ts2021 endpoints with state
@@ -400,6 +415,11 @@ async fn handle_ts2021_http_connection(
         let mut router = router.clone();
         let machine_key_context = machine_key_context.clone();
         async move {
+            info!(
+                method = %req.method(),
+                uri = %req.uri(),
+                "HTTP/2 request over Noise"
+            );
             let (mut parts, body) = req.into_parts();
             parts.extensions.insert(machine_key_context);
             let body = Body::new(body);
@@ -419,7 +439,7 @@ async fn handle_ts2021_http_connection(
     Ok(())
 }
 
-/// suitable for running http/2 over the Noise transport after http upgrade
+/// http upgraded noise stream wrapper.
 ///
 /// this provides asyncread + asyncwrite over a noise-encrypted raw tcp stream,
 /// suitable for running HTTP/2 over the Noise transport after HTTP upgrade.
@@ -457,7 +477,7 @@ impl AsyncRead for HttpNoiseStream {
         }
 
         // read a length-prefixed encrypted message from the stream
-        // read the length prefix
+        // format: [len:2 be][encrypted data]
         let mut len_buf = [0u8; 2];
 
         // read the length prefix
