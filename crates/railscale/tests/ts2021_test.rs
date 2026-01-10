@@ -141,7 +141,7 @@ fn create_test_initiation_message(client_private_key: &[u8]) -> Vec<u8> {
 /// 3. Receives and validates the Noise response
 #[tokio::test]
 async fn test_ts2021_noise_handshake() {
-    use futures_util::{SinkExt, StreamExt};
+    use futures_util::StreamExt;
     use tokio::net::TcpListener;
     use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -158,20 +158,16 @@ async fn test_ts2021_noise_handshake() {
         .await
         .expect("failed to create in-memory database");
     let grants = GrantsEngine::new(Policy::empty());
-    let mut config = Config::default();
+    let config = Config::default();
     let notifier = StateNotifier::new();
 
-    // need to set up noise keys in config - the create_app function needs them
-    let temp_dir = tempfile::tempdir().expect("failed to create temp dir");
-    let key_path = temp_dir.path().join("noise.key");
+    // pass the keypair directly to create_app
+    let keypair = railscale::Keypair {
+        private: server_keypair.private.clone(),
+        public: server_keypair.public.clone(),
+    };
 
-    // write keypair to file (64 bytes: 32 private + 32 public)
-    let mut key_data = server_keypair.private.clone();
-    key_data.extend_from_slice(&server_keypair.public);
-    std::fs::write(&key_path, &key_data).expect("failed to write keypair");
-    config.noise_private_key_path = key_path;
-
-    let app = railscale::create_app(db, grants, config, None, notifier, None).await;
+    let app = railscale::create_app(db, grants, config, None, notifier, Some(keypair)).await;
 
     // bind to a random port
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -247,146 +243,50 @@ async fn test_ts2021_noise_handshake() {
     server_handle.abort();
 }
 
-/// create a valid noise ik initiation message with tailscale framing.
+/// with the server's snow-based responder
 ///
-/// this implements the tailscale noise ik handshake with proper:
-/// - Protocol version prologue mixing
-/// - Message framing (5-byte header + 96-byte payload)
+/// uses the snow crate for cryptographic operations to ensure compatibility
+/// with the server's snow-based responder.
 fn create_valid_initiation_message(
     client_private: &[u8],
-    client_public: &[u8],
+    _client_public: &[u8],
     server_public: &[u8],
 ) -> Vec<u8> {
-    use blake2::digest::Update;
-    use blake2::{Blake2s256, Digest};
-    use chacha20poly1305::{AeadInPlace, ChaCha20Poly1305, KeyInit};
-    use x25519_dalek::{PublicKey, StaticSecret};
+    use snow::Builder;
 
     const PROTOCOL_VERSION: u16 = 1;
-    const NOISE_PATTERN: &[u8] = b"Noise_IK_25519_ChaChaPoly_BLAKE2s";
+    const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-    // initialize symmetric state
-    let mut h = Blake2s256::new();
-    Update::update(&mut h, NOISE_PATTERN);
-    let mut h: [u8; 32] = h.finalize().into();
-    let mut ck = h;
-
-    // mix protocol version prologue
+    // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
-    h = {
-        let mut hasher = Blake2s256::new();
-        Update::update(&mut hasher, &h);
-        Update::update(&mut hasher, prologue.as_bytes());
-        hasher.finalize().into()
-    };
 
-    // <- s: Mix server's static public key into h
-    h = {
-        let mut hasher = Blake2s256::new();
-        Update::update(&mut hasher, &h);
-        Update::update(&mut hasher, server_public);
-        hasher.finalize().into()
-    };
+    // generate the first message: -> e, es, s, ss
+    let params = NOISE_PATTERN.parse().expect("valid pattern");
+    let mut initiator = Builder::new(params)
+        .local_private_key(client_private)
+        .expect("valid key")
+        .remote_public_key(server_public)
+        .expect("valid key")
+        .prologue(prologue.as_bytes())
+        .expect("valid prologue")
+        .build_initiator()
+        .expect("build initiator");
 
-    // -> e: Generate client ephemeral keypair
-    let client_ephemeral_private = StaticSecret::random_from_rng(rand_core::OsRng);
-    let client_ephemeral_public = PublicKey::from(&client_ephemeral_private);
+    // generate the first message: -> e, es, s, ss
+    let mut noise_payload = vec![0u8; 65535];
+    let len = initiator
+        .write_message(&[], &mut noise_payload)
+        .expect("write message");
+    noise_payload.truncate(len);
 
-    // mix ephemeral public into h
-    h = {
-        let mut hasher = Blake2s256::new();
-        Update::update(&mut hasher, &h);
-        Update::update(&mut hasher, client_ephemeral_public.as_bytes());
-        hasher.finalize().into()
-    };
-
-    // es: DH(client_ephemeral, server_static)
-    let server_pub_key = PublicKey::from(<[u8; 32]>::try_from(server_public).unwrap());
-    let es_shared = client_ephemeral_private.diffie_hellman(&server_pub_key);
-
-    // hkdf to derive cipher key from es
-    let (ck_new, k1) = hkdf_derive(&ck, es_shared.as_bytes());
-    ck = ck_new;
-
-    // encrypt client's static public key (s)
-    let mut encrypted_static = client_public.to_vec();
-    let cipher1 = ChaCha20Poly1305::new_from_slice(&k1).unwrap();
-    let nonce = [0u8; 12];
-    let tag1 = cipher1
-        .encrypt_in_place_detached(&nonce.into(), &h, &mut encrypted_static)
-        .expect("encryption failed");
-
-    // mix ciphertext into h
-    let ciphertext_with_tag: Vec<u8> = encrypted_static
-        .iter()
-        .chain(tag1.iter())
-        .copied()
-        .collect();
-    h = {
-        let mut hasher = Blake2s256::new();
-        Update::update(&mut hasher, &h);
-        Update::update(&mut hasher, &ciphertext_with_tag);
-        hasher.finalize().into()
-    };
-
-    // ss: DH(client_static, server_static)
-    let client_static_secret = StaticSecret::from(<[u8; 32]>::try_from(client_private).unwrap());
-    let ss_shared = client_static_secret.diffie_hellman(&server_pub_key);
-
-    // hkdf to derive cipher key from ss
-    let (ck_new, k2) = hkdf_derive(&ck, ss_shared.as_bytes());
-    let _ = ck_new; // ck updated but not used further in initiation
-
-    // encrypt empty payload and get tag
-    let mut empty_payload = Vec::new();
-    let cipher2 = ChaCha20Poly1305::new_from_slice(&k2).unwrap();
-    let tag2 = cipher2
-        .encrypt_in_place_detached(&nonce.into(), &h, &mut empty_payload)
-        .expect("encryption failed");
-
-    // build the initiation message (101 bytes)
-    let mut msg = vec![0u8; 101];
-
-    // header (5 bytes)
-    msg[0..2].copy_from_slice(&PROTOCOL_VERSION.to_be_bytes());
-    msg[2] = 0x01; // msgTypeInitiation
-    msg[3..5].copy_from_slice(&96u16.to_be_bytes());
-
-    // payload (96 bytes)
-    msg[5..37].copy_from_slice(client_ephemeral_public.as_bytes()); // 32 bytes
-    msg[37..69].copy_from_slice(&encrypted_static); // 32 bytes
-    msg[69..85].copy_from_slice(&tag1); // 16 bytes
-    msg[85..101].copy_from_slice(&tag2); // 16 bytes
+    // build the framed initiation message
+    // header: [version:2][type:1=0x01][len:2]
+    let payload_len = noise_payload.len() as u16;
+    let mut msg = Vec::with_capacity(5 + noise_payload.len());
+    msg.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    msg.push(0x01); // msgTypeInitiation
+    msg.extend_from_slice(&payload_len.to_be_bytes());
+    msg.extend_from_slice(&noise_payload);
 
     msg
-}
-
-/// hkdf-blake2s key derivation (manual implementation to avoid version conflicts)
-///
-/// hkdf extract + expand using blake2s as the underlying hash.
-/// this follows the noise spec's mixkey operation.
-fn hkdf_derive(ck: &[u8; 32], input: &[u8]) -> ([u8; 32], [u8; 32]) {
-    use blake2::Blake2sMac256;
-    use blake2::digest::{FixedOutput, KeyInit, Update};
-
-    // hkdf-extract: prk = hmac(salt=ck, ikm=input)
-    let mut hmac = Blake2sMac256::new_from_slice(ck).expect("valid key length");
-    Update::update(&mut hmac, input);
-    let prk: [u8; 32] = hmac.finalize_fixed().into();
-
-    // hkdf-expand: output = hmac(prk, info || 0x01) || hmac(prk, t1 || info || 0x02)
-    // for noise, info is empty and we need 64 bytes
-
-    // t1 = hmac(prk, 0x01)
-    let mut hmac1 = Blake2sMac256::new_from_slice(&prk).expect("valid key length");
-    Update::update(&mut hmac1, &[0x01]);
-    let t1: [u8; 32] = hmac1.finalize_fixed().into();
-
-    // t2 = hmac(prk, t1 || 0x02)
-    let mut hmac2 = Blake2sMac256::new_from_slice(&prk).expect("valid key length");
-    Update::update(&mut hmac2, &t1);
-    Update::update(&mut hmac2, &[0x02]);
-    let t2: [u8; 32] = hmac2.finalize_fixed().into();
-
-    (t1, t2)
 }

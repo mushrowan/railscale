@@ -42,6 +42,24 @@ impl NoiseHandshake {
         Ok(Self { state })
     }
 
+    /// operations, binding the handshake to the protocol context
+    ///
+    /// # Arguments
+    /// * `private_key` - Server's static private key (32 bytes)
+    ///* `prologue` - Protocol-specific prologue data
+    /// # Arguments
+    /// * `private_key` - Server's static private key (32 bytes)
+    /// * `prologue` - Protocol-specific prologue data
+    pub fn new_responder_with_prologue(private_key: &[u8], prologue: &[u8]) -> crate::Result<Self> {
+        let params = NOISE_PATTERN.parse()?;
+        let builder = Builder::new(params);
+        let state = builder
+            .local_private_key(private_key)?
+            .prologue(prologue)?
+            .build_responder()?;
+        Ok(Self { state })
+    }
+
     /// process an incoming handshake message.
     ///
     /// # Arguments

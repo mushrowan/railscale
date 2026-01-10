@@ -43,6 +43,9 @@ futures-util = "0.3"
 bytes = { workspace = true }
 hyper = "1.8"
 
+# TS2021
+base64 = { workspace = true }
+
 [dev-dependencies]
 tower = "0.5"
 hyper = "1.8"
@@ -58,8 +61,5 @@ base64 = { workspace = true }
 tokio-tungstenite = "0.26"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 http = "1"
-# Crypto crates for Noise handshake testing - pinned for compatibility
-blake2 = "0.10"
-chacha20poly1305 = "0.10"
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-rand_core = { version = "0.6", features = ["getrandom"] }
+# Crypto crates for Noise handshake testing
+snow = "0.10"
