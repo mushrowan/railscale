@@ -20,7 +20,7 @@ railscale-state = { workspace = true }
 railscale-proto = { workspace = true }
 railscale-grants = { workspace = true }
 tokio = { workspace = true }
-anyhow = { workspace = true }
+color-eyre = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 axum = "0.8"

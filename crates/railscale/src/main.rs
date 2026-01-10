@@ -8,8 +8,8 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
 use clap::Parser;
+use color_eyre::eyre::{Context, Result, bail};
 use railscale_db::RailscaleDb;
 use railscale_grants::{GrantsEngine, Policy};
 use railscale_types::Config;
@@ -79,13 +79,13 @@ impl Cli {
                     db_type: "postgres".to_string(),
                     connection_string: db_url,
                 }
-            } else if db_url.starts_with("sqlite://") {
+            } else if let Some(path) = db_url.strip_prefix("sqlite://") {
                 railscale_types::DatabaseConfig {
                     db_type: "sqlite".to_string(),
-                    connection_string: db_url.strip_prefix("sqlite://").unwrap().to_string(),
+                    connection_string: path.to_string(),
                 }
             } else {
-                anyhow::bail!("database URL must start with sqlite:// or postgres://");
+                bail!("database URL must start with sqlite:// or postgres://");
             }
         } else {
             railscale_types::DatabaseConfig::default()
@@ -108,6 +108,8 @@ impl Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let cli = Cli::parse();
 
     // initialize logging
