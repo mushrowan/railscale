@@ -147,6 +147,18 @@ async fn main() -> Result<()> {
     info!("Listen address: {}", config.listen_addr);
     info!("Server URL: {}", config.server_url);
 
+    // ensure parent directory exists for sqlite databases
+    if config.database.db_type == "sqlite" {
+        let db_path = std::path::Path::new(&config.database.connection_string);
+        if let Some(parent) = db_path.parent()
+            && !parent.exists()
+        {
+            info!("Creating database directory: {:?}", parent);
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create database directory: {:?}", parent))?;
+        }
+    }
+
     // initialize database
     let db = RailscaleDb::new(&config)
         .await
