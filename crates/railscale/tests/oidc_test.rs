@@ -1,4 +1,4 @@
-//! integration tests for oidc authentication flow
+//! integration tests for oidc authentication flow.
 
 use axum::{
     body::Body,
@@ -16,8 +16,8 @@ use wiremock::{
     matchers::{method, path},
 };
 
-/// test RSA private key (2048-bit) for signing JWTs in tests
-/// this is a static test key - DO NOT use in production
+/// test rsa private key (2048-bit) for signing jwts in tests.
+/// this is a static test key - do not use in production.
 const TEST_RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
 MIIEowIBAAKCAQEA8QAHgeEUCGHmuZRpYYt4N2PLVPSfHZ0bOu2W7r7AtqiFGLTs
 loNMN6kvu1uAchBnf/daK9Gy4NUFX7WsLRx6cDii4kvGkcGRHm0yfMXdBHATB7y4
@@ -46,13 +46,13 @@ P9JXmQKBgB5m4nXiyRz++ZejUTQzd1r/CD/m3kHcazakWc01aNL0Q2c6NhS9Qnla
 d02SQNqbiFrs7JOdrqIv5cwHj2y4LxXqFCzoz6KX5AK1r/dOxQqm
 -----END RSA PRIVATE KEY-----"#;
 
-/// test RSA public key components for JWKS
-/// these match the private key above (base64url encoded)
+/// test rsa public key components for jwks.
+/// these match the private key above (base64url encoded).
 const TEST_RSA_MODULUS: &str = "8QAHgeEUCGHmuZRpYYt4N2PLVPSfHZ0bOu2W7r7AtqiFGLTsloNMN6kvu1uAchBnf_daK9Gy4NUFX7WsLRx6cDii4kvGkcGRHm0yfMXdBHATB7y4UBBYrIduoKg-nJBmnSKMrENzOUbHAiAcoknNrbtrke9x_8lFV1IgX_AH9ZM-eIbPSKR74W8TbylZEnqRUeVW5hnUjw1uNPrWVIEmHC-fme-ONEGKPT4Zc1oFYk-o5nftq1ZanSGXHAKK3kEpRbLiiSZ_ak53vwqJm3gA3lAbT5Xhdvbh0dzKARVD5ST-OUlk2sz2-_5U4VZkuTAOd2VRLngHgff5GkMUVBeNEQ";
 const TEST_RSA_EXPONENT: &str = "AQAB";
 const TEST_KEY_ID: &str = "test-key-1";
 
-/// create a mock oidc discovery response for the given issuer url
+/// create a mock oidc discovery response for the given issuer url.
 fn mock_discovery_response(issuer: &str) -> serde_json::Value {
     serde_json::json!({
         "issuer": issuer,
@@ -69,14 +69,14 @@ fn mock_discovery_response(issuer: &str) -> serde_json::Value {
     })
 }
 
-/// create a mock JWKS response (empty - used for tests that don't need JWT verification)
+/// create a mock jwks response (empty - used for tests that don't need jwt verification).
 fn mock_jwks_response() -> serde_json::Value {
     serde_json::json!({
         "keys": []
     })
 }
 
-/// create a JWKS response with a test RSA public key
+/// create a jwks response with a test rsa public key.
 fn test_jwks_response() -> serde_json::Value {
     serde_json::json!({
         "keys": [{
@@ -90,7 +90,7 @@ fn test_jwks_response() -> serde_json::Value {
     })
 }
 
-/// jWT claims for id token
+/// jwt claims for id token.
 #[derive(Debug, Serialize, Deserialize)]
 struct IdTokenClaims {
     iss: String,
@@ -105,7 +105,7 @@ struct IdTokenClaims {
     name: String,
 }
 
-/// create a signed id token JWT for testing
+/// create a signed id token jwt for testing.
 fn create_test_id_token(issuer: &str, client_id: &str, nonce: &str) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -134,7 +134,7 @@ fn create_test_id_token(issuer: &str, client_id: &str, nonce: &str) -> String {
     jsonwebtoken::encode(&header, &claims, &key).expect("JWT encoding should succeed")
 }
 
-/// create a test oidc config pointing to the mock server
+/// create a test oidc config pointing to the mock server.
 fn test_oidc_config(issuer: &str) -> OidcConfig {
     OidcConfig {
         issuer: issuer.to_string(),
@@ -155,7 +155,7 @@ fn test_oidc_config(issuer: &str) -> OidcConfig {
     }
 }
 
-/// helper to create a default grants engine
+/// helper to create a default grants engine.
 fn default_grants() -> GrantsEngine {
     let mut policy = Policy::empty();
     policy.grants.push(Grant {
@@ -199,7 +199,7 @@ async fn test_register_redirect_with_mock_oidc() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    // create app with oidc
+    // create app with OIDC
     let config = Config::default();
     let app = railscale::create_app(db, default_grants(), config, Some(oidc)).await;
 
@@ -238,9 +238,18 @@ async fn test_register_redirect_with_mock_oidc() {
     );
 
     // verify required oauth2 parameters are present
-    assert!(location.contains("client_id=test-client"), "should have client_id");
-    assert!(location.contains("redirect_uri="), "should have redirect_uri");
-    assert!(location.contains("response_type=code"), "should have response_type=code");
+    assert!(
+        location.contains("client_id=test-client"),
+        "should have client_id"
+    );
+    assert!(
+        location.contains("redirect_uri="),
+        "should have redirect_uri"
+    );
+    assert!(
+        location.contains("response_type=code"),
+        "should have response_type=code"
+    );
     assert!(location.contains("scope="), "should have scope");
     assert!(location.contains("state="), "should have state parameter");
     assert!(location.contains("nonce="), "should have nonce parameter");
@@ -276,7 +285,7 @@ async fn test_oidc_callback_with_invalid_state() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    // create app with oidc
+    // create app with OIDC
     let config = Config::default();
     let app = railscale::create_app(db, default_grants(), config, Some(oidc)).await;
 
@@ -356,7 +365,7 @@ async fn test_oidc_callback_full_flow_creates_user() {
         .mount(&mock_server)
         .await;
 
-    // create app with the same oidc provider (shares the cache)
+    // create app with the same OIDC provider (shares the cache)
     let config = Config::default();
     let app = railscale::create_app(db.clone(), default_grants(), config, Some(oidc)).await;
 
