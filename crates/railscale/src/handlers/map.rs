@@ -1,6 +1,12 @@
 //! handler for /machine/map endpoint.
 
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{
+    Json,
+    body::Body,
+    extract::State,
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
+};
 use railscale_db::Database;
 use railscale_proto::{MapRequest, MapResponse, MapResponseNode, UserProfile};
 use railscale_types::{Node, UserId};
@@ -76,7 +82,47 @@ pub async fn map(
         control_time: Some(chrono::Utc::now().to_rfc3339()),
     };
 
-    Ok(Json(response))
+    if req.stream {
+        // streaming mode: return length-prefixed binary response
+        // non-streaming mode: return plain json
+        Ok(LengthPrefixedResponse(response).into_response())
+    } else {
+        // non-streaming mode: return plain json
+        Ok(Json(response).into_response())
+    }
+}
+
+/// response wrapper that serializes mapresponse with a 4-byte length prefix.
+///this is the tailscale control protocol format for streaming map responses
+/// format: [u32 little-endian length] [json bytes]
+///
+/// this is the tailscale control protocol format for streaming map responses.
+struct LengthPrefixedResponse(MapResponse);
+
+impl IntoResponse for LengthPrefixedResponse {
+    fn into_response(self) -> Response {
+        let json_bytes = match serde_json::to_vec(&self.0) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::empty())
+                    .unwrap();
+            }
+        };
+
+        // create length-prefixed message: 4-byte LE length + JSON body
+        let len = json_bytes.len() as u32;
+        let mut body = Vec::with_capacity(4 + json_bytes.len());
+        body.extend_from_slice(&len.to_le_bytes());
+        body.extend_from_slice(&json_bytes);
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(body))
+            .unwrap()
+    }
 }
 
 /// convert a node to mapresponsenode.

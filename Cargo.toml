@@ -47,6 +47,9 @@ ipnet = { version = "2", features = ["serde"] }
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# Binary data
+bytes = "1"
+
 # OIDC
 openidconnect = "4"
 

@@ -44,3 +44,5 @@ hyper = "1.8"
 chrono = { workspace = true }
 wiremock = "0.6"
 jsonwebtoken = "9"
+bytes = { workspace = true }
+http-body-util = "0.1"
