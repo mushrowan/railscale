@@ -42,3 +42,5 @@ rand = "0.9"
 tower = "0.5"
 hyper = "1.8"
 chrono = { workspace = true }
+wiremock = "0.6"
+jsonwebtoken = "9"
