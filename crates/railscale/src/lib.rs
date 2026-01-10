@@ -35,16 +35,16 @@ pub struct AppState {
     pub noise_private_key: Vec<u8>,
 }
 
-/// if the file does not exist, generates a new keypair and saves it
+/// load a noise keypair from file, or generate and save a new one.
+///
+/// if the file exists, reads the 64-byte keypair (32 private + 32 public).
+/// if the file does not exist, generates a new keypair and saves it.
 ///
 /// # Arguments
 /// * `path` - Path to the key file
 ///
 /// # Returns
-/// the loaded or generated keypair
-///
-/// # Returns
-//load existing key
+/// the loaded or generated keypair.
 pub async fn load_or_generate_noise_keypair(path: &Path) -> std::io::Result<Keypair> {
     if path.exists() {
         // load existing key
@@ -107,6 +107,7 @@ pub async fn create_app(
 
     Router::new()
         .route("/key", get(handlers::key))
+        .route("/ts2021", get(handlers::ts2021))
         .route("/machine/register", post(handlers::register))
         .route("/machine/map", post(handlers::map))
         .route(
