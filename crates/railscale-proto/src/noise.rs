@@ -9,10 +9,21 @@
 //! - ChaChaPoly: ChaCha20-Poly1305 for encryption
 //! - BLAKE2s: Hash function
 
-use snow::{Builder, HandshakeState, TransportState};
+use snow::{Builder, HandshakeState, Keypair, TransportState};
 
 /// noise protocol pattern used by tailscale.
 const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+
+/// generate a new curve25519 keypair for noise protocol.
+///
+/// # Returns
+/// a `keypair` containing both private and public keys (32 bytes each).
+pub fn generate_keypair() -> crate::Result<Keypair> {
+    let params = NOISE_PATTERN.parse()?;
+    let builder = Builder::new(params);
+    Ok(builder.generate_keypair()?)
+}
+
 
 /// noise protocol handshake state.
 #[derive(Debug)]

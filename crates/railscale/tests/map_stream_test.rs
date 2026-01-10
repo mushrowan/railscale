@@ -89,7 +89,7 @@ impl MapTestFixture {
         let grants = GrantsEngine::new(policy);
 
         let notifier = StateNotifier::new();
-        let app = railscale::create_app(db.clone(), grants, config, None, notifier.clone()).await;
+        let app = railscale::create_app(db.clone(), grants, config, None, notifier.clone(), None).await;
 
         Self {
             db,

@@ -173,7 +173,7 @@ async fn main() -> Result<()> {
 
     // build router
     let notifier = railscale::StateNotifier::new();
-    let app = railscale::create_app(db, grants, config.clone(), None, notifier).await;
+    let app = railscale::create_app(db, grants, config.clone(), None, notifier, None).await;
 
     // parse listen address
     let addr: SocketAddr = config

@@ -83,6 +83,7 @@ async fn test_map_request_returns_node() {
         config,
         None,
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 
@@ -217,6 +218,7 @@ async fn test_map_request_returns_peers() {
         config,
         None,
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 
@@ -292,6 +294,7 @@ async fn test_map_request_returns_dns_config() {
         config,
         None,
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 
@@ -373,6 +376,7 @@ async fn test_map_request_returns_derp_map() {
         config,
         None,
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 
@@ -526,6 +530,7 @@ async fn test_map_request_respects_user_grants() {
         config,
         None,
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 

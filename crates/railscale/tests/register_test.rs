@@ -72,6 +72,7 @@ async fn test_register_with_preauth_key() {
         config,
         None,
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 

@@ -15,7 +15,7 @@ pub use map_request::{
     DerpMap, DerpNode, DerpRegion, DnsConfig, FilterRule, MapRequest, MapResponse, MapResponseNode,
     PortRange, UserProfile,
 };
-pub use noise::{NoiseHandshake, NoiseTransport};
+pub use noise::{generate_keypair, NoiseHandshake, NoiseTransport};
 
 /// result type for protocol operations.
 pub type Result<T> = std::result::Result<T, Error>;

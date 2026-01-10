@@ -207,6 +207,7 @@ async fn test_register_redirect_with_mock_oidc() {
         config,
         Some(oidc),
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 
@@ -300,6 +301,7 @@ async fn test_oidc_callback_with_invalid_state() {
         config,
         Some(oidc),
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 
@@ -387,6 +389,7 @@ async fn test_oidc_callback_full_flow_creates_user() {
         config,
         Some(oidc),
         railscale::StateNotifier::default(),
+        None,
     )
     .await;
 
