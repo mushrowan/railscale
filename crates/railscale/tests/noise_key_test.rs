@@ -1,4 +1,4 @@
-//! tests for Noise key loading and persistence
+//! tests for noise key loading and persistence.
 
 use railscale::{StateNotifier, create_app, load_or_generate_noise_keypair};
 use railscale_db::RailscaleDb;
@@ -87,13 +87,18 @@ async fn test_app_uses_provided_keypair() {
         .unwrap();
     let key_response: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    // the public key in response should match our keypair
-    let returned_key: Vec<u8> = key_response["publicKey"]
-        .as_array()
-        .expect("publicKey should be array")
-        .iter()
-        .map(|v| v.as_u64().unwrap() as u8)
-        .collect();
+    // the public key in response should be a string with "mkey:" prefix
+    let returned_key_str = key_response["publicKey"]
+        .as_str()
+        .expect("publicKey should be string");
+    assert!(
+        returned_key_str.starts_with("mkey:"),
+        "publicKey should have mkey: prefix"
+    );
+
+    // parse the hex key and compare to expected
+    let hex_str = returned_key_str.strip_prefix("mkey:").unwrap();
+    let returned_key = hex::decode(hex_str).expect("publicKey should be valid hex");
 
     assert_eq!(returned_key, expected_public_key);
 }

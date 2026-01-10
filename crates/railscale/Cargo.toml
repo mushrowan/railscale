@@ -48,6 +48,7 @@ hyper = "1.8"
 
 # TS2021
 base64 = { workspace = true }
+hex = "0.4"
 tokio-tungstenite = "0.26"
 snow = "0.10"
 tower = "0.5"

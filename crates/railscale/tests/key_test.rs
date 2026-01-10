@@ -13,10 +13,24 @@ use railscale_types::Config;
 use serde::Deserialize;
 use tower::ServiceExt;
 
+/// legacy NaCl crypto_box machine key (empty for Noise-only servers)
+///
+/// server's Noise public key as "mkey:" + hex(32 bytes)
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct KeyResponse {
-    public_key: Vec<u8>,
+    /// parse a machine key string ("mkey:" + hex) into raw bytes
+    legacy_public_key: String,
+    /// server's noise public key as "mkey:" + hex(32 bytes).
+    public_key: String,
+}
+
+/// parse a machine key string ("mkey:" + hex) into raw bytes.
+fn parse_machine_key(key: &str) -> Vec<u8> {
+    let hex_str = key
+        .strip_prefix("mkey:")
+        .expect("key should have mkey: prefix");
+    hex::decode(hex_str).expect("key should be valid hex")
 }
 
 /// test that get /key returns the server's noise public key.
@@ -51,11 +65,27 @@ async fn test_key_endpoint_returns_public_key() {
     let key_response: KeyResponse =
         serde_json::from_slice(&body).expect("failed to parse response as KeyResponse");
 
-    // verify public key is 32 bytes (curve25519)
+    // verify public key format and length
+    assert!(
+        key_response.public_key.starts_with("mkey:"),
+        "public key should have mkey: prefix"
+    );
+    let key_bytes = parse_machine_key(&key_response.public_key);
     assert_eq!(
-        key_response.public_key.len(),
+        key_bytes.len(),
         32,
         "public key should be 32 bytes (Curve25519)"
+    );
+
+    // legacy key should be zero-valued (all zeros) for noise-only servers
+    assert!(
+        key_response.legacy_public_key.starts_with("mkey:"),
+        "legacy key should have mkey: prefix"
+    );
+    let legacy_bytes = parse_machine_key(&key_response.legacy_public_key);
+    assert!(
+        legacy_bytes.iter().all(|&b| b == 0),
+        "legacy key should be all zeros"
     );
 }
 

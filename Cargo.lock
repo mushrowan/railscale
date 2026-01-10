@@ -2540,6 +2540,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "futures-util",
+ "hex",
  "http",
  "http-body-util",
  "hyper",

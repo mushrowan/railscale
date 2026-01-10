@@ -89,7 +89,7 @@
 
             # Check formatting
             fmt = craneLib.cargoFmt {
-              inherit src;
+              inherit src cargoArtifacts;
             };
             cargoTest = craneLib.cargoTest (commonArgs // {inherit cargoArtifacts;});
           }
