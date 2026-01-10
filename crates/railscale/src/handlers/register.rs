@@ -5,7 +5,7 @@ use railscale_db::Database;
 use railscale_types::{MachineKey, Node, NodeId, NodeKey};
 use serde::{Deserialize, Serialize};
 
-use super::{ApiError, OptionalMachineKeyContext, OptionExt, ResultExt};
+use super::{ApiError, OptionExt, OptionalMachineKeyContext, ResultExt};
 use crate::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,11 +24,11 @@ pub struct RegisterResponse {
 
 /// handle node registration via preauth key.
 ///
+/// this endpoint is called by tailscale clients to register a new node
+/// with the control server.
+///
 /// when accessed via the ts2021 protocol, the machine key is extracted from
-/// the Noise handshake context (which is cryptographically authenticated)
-///for direct http access, the machine key from the request body is used
-/// when accessed via the ts2021 protocol, the machine key is extracted from
-//prefer machine key from Noise context (authenticated) over request body
+/// the Noise handshake context (which is cryptographically authenticated).
 /// for direct http access, the machine key from the request body is used.
 pub async fn register(
     State(state): State<AppState>,

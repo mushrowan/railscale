@@ -425,8 +425,8 @@ async fn test_ts2021_http2_over_noise() {
     server_handle.abort();
 }
 
-/// protocol, the handler uses the machine key from the authenticated Noise
-///handshake rather than trusting any machine key in the request body
+/// test that handlers receive the machine key from the noise handshake context.
+///
 /// this test verifies that when a registration request comes through the ts2021
 /// protocol, the handler uses the machine key from the authenticated Noise
 /// handshake rather than trusting any machine key in the request body.
@@ -467,7 +467,9 @@ async fn test_ts2021_machine_key_from_noise_context() {
     preauth_key.reusable = true;
     preauth_key.expiration = Some(chrono::Utc::now() + chrono::Duration::hours(1));
 
-    db.create_preauth_key(&preauth_key).await.expect("failed to create preauth key");
+    db.create_preauth_key(&preauth_key)
+        .await
+        .expect("failed to create preauth key");
 
     let grants = GrantsEngine::new(Policy::empty());
     let config = Config::default();
@@ -505,7 +507,7 @@ async fn test_ts2021_machine_key_from_noise_context() {
             .ok();
     });
 
-    // build client initiator
+    // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
     // build client initiator
@@ -613,9 +615,14 @@ async fn test_ts2021_machine_key_from_noise_context() {
     );
 
     // read the response body
-    let body = response.into_body().collect().await.expect("failed to read body").to_bytes();
-    let register_response: serde_json::Value = serde_json::from_slice(&body)
-        .expect("failed to parse response");
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("failed to read body")
+        .to_bytes();
+    let register_response: serde_json::Value =
+        serde_json::from_slice(&body).expect("failed to parse response");
 
     // the machine key in the response should match the client's noise public key,
     // not the fake machine key we sent in the request body
