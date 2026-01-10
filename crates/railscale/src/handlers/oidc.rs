@@ -149,8 +149,15 @@ mod tests {
 
         // create app without OIDC
         let config = railscale_types::Config::default();
-        let app =
-            crate::create_app(db, grants, config, None, crate::StateNotifier::default(), None).await;
+        let app = crate::create_app(
+            db,
+            grants,
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
 
         // generate a test registration id
         let reg_id = RegistrationId::new([1u8; 32]);
@@ -191,8 +198,15 @@ mod tests {
 
         // create app without OIDC
         let config = railscale_types::Config::default();
-        let app =
-            crate::create_app(db, grants, config, None, crate::StateNotifier::default(), None).await;
+        let app = crate::create_app(
+            db,
+            grants,
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
 
         // send callback request with code and state
         let response = app

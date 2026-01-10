@@ -24,7 +24,6 @@ pub fn generate_keypair() -> crate::Result<Keypair> {
     Ok(builder.generate_keypair()?)
 }
 
-
 /// noise protocol handshake state.
 #[derive(Debug)]
 pub struct NoiseHandshake {

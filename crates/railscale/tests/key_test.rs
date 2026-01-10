@@ -1,12 +1,12 @@
-//! integration tests for the `/key` endpoint
+//! integration tests for the `/key` endpoint.
 //!
-//! the `/key` endpoint returns the server's Noise public key for TS2021 protocol
+//! the `/key` endpoint returns the server's noise public key for ts2021 protocol.
 
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use railscale::{create_app, StateNotifier};
+use railscale::{StateNotifier, create_app};
 use railscale_db::RailscaleDb;
 use railscale_grants::{GrantsEngine, Policy};
 use railscale_types::Config;
@@ -19,7 +19,7 @@ struct KeyResponse {
     public_key: Vec<u8>,
 }
 
-/// test that GET /key returns the server's Noise public key
+/// test that get /key returns the server's noise public key.
 #[tokio::test]
 async fn test_key_endpoint_returns_public_key() {
     // create test fixtures
@@ -59,7 +59,7 @@ async fn test_key_endpoint_returns_public_key() {
     );
 }
 
-/// test that GET /key returns consistent key across requests
+/// test that get /key returns consistent key across requests.
 #[tokio::test]
 async fn test_key_endpoint_returns_consistent_key() {
     let db = RailscaleDb::new_in_memory()
