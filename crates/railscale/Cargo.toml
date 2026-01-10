@@ -45,6 +45,10 @@ hyper = "1.8"
 
 # TS2021
 base64 = { workspace = true }
+tokio-tungstenite = "0.26"
+snow = "0.10"
+tower = "0.5"
+hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 
 [dev-dependencies]
 tower = "0.5"

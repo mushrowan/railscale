@@ -5,12 +5,23 @@
 //! tailscale control protocol.
 
 use axum::{
+    Router,
+    body::Body,
     extract::{Query, State, WebSocketUpgrade, ws::Message},
     response::Response,
+    routing::post,
 };
 use base64::Engine;
+use bytes::{Buf, BytesMut};
+use futures_util::StreamExt;
+use hyper::Request;
 use railscale_proto::NoiseHandshake;
 use serde::Deserialize;
+use std::io::{self, ErrorKind};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tower::Service;
 use tracing::{debug, error};
 
 use crate::AppState;
@@ -45,7 +56,9 @@ pub async fn ts2021(
 
     ws.protocols(["tailscale-control-protocol"])
         .on_upgrade(move |socket| async move {
-            if let Err(e) = handle_ts2021_connection(socket, handshake_b64, private_key).await {
+            if let Err(e) =
+                handle_ts2021_connection(socket, handshake_b64, private_key, state).await
+            {
                 error!("ts2021 connection error: {}", e);
             }
         })
@@ -56,6 +69,7 @@ async fn handle_ts2021_connection(
     mut socket: axum::extract::ws::WebSocket,
     handshake_b64: Option<String>,
     private_key: Vec<u8>,
+    state: AppState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // parse the initiation message from the query parameter
     let Some(handshake_b64) = handshake_b64 else {
@@ -125,7 +139,7 @@ async fn handle_ts2021_connection(
 
     debug!("sending response message: {} bytes", response_msg.len());
 
-    // handshake should be complete - convert to transport mode
+    // send over websocket
     socket.send(Message::Binary(response_msg.into())).await?;
 
     // handshake should be complete - convert to transport mode
@@ -138,33 +152,174 @@ async fn handle_ts2021_connection(
         .ok_or("missing client static key")?;
     debug!("client machine key: {} bytes", client_key.len());
 
-    let mut transport = handshake.into_transport()?;
+    let transport = handshake.into_transport()?;
 
-    // handle encrypted messages
-    // for now, echo back decrypted messages (will be replaced with http/2)
-    while let Some(msg) = socket.recv().await {
-        let msg = msg?;
-        match msg {
-            Message::Binary(data) => {
-                debug!("received encrypted message: {} bytes", data.len());
+    // split the websocket for bidirectional communication
+    let (ws_write, ws_read) = socket.split();
 
-                // decrypt the message
-                let plaintext = transport.decrypt(&data)?;
-                debug!("decrypted message: {} bytes", plaintext.len());
+    // create the encrypted stream
+    let noise_stream = ServerNoiseStream::new(ws_read, ws_write, transport);
 
-                // echo back (encrypted)
-                let response = transport.encrypt(&plaintext)?;
-                socket.send(Message::Binary(response.into())).await?;
-            }
-            Message::Close(_) => {
-                debug!("client closed connection");
-                break;
-            }
-            _ => {
-                debug!("ignoring non-binary message");
-            }
+    // create a router for the ts2021 endpoints with state
+    let router: Router = Router::new()
+        .route("/machine/register", post(super::register))
+        .route("/machine/map", post(super::map))
+        .with_state(state);
+
+    // convert hyper request to axum-compatible request
+    let io = hyper_util::rt::TokioIo::new(noise_stream);
+    let service = hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| {
+        let mut router = router.clone();
+        async move {
+            // convert hyper request to axum-compatible request
+            let (parts, body) = req.into_parts();
+            let body = Body::new(body);
+            let req = Request::from_parts(parts, body);
+
+            tower::Service::call(&mut router, req).await
         }
+    });
+
+    // serve http/2 connection
+    let mut http2 = hyper::server::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new());
+    http2.max_frame_size(16384);
+
+    if let Err(e) = http2.serve_connection(io, service).await {
+        debug!("HTTP/2 connection ended: {}", e);
     }
 
     Ok(())
+}
+
+/// server-side noise stream wrapper for axum websocket.
+///
+/// this provides asyncread + asyncwrite over an encrypted websocket,
+/// suitable for running HTTP/2 over the Noise transport.
+struct ServerNoiseStream<R, W> {
+    reader: R,
+    writer: W,
+    transport: railscale_proto::NoiseTransport,
+    read_buffer: BytesMut,
+}
+
+impl<R, W> ServerNoiseStream<R, W>
+where
+    R: futures_util::Stream<Item = Result<Message, axum::Error>> + Unpin,
+    W: futures_util::Sink<Message, Error = axum::Error> + Unpin,
+{
+    fn new(reader: R, writer: W, transport: railscale_proto::NoiseTransport) -> Self {
+        Self {
+            reader,
+            writer,
+            transport,
+            read_buffer: BytesMut::new(),
+        }
+    }
+}
+
+impl<R, W> AsyncRead for ServerNoiseStream<R, W>
+where
+    R: futures_util::Stream<Item = Result<Message, axum::Error>> + Unpin,
+    W: futures_util::Sink<Message, Error = axum::Error> + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        // if we have buffered data, return it
+        if !self.read_buffer.is_empty() {
+            let len = std::cmp::min(buf.remaining(), self.read_buffer.len());
+            buf.put_slice(&self.read_buffer[..len]);
+            self.read_buffer.advance(len);
+            return Poll::Ready(Ok(()));
+        }
+
+        // copy what we can to the output buffer
+        match Pin::new(&mut self.reader).poll_next(cx) {
+            Poll::Ready(Some(Ok(Message::Binary(data)))) => {
+                // buffer the rest
+                match self.transport.decrypt(&data) {
+                    Ok(plaintext) => {
+                        // copy what we can to the output buffer
+                        let copy_len = std::cmp::min(buf.remaining(), plaintext.len());
+                        buf.put_slice(&plaintext[..copy_len]);
+                        // buffer the rest
+                        if copy_len < plaintext.len() {
+                            self.read_buffer.extend_from_slice(&plaintext[copy_len..]);
+                        }
+                        Poll::Ready(Ok(()))
+                    }
+                    Err(e) => Poll::Ready(Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!("noise decrypt failed: {}", e),
+                    ))),
+                }
+            }
+            Poll::Ready(Some(Ok(Message::Close(_)))) => Poll::Ready(Ok(())),
+            Poll::Ready(Some(Ok(_))) => {
+                cx.waker().wake_by_ref();
+                Poll::Pending
+            }
+            Poll::Ready(Some(Err(e))) => {
+                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+            }
+            Poll::Ready(None) => Poll::Ready(Ok(())),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<R, W> AsyncWrite for ServerNoiseStream<R, W>
+where
+    R: futures_util::Stream<Item = Result<Message, axum::Error>> + Unpin,
+    W: futures_util::Sink<Message, Error = axum::Error> + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        // encrypt the data
+        match self.transport.encrypt(buf) {
+            Ok(ciphertext) => {
+                match Pin::new(&mut self.writer).poll_ready(cx) {
+                    Poll::Ready(Ok(())) => {
+                        match Pin::new(&mut self.writer)
+                            .start_send(Message::Binary(ciphertext.into()))
+                        {
+                            Ok(()) => Poll::Ready(Ok(buf.len())),
+                            Err(e) => {
+                                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                            }
+                        }
+                    }
+                    Poll::Ready(Err(e)) => {
+                        Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                    }
+                    Poll::Pending => Poll::Pending,
+                }
+            }
+            Err(e) => Poll::Ready(Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("noise encrypt failed: {}", e),
+            ))),
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.writer).poll_flush(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        match Pin::new(&mut self.writer).poll_close(cx) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }

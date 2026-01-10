@@ -243,18 +243,19 @@ async fn test_ts2021_noise_handshake() {
     server_handle.abort();
 }
 
+/// test that http/2 works over the noise-encrypted websocket connection.
+///
+/// this test:
 /// 1. Completes the Noise handshake
-///2. Client sends an encrypted message
-/// 3. Server should receive it (and in future, respond)
-/// 1. Completes the Noise handshake
-/// 2. Client sends an encrypted message
-/// 3. Server should receive it (and in future, respond)
+/// 2. sends an http/2 request to /machine/register
+/// 3. Verifies the server responds correctly
 #[tokio::test]
-async fn test_ts2021_encrypted_message_exchange() {
-    use futures_util::{SinkExt, StreamExt};
+async fn test_ts2021_http2_over_noise() {
+    use futures_util::StreamExt;
+    use hyper::Request;
     use snow::Builder;
     use tokio::net::TcpListener;
-    use tokio_tungstenite::{connect_async, tungstenite::Message};
+    use tokio_tungstenite::connect_async;
 
     const PROTOCOL_VERSION: u16 = 1;
     const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
@@ -307,7 +308,7 @@ async fn test_ts2021_encrypted_message_exchange() {
             .ok();
     });
 
-    // build client initiator
+    // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
     // build client initiator
@@ -339,21 +340,24 @@ async fn test_ts2021_encrypted_message_exchange() {
 
     let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
 
-    // connect via websocket
+    // split the websocket stream
     let url = format!("ws://{}/ts2021?X-Tailscale-Handshake={}", addr, init_b64);
-    let (mut ws_stream, _response) = connect_async(&url)
+    let (ws_stream, _response) = connect_async(&url)
         .await
         .expect("failed to connect WebSocket");
 
+    // split the websocket stream
+    let (ws_write, mut ws_read) = ws_stream.split();
+
     // read the noise response
-    let msg = ws_stream
+    let msg = ws_read
         .next()
         .await
         .expect("expected response message")
         .expect("failed to read message");
 
     let response_bytes = match msg {
-        Message::Binary(data) => data,
+        tokio_tungstenite::tungstenite::Message::Binary(data) => data,
         other => panic!("expected binary message, got {:?}", other),
     };
 
@@ -372,63 +376,54 @@ async fn test_ts2021_encrypted_message_exchange() {
         "handshake should be complete"
     );
 
-    // convert to transport mode
-    let mut client_transport = client_handshake
+    // this provides AsyncRead + AsyncWrite for hyper
+    let client_transport = client_handshake
         .into_transport_mode()
         .expect("failed to enter transport mode");
 
-    // send an encrypted test message
-    let test_message = b"hello from client";
-    let mut encrypted = vec![0u8; test_message.len() + 16];
-    let len = client_transport
-        .write_message(test_message, &mut encrypted)
-        .expect("failed to encrypt");
-    encrypted.truncate(len);
+    // create a noisestream that wraps the websocket with noise encryption
+    // this provides asyncread + asyncwrite for hyper
+    let noise_stream = railscale::NoiseStream::new(ws_read, ws_write, client_transport);
 
-    // send the encrypted message over WebSocket
-    ws_stream
-        .send(Message::Binary(encrypted.into()))
+    // use hyper's http/2 client over the encrypted stream
+    let io = hyper_util::rt::TokioIo::new(noise_stream);
+
+    let (mut sender, conn) = hyper::client::conn::http2::handshake(
+        hyper_util::rt::TokioExecutor::new(),
+        io,
+    )
+    .await
+    .expect("HTTP/2 handshake failed");
+
+    // send a request to /machine/register
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            eprintln!("HTTP/2 connection error: {}", e);
+        }
+    });
+
+    // send a request to /machine/register
+    let request = Request::builder()
+        .method("POST")
+        .uri("/machine/register")
+        .header("Content-Type", "application/json")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .expect("failed to build request");
+
+    let response = sender
+        .send_request(request)
         .await
-        .expect("failed to send encrypted message");
+        .expect("failed to send request");
 
-    // the test passes if we receive a response (server stayed open and responded)
-    let response = tokio::time::timeout(std::time::Duration::from_secs(2), ws_stream.next()).await;
-
-    // the test passes if we receive a response (server stayed open and responded)
+    // we expect some response (even if it's an error due to missing auth)
+    // the important thing is that http/2 worked over the encrypted channel
     assert!(
-        response.is_ok(),
-        "server should stay open after handshake and respond to messages"
+        response.status().is_client_error() || response.status().is_success(),
+        "expected valid HTTP response, got {:?}",
+        response.status()
     );
-    let response = response
-        .unwrap()
-        .expect("should receive a message")
-        .expect("message should be valid");
-
-    // decrypt the response to verify it's valid encrypted data
-    match response {
-        Message::Binary(data) => {
-            // decrypt the response to verify it's valid encrypted data
-            let mut decrypted = vec![0u8; data.len()];
-            let len = client_transport
-                .read_message(&data, &mut decrypted)
-                .expect("should be able to decrypt server response");
-            decrypted.truncate(len);
-            // server should echo back the same message
-            assert_eq!(
-                decrypted, test_message,
-                "server should echo back the original message"
-            );
-        }
-        Message::Close(_) => {
-            panic!("server closed connection instead of responding to encrypted message");
-        }
-        other => {
-            panic!("expected binary message, got {:?}", other);
-        }
-    }
 
     // clean up
-    ws_stream.close(None).await.ok();
     server_handle.abort();
 }
 

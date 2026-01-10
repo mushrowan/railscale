@@ -3,10 +3,12 @@
 mod derp;
 mod dns;
 pub mod handlers;
+mod noise_stream;
 mod notifier;
 pub mod oidc;
 pub mod resolver;
 
+pub use noise_stream::NoiseStream;
 pub use notifier::StateNotifier;
 pub use railscale_proto::Keypair;
 
