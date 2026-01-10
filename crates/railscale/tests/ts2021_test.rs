@@ -133,9 +133,9 @@ fn create_test_initiation_message(client_private_key: &[u8]) -> Vec<u8> {
     msg
 }
 
-/// 1. Starts a real server
-///2. Connects via WebSocket with a valid Noise IK initiation
-/// 3. Receives and validates the Noise response
+/// test that the /ts2021 endpoint performs noise handshake over websocket.
+///
+/// this test:
 /// 1. Starts a real server
 /// 2. Connects via WebSocket with a valid Noise IK initiation
 /// 3. Receives and validates the Noise response
@@ -184,13 +184,16 @@ async fn test_ts2021_noise_handshake() {
         let (stream, _) = listener.accept().await.expect("failed to accept");
         let io = hyper_util::rt::TokioIo::new(stream);
         hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
-            .serve_connection_with_upgrades(io, hyper::service::service_fn(move |req| {
-                let app = app.clone();
-                async move {
-                    use tower::ServiceExt;
-                    app.oneshot(req).await
-                }
-            }))
+            .serve_connection_with_upgrades(
+                io,
+                hyper::service::service_fn(move |req| {
+                    let app = app.clone();
+                    async move {
+                        use tower::ServiceExt;
+                        app.oneshot(req).await
+                    }
+                }),
+            )
             .await
             .ok();
     });
@@ -204,16 +207,13 @@ async fn test_ts2021_noise_handshake() {
     let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_message);
 
     // connect via websocket
-    let url = format!(
-        "ws://{}/ts2021?X-Tailscale-Handshake={}",
-        addr, init_b64
-    );
+    let url = format!("ws://{}/ts2021?X-Tailscale-Handshake={}", addr, init_b64);
 
     let (mut ws_stream, response) = connect_async(&url)
         .await
         .expect("failed to connect WebSocket");
 
-    // read the noise response message from WebSocket
+    // verify the subprotocol was accepted
     assert_eq!(response.status(), http::StatusCode::SWITCHING_PROTOCOLS);
 
     // read the noise response message from WebSocket
@@ -228,7 +228,7 @@ async fn test_ts2021_noise_handshake() {
         other => panic!("expected binary message, got {:?}", other),
     };
 
-    // - 48 bytes: server ephemeral public + tag
+    // verify response format (51 bytes):
     // - 1 byte: message type (0x02 = response)
     // - 2 bytes: payload length (48, big-endian)
     // - 48 bytes: server ephemeral public + tag
@@ -247,8 +247,8 @@ async fn test_ts2021_noise_handshake() {
     server_handle.abort();
 }
 
-/// - protocol version prologue mixing
-///- Message framing (5-byte header + 96-byte payload)
+/// create a valid noise ik initiation message with tailscale framing.
+///
 /// this implements the tailscale noise ik handshake with proper:
 /// - Protocol version prologue mixing
 /// - Message framing (5-byte header + 96-byte payload)
@@ -330,8 +330,7 @@ fn create_valid_initiation_message(
     };
 
     // ss: DH(client_static, server_static)
-    let client_static_secret =
-        StaticSecret::from(<[u8; 32]>::try_from(client_private).unwrap());
+    let client_static_secret = StaticSecret::from(<[u8; 32]>::try_from(client_private).unwrap());
     let ss_shared = client_static_secret.diffie_hellman(&server_pub_key);
 
     // hkdf to derive cipher key from ss
@@ -345,7 +344,7 @@ fn create_valid_initiation_message(
         .encrypt_in_place_detached(&nonce.into(), &h, &mut empty_payload)
         .expect("encryption failed");
 
-    // header (5 bytes)
+    // build the initiation message (101 bytes)
     let mut msg = vec![0u8; 101];
 
     // header (5 bytes)
@@ -362,20 +361,20 @@ fn create_valid_initiation_message(
     msg
 }
 
-/// this follows the Noise spec's MixKey operation
+/// hkdf-blake2s key derivation (manual implementation to avoid version conflicts)
 ///
 /// hkdf extract + expand using blake2s as the underlying hash.
 /// this follows the noise spec's mixkey operation.
 fn hkdf_derive(ck: &[u8; 32], input: &[u8]) -> ([u8; 32], [u8; 32]) {
-    use blake2::digest::{FixedOutput, KeyInit, Update};
     use blake2::Blake2sMac256;
+    use blake2::digest::{FixedOutput, KeyInit, Update};
 
     // hkdf-extract: prk = hmac(salt=ck, ikm=input)
     let mut hmac = Blake2sMac256::new_from_slice(ck).expect("valid key length");
     Update::update(&mut hmac, input);
     let prk: [u8; 32] = hmac.finalize_fixed().into();
 
-    // t1 = HMAC(PRK, 0x01)
+    // hkdf-expand: output = hmac(prk, info || 0x01) || hmac(prk, t1 || info || 0x02)
     // for noise, info is empty and we need 64 bytes
 
     // t1 = hmac(prk, 0x01)
