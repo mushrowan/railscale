@@ -84,7 +84,7 @@ pub async fn map(
 
     if req.stream {
         // streaming mode: return length-prefixed binary response
-        // non-streaming mode: return plain json
+        // format: 4-byte little-endian length + json body
         Ok(LengthPrefixedResponse(response).into_response())
     } else {
         // non-streaming mode: return plain json
@@ -93,7 +93,7 @@ pub async fn map(
 }
 
 /// response wrapper that serializes mapresponse with a 4-byte length prefix.
-///this is the tailscale control protocol format for streaming map responses
+///
 /// format: [u32 little-endian length] [json bytes]
 ///
 /// this is the tailscale control protocol format for streaming map responses.
@@ -107,12 +107,12 @@ impl IntoResponse for LengthPrefixedResponse {
                 return Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(Body::empty())
-                    .unwrap();
+                    .expect("empty body response is valid");
             }
         };
 
         // create length-prefixed message: 4-byte LE length + JSON body
-        let len = json_bytes.len() as u32;
+        let len = u32::try_from(json_bytes.len()).unwrap_or(u32::MAX);
         let mut body = Vec::with_capacity(4 + json_bytes.len());
         body.extend_from_slice(&len.to_le_bytes());
         body.extend_from_slice(&json_bytes);
@@ -121,7 +121,7 @@ impl IntoResponse for LengthPrefixedResponse {
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/octet-stream")
             .body(Body::from(body))
-            .unwrap()
+            .expect("valid status and headers")
     }
 }
 
