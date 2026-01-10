@@ -97,17 +97,17 @@ async fn handle_ts2021_connection(
         .into());
     }
 
-    // process the initiation message
+    // extract the noise payload (96 bytes after header)
     let noise_payload = &init_message[5..];
 
-    // generate response message
+    // create the tailscale prologue for this version
     let prologue = format!("Tailscale Control Protocol v{}", version);
 
     // create noise responder with prologue
     let mut handshake =
         NoiseHandshake::new_responder_with_prologue(&private_key, prologue.as_bytes())?;
 
-    // frame the response: [type:1=0x02][len:2][payload]
+    // process the initiation message
     handshake.read_message(noise_payload)?;
 
     // generate response message
@@ -125,11 +125,46 @@ async fn handle_ts2021_connection(
 
     debug!("sending response message: {} bytes", response_msg.len());
 
-    // send over websocket
+    // handshake should be complete - convert to transport mode
     socket.send(Message::Binary(response_msg.into())).await?;
 
-    // TODO: continue with http/2 over noise transport
-    // for now, the handshake is complete - future work will add the http/2 layer
+    // handshake should be complete - convert to transport mode
+    if !handshake.is_complete() {
+        return Err("handshake not complete after response".into());
+    }
+
+    let client_key = handshake
+        .remote_static()
+        .ok_or("missing client static key")?;
+    debug!("client machine key: {} bytes", client_key.len());
+
+    let mut transport = handshake.into_transport()?;
+
+    // handle encrypted messages
+    // for now, echo back decrypted messages (will be replaced with http/2)
+    while let Some(msg) = socket.recv().await {
+        let msg = msg?;
+        match msg {
+            Message::Binary(data) => {
+                debug!("received encrypted message: {} bytes", data.len());
+
+                // decrypt the message
+                let plaintext = transport.decrypt(&data)?;
+                debug!("decrypted message: {} bytes", plaintext.len());
+
+                // echo back (encrypted)
+                let response = transport.encrypt(&plaintext)?;
+                socket.send(Message::Binary(response.into())).await?;
+            }
+            Message::Close(_) => {
+                debug!("client closed connection");
+                break;
+            }
+            _ => {
+                debug!("ignoring non-binary message");
+            }
+        }
+    }
 
     Ok(())
 }

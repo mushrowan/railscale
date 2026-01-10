@@ -243,7 +243,196 @@ async fn test_ts2021_noise_handshake() {
     server_handle.abort();
 }
 
-/// with the server's snow-based responder
+/// 1. Completes the Noise handshake
+///2. Client sends an encrypted message
+/// 3. Server should receive it (and in future, respond)
+/// 1. Completes the Noise handshake
+/// 2. Client sends an encrypted message
+/// 3. Server should receive it (and in future, respond)
+#[tokio::test]
+async fn test_ts2021_encrypted_message_exchange() {
+    use futures_util::{SinkExt, StreamExt};
+    use snow::Builder;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+    const PROTOCOL_VERSION: u16 = 1;
+    const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+
+    // create server keypair
+    let server_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate server keypair");
+
+    // create client keypair
+    let client_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate client keypair");
+
+    // create app with the server keypair
+    let db = RailscaleDb::new_in_memory()
+        .await
+        .expect("failed to create in-memory database");
+    let grants = GrantsEngine::new(Policy::empty());
+    let config = Config::default();
+    let notifier = StateNotifier::new();
+
+    let keypair = railscale::Keypair {
+        private: server_keypair.private.clone(),
+        public: server_keypair.public.clone(),
+    };
+
+    let app = railscale::create_app(db, grants, config, None, notifier, Some(keypair)).await;
+
+    // bind to a random port
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind");
+    let addr = listener.local_addr().expect("failed to get local addr");
+
+    // spawn the server
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("failed to accept");
+        let io = hyper_util::rt::TokioIo::new(stream);
+        hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+            .serve_connection_with_upgrades(
+                io,
+                hyper::service::service_fn(move |req| {
+                    let app = app.clone();
+                    async move {
+                        use tower::ServiceExt;
+                        app.oneshot(req).await
+                    }
+                }),
+            )
+            .await
+            .ok();
+    });
+
+    // build client initiator
+    let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
+
+    // build client initiator
+    let params: snow::params::NoiseParams = NOISE_PATTERN.parse().expect("valid pattern");
+    let mut client_handshake = Builder::new(params)
+        .local_private_key(&client_keypair.private)
+        .expect("valid key")
+        .remote_public_key(&server_keypair.public)
+        .expect("valid key")
+        .prologue(prologue.as_bytes())
+        .expect("valid prologue")
+        .build_initiator()
+        .expect("build initiator");
+
+    // generate the first message
+    let mut noise_payload = vec![0u8; 65535];
+    let len = client_handshake
+        .write_message(&[], &mut noise_payload)
+        .expect("write message");
+    noise_payload.truncate(len);
+
+    // build framed initiation message
+    let payload_len = noise_payload.len() as u16;
+    let mut init_msg = Vec::with_capacity(5 + noise_payload.len());
+    init_msg.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    init_msg.push(0x01); // msgTypeInitiation
+    init_msg.extend_from_slice(&payload_len.to_be_bytes());
+    init_msg.extend_from_slice(&noise_payload);
+
+    let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
+
+    // connect via websocket
+    let url = format!("ws://{}/ts2021?X-Tailscale-Handshake={}", addr, init_b64);
+    let (mut ws_stream, _response) = connect_async(&url)
+        .await
+        .expect("failed to connect WebSocket");
+
+    // read the noise response
+    let msg = ws_stream
+        .next()
+        .await
+        .expect("expected response message")
+        .expect("failed to read message");
+
+    let response_bytes = match msg {
+        Message::Binary(data) => data,
+        other => panic!("expected binary message, got {:?}", other),
+    };
+
+    // parse and process the response to complete handshake
+    assert_eq!(response_bytes[0], 0x02, "response type should be 0x02");
+    let response_payload = &response_bytes[3..]; // Skip type + length
+
+    let mut buf = vec![0u8; 65535];
+    client_handshake
+        .read_message(response_payload, &mut buf)
+        .expect("failed to read server response");
+
+    // handshake should be complete
+    assert!(
+        client_handshake.is_handshake_finished(),
+        "handshake should be complete"
+    );
+
+    // convert to transport mode
+    let mut client_transport = client_handshake
+        .into_transport_mode()
+        .expect("failed to enter transport mode");
+
+    // send an encrypted test message
+    let test_message = b"hello from client";
+    let mut encrypted = vec![0u8; test_message.len() + 16];
+    let len = client_transport
+        .write_message(test_message, &mut encrypted)
+        .expect("failed to encrypt");
+    encrypted.truncate(len);
+
+    // send the encrypted message over WebSocket
+    ws_stream
+        .send(Message::Binary(encrypted.into()))
+        .await
+        .expect("failed to send encrypted message");
+
+    // the test passes if we receive a response (server stayed open and responded)
+    let response = tokio::time::timeout(std::time::Duration::from_secs(2), ws_stream.next()).await;
+
+    // the test passes if we receive a response (server stayed open and responded)
+    assert!(
+        response.is_ok(),
+        "server should stay open after handshake and respond to messages"
+    );
+    let response = response
+        .unwrap()
+        .expect("should receive a message")
+        .expect("message should be valid");
+
+    // decrypt the response to verify it's valid encrypted data
+    match response {
+        Message::Binary(data) => {
+            // decrypt the response to verify it's valid encrypted data
+            let mut decrypted = vec![0u8; data.len()];
+            let len = client_transport
+                .read_message(&data, &mut decrypted)
+                .expect("should be able to decrypt server response");
+            decrypted.truncate(len);
+            // server should echo back the same message
+            assert_eq!(
+                decrypted, test_message,
+                "server should echo back the original message"
+            );
+        }
+        Message::Close(_) => {
+            panic!("server closed connection instead of responding to encrypted message");
+        }
+        other => {
+            panic!("expected binary message, got {:?}", other);
+        }
+    }
+
+    // clean up
+    ws_stream.close(None).await.ok();
+    server_handle.abort();
+}
+
+/// create a valid noise ik initiation message with tailscale framing.
 ///
 /// uses the snow crate for cryptographic operations to ensure compatibility
 /// with the server's snow-based responder.
@@ -260,7 +449,7 @@ fn create_valid_initiation_message(
     // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
-    // generate the first message: -> e, es, s, ss
+    // build initiator with prologue and remote static key
     let params = NOISE_PATTERN.parse().expect("valid pattern");
     let mut initiator = Builder::new(params)
         .local_private_key(client_private)
