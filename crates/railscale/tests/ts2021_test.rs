@@ -340,7 +340,7 @@ async fn test_ts2021_http2_over_noise() {
 
     let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
 
-    // split the websocket stream
+    // connect via websocket
     let url = format!("ws://{}/ts2021?X-Tailscale-Handshake={}", addr, init_b64);
     let (ws_stream, _response) = connect_async(&url)
         .await
@@ -376,7 +376,7 @@ async fn test_ts2021_http2_over_noise() {
         "handshake should be complete"
     );
 
-    // this provides AsyncRead + AsyncWrite for hyper
+    // convert to transport mode
     let client_transport = client_handshake
         .into_transport_mode()
         .expect("failed to enter transport mode");
@@ -388,14 +388,12 @@ async fn test_ts2021_http2_over_noise() {
     // use hyper's http/2 client over the encrypted stream
     let io = hyper_util::rt::TokioIo::new(noise_stream);
 
-    let (mut sender, conn) = hyper::client::conn::http2::handshake(
-        hyper_util::rt::TokioExecutor::new(),
-        io,
-    )
-    .await
-    .expect("HTTP/2 handshake failed");
+    let (mut sender, conn) =
+        hyper::client::conn::http2::handshake(hyper_util::rt::TokioExecutor::new(), io)
+            .await
+            .expect("HTTP/2 handshake failed");
 
-    // send a request to /machine/register
+    // spawn the connection driver
     tokio::spawn(async move {
         if let Err(e) = conn.await {
             eprintln!("HTTP/2 connection error: {}", e);

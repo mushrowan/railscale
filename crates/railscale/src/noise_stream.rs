@@ -1,8 +1,8 @@
-//! noiseStream - AsyncRead/AsyncWrite adapter for Noise-encrypted WebSocket
+//! noisestream - asyncread/asyncwrite adapter for noise-encrypted websocket.
 //!
 //! this module provides a stream adapter that bridges websocket binary messages
 //! with Noise encryption, presenting an AsyncRead + AsyncWrite interface suitable
-//! for running http/2 over the encrypted channel
+//! for running HTTP/2 over the encrypted channel.
 
 use bytes::{Buf, BytesMut};
 use futures_util::{Sink, Stream};
@@ -14,7 +14,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::Message;
 
-/// a stream that provides AsyncRead + AsyncWrite over a Noise-encrypted WebSocket
+/// a stream that provides asyncread + asyncwrite over a noise-encrypted websocket.
 ///
 /// this adapter:
 /// - Decrypts incoming WebSocket binary messages and buffers them for reading
@@ -51,7 +51,7 @@ where
     W: Sink<Message, Error = E> + Unpin + Send + 'static,
     E: std::error::Error + Send + 'static,
 {
-    /// create a new NoiseStream wrapping a WebSocket and Noise transport
+    /// create a new noisestream wrapping a websocket and noise transport.
     ///
     /// # Arguments
     /// * `reader` - The WebSocket message stream (read half)
@@ -211,7 +211,9 @@ where
 
         match Pin::new(&mut guard.writer).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -229,7 +231,9 @@ where
 
         match Pin::new(&mut guard.writer).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+            }
             Poll::Pending => Poll::Pending,
         }
     }

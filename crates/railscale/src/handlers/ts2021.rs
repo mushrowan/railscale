@@ -21,7 +21,6 @@ use std::io::{self, ErrorKind};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tower::Service;
 use tracing::{debug, error};
 
 use crate::AppState;
@@ -166,7 +165,7 @@ async fn handle_ts2021_connection(
         .route("/machine/map", post(super::map))
         .with_state(state);
 
-    // convert hyper request to axum-compatible request
+    // run http/2 server over the encrypted stream
     let io = hyper_util::rt::TokioIo::new(noise_stream);
     let service = hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| {
         let mut router = router.clone();
@@ -235,10 +234,10 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        // copy what we can to the output buffer
+        // try to read from websocket
         match Pin::new(&mut self.reader).poll_next(cx) {
             Poll::Ready(Some(Ok(Message::Binary(data)))) => {
-                // buffer the rest
+                // decrypt the message
                 match self.transport.decrypt(&data) {
                     Ok(plaintext) => {
                         // copy what we can to the output buffer
@@ -282,24 +281,19 @@ where
     ) -> Poll<io::Result<usize>> {
         // encrypt the data
         match self.transport.encrypt(buf) {
-            Ok(ciphertext) => {
-                match Pin::new(&mut self.writer).poll_ready(cx) {
-                    Poll::Ready(Ok(())) => {
-                        match Pin::new(&mut self.writer)
-                            .start_send(Message::Binary(ciphertext.into()))
-                        {
-                            Ok(()) => Poll::Ready(Ok(buf.len())),
-                            Err(e) => {
-                                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
-                            }
-                        }
+            Ok(ciphertext) => match Pin::new(&mut self.writer).poll_ready(cx) {
+                Poll::Ready(Ok(())) => {
+                    match Pin::new(&mut self.writer).start_send(Message::Binary(ciphertext.into()))
+                    {
+                        Ok(()) => Poll::Ready(Ok(buf.len())),
+                        Err(e) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
                     }
-                    Poll::Ready(Err(e)) => {
-                        Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
-                    }
-                    Poll::Pending => Poll::Pending,
                 }
-            }
+                Poll::Ready(Err(e)) => {
+                    Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                }
+                Poll::Pending => Poll::Pending,
+            },
             Err(e) => Poll::Ready(Err(io::Error::new(
                 ErrorKind::InvalidData,
                 format!("noise encrypt failed: {}", e),
@@ -310,7 +304,9 @@ where
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match Pin::new(&mut self.writer).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -318,7 +314,9 @@ where
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match Pin::new(&mut self.writer).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
+            Poll::Ready(Err(e)) => {
+                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+            }
             Poll::Pending => Poll::Pending,
         }
     }
