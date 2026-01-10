@@ -171,9 +171,25 @@ async fn main() -> Result<()> {
 
     info!("Database initialized successfully");
 
+    // load or generate noise keypair
+    info!(
+        "Loading Noise keypair from {:?}",
+        config.noise_private_key_path
+    );
+    let keypair = railscale::load_or_generate_noise_keypair(&config.noise_private_key_path)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to load/generate noise keypair: {:?}",
+                config.noise_private_key_path
+            )
+        })?;
+    info!("Noise public key loaded ({} bytes)", keypair.public.len());
+
     // build router
     let notifier = railscale::StateNotifier::new();
-    let app = railscale::create_app(db, grants, config.clone(), None, notifier, None).await;
+    let app =
+        railscale::create_app(db, grants, config.clone(), None, notifier, Some(keypair)).await;
 
     // parse listen address
     let addr: SocketAddr = config

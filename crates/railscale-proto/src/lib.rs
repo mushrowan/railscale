@@ -16,6 +16,7 @@ pub use map_request::{
     PortRange, UserProfile,
 };
 pub use noise::{NoiseHandshake, NoiseTransport, generate_keypair};
+pub use snow::Keypair;
 
 /// result type for protocol operations.
 pub type Result<T> = std::result::Result<T, Error>;
