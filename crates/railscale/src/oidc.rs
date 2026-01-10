@@ -1,8 +1,5 @@
 //! oidc authentication provider.
 
-// TODO: remove once handlers are wired up
-#![allow(dead_code)]
-
 use std::time::Duration;
 
 use moka::sync::Cache;

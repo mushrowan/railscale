@@ -57,10 +57,7 @@ pub async fn oidc_callback(
 
     // exchange authorization code for tokens
     let token_response = oidc
-        .exchange_code(
-            AuthorizationCode::new(params.code),
-            reg_info.pkce_verifier,
-        )
+        .exchange_code(AuthorizationCode::new(params.code), reg_info.pkce_verifier)
         .await
         .map_err(ApiError::internal)?;
 
@@ -74,7 +71,7 @@ pub async fn oidc_callback(
         .verify_id_token(id_token, &reg_info.nonce)
         .map_err(ApiError::unauthorized)?;
 
-    // get or create user
+    // validate claims against configuration
     crate::oidc::validate_oidc_claims(oidc.config(), &claims)
         .map_err(|e| ApiError::unauthorized(format!("authorization failed: {}", e)))?;
 
