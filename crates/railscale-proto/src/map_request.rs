@@ -166,6 +166,7 @@ pub struct DnsConfig {
 
 /// derp map for relay servers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct DerpMap {
     /// derp regions.
     pub regions: std::collections::HashMap<i32, DerpRegion>,
@@ -173,8 +174,10 @@ pub struct DerpMap {
 
 /// a derp region.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct DerpRegion {
     /// region id.
+    #[serde(rename = "RegionID")]
     pub region_id: i32,
 
     /// region code (e.g., "nyc", "sfo").
@@ -188,31 +191,42 @@ pub struct DerpRegion {
 }
 
 /// a derp node/server.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct DerpNode {
     /// node name.
     pub name: String,
 
-    /// region id.
+    /// derp port (0 means 443)
+    #[serde(rename = "RegionID")]
     pub region_id: i32,
 
-    /// hostname.
+    /// whether the node can serve on port 80 (for captive portal checks)
     pub host_name: String,
 
     /// ipv4 address.
+    #[serde(rename = "IPv4", default, skip_serializing_if = "Option::is_none")]
     pub ipv4: Option<String>,
 
     /// ipv6 address.
+    #[serde(rename = "IPv6", default, skip_serializing_if = "Option::is_none")]
     pub ipv6: Option<String>,
 
-    /// stun port.
-    pub stun_port: u16,
+    /// stun port (0 means 3478, -1 means disabled).
+    #[serde(rename = "STUNPort", default)]
+    pub stun_port: i32,
 
     /// whether stun-only (no derp relay).
+    #[serde(rename = "STUNOnly", default)]
     pub stun_only: bool,
 
-    /// derp port.
-    pub derp_port: u16,
+    /// derp port (0 means 443).
+    #[serde(rename = "DERPPort", default)]
+    pub derp_port: i32,
+
+    /// whether the node can serve on port 80 (for captive portal checks).
+    #[serde(rename = "CanPort80", default)]
+    pub can_port_80: bool,
 }
 
 /// a packet filter rule (simplified).

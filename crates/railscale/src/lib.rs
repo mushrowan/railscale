@@ -1,6 +1,6 @@
 //! railscale library - HTTP handlers and application setup.
 
-mod derp;
+pub mod derp;
 mod dns;
 pub mod handlers;
 mod noise_stream;
@@ -8,6 +8,9 @@ mod notifier;
 pub mod oidc;
 pub mod resolver;
 
+pub use derp::{
+    DerpError, fetch_derp_map_from_url, generate_derp_map, load_derp_map_from_path, merge_derp_maps,
+};
 pub use noise_stream::NoiseStream;
 pub use notifier::StateNotifier;
 pub use railscale_proto::Keypair;
