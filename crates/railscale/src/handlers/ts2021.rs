@@ -23,6 +23,7 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tracing::{debug, error};
 
+use super::MachineKeyContext;
 use crate::AppState;
 
 /// ts2021 message types.
@@ -151,6 +152,9 @@ async fn handle_ts2021_connection(
         .ok_or("missing client static key")?;
     debug!("client machine key: {} bytes", client_key.len());
 
+    // create machine key context from the noise handshake
+    let machine_key_context = MachineKeyContext::from_bytes(client_key);
+
     let transport = handshake.into_transport()?;
 
     // split the websocket for bidirectional communication
@@ -169,9 +173,14 @@ async fn handle_ts2021_connection(
     let io = hyper_util::rt::TokioIo::new(noise_stream);
     let service = hyper::service::service_fn(move |req: Request<hyper::body::Incoming>| {
         let mut router = router.clone();
+        let machine_key_context = machine_key_context.clone();
         async move {
             // convert hyper request to axum-compatible request
-            let (parts, body) = req.into_parts();
+            let (mut parts, body) = req.into_parts();
+
+            // inject the machine key context from noise handshake
+            parts.extensions.insert(machine_key_context);
+
             let body = Body::new(body);
             let req = Request::from_parts(parts, body);
 

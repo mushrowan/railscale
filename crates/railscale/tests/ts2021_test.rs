@@ -425,6 +425,219 @@ async fn test_ts2021_http2_over_noise() {
     server_handle.abort();
 }
 
+/// protocol, the handler uses the machine key from the authenticated Noise
+///handshake rather than trusting any machine key in the request body
+/// this test verifies that when a registration request comes through the ts2021
+/// protocol, the handler uses the machine key from the authenticated Noise
+/// handshake rather than trusting any machine key in the request body.
+#[tokio::test]
+async fn test_ts2021_machine_key_from_noise_context() {
+    use futures_util::StreamExt;
+    use hyper::Request;
+    use snow::Builder;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    const PROTOCOL_VERSION: u16 = 1;
+    const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+
+    // create server keypair
+    let server_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate server keypair");
+
+    // create client keypair - the public key is the machine key
+    let client_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate client keypair");
+
+    // create app with the server keypair
+    let db = RailscaleDb::new_in_memory()
+        .await
+        .expect("failed to create in-memory database");
+
+    // create a preauth key for registration
+    use railscale_db::Database;
+    use railscale_types::{PreAuthKey, User, UserId};
+
+    // create user first (foreign key constraint)
+    let user = User::new(UserId(1), "test".to_string());
+    db.create_user(&user).await.expect("failed to create user");
+
+    // create preauth key
+    let mut preauth_key = PreAuthKey::new(0, "test-preauth-key".to_string(), UserId(1));
+    preauth_key.reusable = true;
+    preauth_key.expiration = Some(chrono::Utc::now() + chrono::Duration::hours(1));
+
+    db.create_preauth_key(&preauth_key).await.expect("failed to create preauth key");
+
+    let grants = GrantsEngine::new(Policy::empty());
+    let config = Config::default();
+    let notifier = StateNotifier::new();
+
+    let keypair = railscale::Keypair {
+        private: server_keypair.private.clone(),
+        public: server_keypair.public.clone(),
+    };
+
+    let app = railscale::create_app(db, grants, config, None, notifier, Some(keypair)).await;
+
+    // bind to a random port
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind");
+    let addr = listener.local_addr().expect("failed to get local addr");
+
+    // spawn the server
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("failed to accept");
+        let io = hyper_util::rt::TokioIo::new(stream);
+        hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+            .serve_connection_with_upgrades(
+                io,
+                hyper::service::service_fn(move |req| {
+                    let app = app.clone();
+                    async move {
+                        use tower::ServiceExt;
+                        app.oneshot(req).await
+                    }
+                }),
+            )
+            .await
+            .ok();
+    });
+
+    // build client initiator
+    let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
+
+    // build client initiator
+    let params: snow::params::NoiseParams = NOISE_PATTERN.parse().expect("valid pattern");
+    let mut client_handshake = Builder::new(params)
+        .local_private_key(&client_keypair.private)
+        .expect("valid key")
+        .remote_public_key(&server_keypair.public)
+        .expect("valid key")
+        .prologue(prologue.as_bytes())
+        .expect("valid prologue")
+        .build_initiator()
+        .expect("build initiator");
+
+    // generate the first message
+    let mut noise_payload = vec![0u8; 65535];
+    let len = client_handshake
+        .write_message(&[], &mut noise_payload)
+        .expect("write message");
+    noise_payload.truncate(len);
+
+    // build framed initiation message
+    let payload_len = noise_payload.len() as u16;
+    let mut init_msg = Vec::with_capacity(5 + noise_payload.len());
+    init_msg.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    init_msg.push(0x01);
+    init_msg.extend_from_slice(&payload_len.to_be_bytes());
+    init_msg.extend_from_slice(&noise_payload);
+
+    let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
+
+    // connect via websocket
+    let url = format!("ws://{}/ts2021?X-Tailscale-Handshake={}", addr, init_b64);
+    let (ws_stream, _response) = connect_async(&url)
+        .await
+        .expect("failed to connect WebSocket");
+
+    let (ws_write, mut ws_read) = ws_stream.split();
+
+    // read the noise response
+    let msg = ws_read
+        .next()
+        .await
+        .expect("expected response message")
+        .expect("failed to read message");
+
+    let response_bytes = match msg {
+        tokio_tungstenite::tungstenite::Message::Binary(data) => data,
+        other => panic!("expected binary message, got {:?}", other),
+    };
+
+    // parse and process the response to complete handshake
+    let response_payload = &response_bytes[3..];
+    let mut buf = vec![0u8; 65535];
+    client_handshake
+        .read_message(response_payload, &mut buf)
+        .expect("failed to read server response");
+
+    // convert to transport mode
+    let client_transport = client_handshake
+        .into_transport_mode()
+        .expect("failed to enter transport mode");
+
+    let noise_stream = railscale::NoiseStream::new(ws_read, ws_write, client_transport);
+    let io = hyper_util::rt::TokioIo::new(noise_stream);
+
+    let (mut sender, conn) =
+        hyper::client::conn::http2::handshake(hyper_util::rt::TokioExecutor::new(), io)
+            .await
+            .expect("HTTP/2 handshake failed");
+
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            eprintln!("HTTP/2 connection error: {}", e);
+        }
+    });
+
+    // send a register request with a fake machine key in the body
+    // the handler should use the real machine key from the noise context instead
+    let fake_machine_key: Vec<u8> = (0..32).map(|i| i as u8).collect(); // 32 bytes of fake data
+    let register_body = serde_json::json!({
+        "machine_key": fake_machine_key,
+        "node_key": client_keypair.public,  // Use real node key
+        "preauth_key": "test-preauth-key"
+    });
+
+    let body = serde_json::to_vec(&register_body).expect("failed to serialize");
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/machine/register")
+        .header("Content-Type", "application/json")
+        .body(http_body_util::Full::new(bytes::Bytes::from(body)))
+        .expect("failed to build request");
+
+    let response = sender
+        .send_request(request)
+        .await
+        .expect("failed to send request");
+
+    assert!(
+        response.status().is_success(),
+        "expected successful registration, got {:?}",
+        response.status()
+    );
+
+    // read the response body
+    let body = response.into_body().collect().await.expect("failed to read body").to_bytes();
+    let register_response: serde_json::Value = serde_json::from_slice(&body)
+        .expect("failed to parse response");
+
+    // the machine key in the response should match the client's noise public key,
+    // not the fake machine key we sent in the request body
+    let response_machine_key = register_response["machine_key"]
+        .as_array()
+        .expect("machine_key should be array")
+        .iter()
+        .map(|v| v.as_u64().expect("should be u64") as u8)
+        .collect::<Vec<u8>>();
+
+    assert_eq!(
+        response_machine_key, client_keypair.public,
+        "machine key in response should match Noise handshake key, not request body"
+    );
+    assert_ne!(
+        response_machine_key, fake_machine_key,
+        "machine key should NOT match the fake key from request body"
+    );
+
+    server_handle.abort();
+}
+
 /// create a valid noise ik initiation message with tailscale framing.
 ///
 /// uses the snow crate for cryptographic operations to ensure compatibility
