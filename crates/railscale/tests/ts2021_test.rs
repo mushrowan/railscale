@@ -1032,11 +1032,11 @@ async fn test_noise_transport_chunks_large_writes() {
     server_handle.abort();
 }
 
-/// - Frame format: `[type:1][len:2 BE][ciphertext:N]`
-///- Type byte 0x03 = msgTypeRecord for data frames
+/// test that http upgraded noise frames use the correct format.
+///
 /// for raw tcp connections (http upgrade, not websocket), tailscale expects:
-/// this test verifies the server sends correctly formatted frames that
-/// the real tailscale client can parse
+/// - Frame format: `[type:1][len:2 BE][ciphertext:N]`
+/// - Type byte 0x03 = msgTypeRecord for data frames
 ///
 /// this test verifies the server sends correctly formatted frames that
 /// the real Tailscale client can parse.
@@ -1048,7 +1048,7 @@ async fn test_http_upgrade_noise_frame_format() {
 
     const PROTOCOL_VERSION: u16 = 131; // Use real Tailscale version
     const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
-    const MSG_TYPE_RECORD: u8 = 0x03;
+    const MSG_TYPE_RECORD: u8 = 0x04;
     const MAX_FRAME_SIZE: usize = 4096; // type + len + ciphertext
 
     // create server keypair
@@ -1099,7 +1099,7 @@ async fn test_http_upgrade_noise_frame_format() {
             .ok();
     });
 
-    // build client initiator
+    // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
     // build client initiator
@@ -1201,7 +1201,7 @@ async fn test_http_upgrade_noise_frame_format() {
         .into_transport_mode()
         .expect("failed to enter transport mode");
 
-    // now read the http/2 SETTINGS frame from the server
+    // move past the noise handshake response
     let post_handshake = &remaining[51..];
 
     // now read the http/2 settings frame from the server
@@ -1227,7 +1227,7 @@ async fn test_http_upgrade_noise_frame_format() {
 
     assert_eq!(
         frame_type, MSG_TYPE_RECORD,
-        "Expected frame type 0x03 (msgTypeRecord), got 0x{:02x}.\n\
+        "Expected frame type 0x04 (msgTypeRecord), got 0x{:02x}.\n\
          HTTP upgraded Noise frames must use format [type:1][len:2][ciphertext]",
         frame_type
     );

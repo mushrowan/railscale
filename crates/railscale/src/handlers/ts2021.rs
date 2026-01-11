@@ -52,11 +52,13 @@ use tracing::{debug, error, info, trace};
 use super::MachineKeyContext;
 use crate::AppState;
 
-/// post-handshake data record type
+/// ts2021 message types.
 const MSG_TYPE_INITIATION: u8 = 0x01;
 const MSG_TYPE_RESPONSE: u8 = 0x02;
+#[allow(dead_code)]
+const MSG_TYPE_ERROR: u8 = 0x03;
 /// post-handshake data record type.
-const MSG_TYPE_RECORD: u8 = 0x03;
+const MSG_TYPE_RECORD: u8 = 0x04;
 
 /// maximum plaintext bytes per noise frame (from tailscale's control/controlbase/conn.go).
 const MAX_PLAINTEXT_SIZE: usize = 4077;
@@ -460,7 +462,10 @@ async fn handle_ts2021_http_connection(
 struct HttpNoiseStream {
     io: TokioIo<hyper::upgrade::Upgraded>,
     transport: railscale_proto::NoiseTransport,
+    /// buffer for decrypted plaintext that hasn't been returned to caller yet
     read_buffer: BytesMut,
+    /// buffer for accumulating incomplete noise frames from the wire
+    pending_frame: BytesMut,
 }
 
 impl HttpNoiseStream {
@@ -472,92 +477,103 @@ impl HttpNoiseStream {
             io,
             transport,
             read_buffer: BytesMut::new(),
+            pending_frame: BytesMut::new(),
         }
     }
 }
 
 impl AsyncRead for HttpNoiseStream {
     fn poll_read(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        // return buffered decrypted data first
-        if !self.read_buffer.is_empty() {
-            let len = std::cmp::min(buf.remaining(), self.read_buffer.len());
-            buf.put_slice(&self.read_buffer[..len]);
-            self.read_buffer.advance(len);
-            return Poll::Ready(Ok(()));
-        }
-
-        // read the 3-byte header (type + length)
-        // format: [type:1][len:2 be][encrypted data]
-        let mut header_buf = [0u8; 3];
-
-        // read the 3-byte header (type + length)
         let this = self.get_mut();
-        let mut read_buf = ReadBuf::new(&mut header_buf);
-        match Pin::new(&mut this.io).poll_read(cx, &mut read_buf) {
-            Poll::Ready(Ok(())) => {
-                if read_buf.filled().is_empty() {
-                    // eof
-                    return Poll::Ready(Ok(()));
-                }
-                if read_buf.filled().len() < 3 {
-                    // need more data (partial read)
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-            }
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Pending => return Poll::Pending,
-        }
 
-        let msg_type = header_buf[0];
-        if msg_type != MSG_TYPE_RECORD {
-            return Poll::Ready(Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "unexpected Noise message type: expected 0x{:02x}, got 0x{:02x}",
-                    MSG_TYPE_RECORD, msg_type
-                ),
-            )));
-        }
-
-        let msg_len = u16::from_be_bytes([header_buf[1], header_buf[2]]) as usize;
-        if msg_len == 0 {
+        // return buffered decrypted data first
+        if !this.read_buffer.is_empty() {
+            let len = std::cmp::min(buf.remaining(), this.read_buffer.len());
+            buf.put_slice(&this.read_buffer[..len]);
+            this.read_buffer.advance(len);
             return Poll::Ready(Ok(()));
         }
 
-        // read the encrypted message
-        let mut encrypted = vec![0u8; msg_len];
-        let mut read_buf = ReadBuf::new(&mut encrypted);
-        match Pin::new(&mut this.io).poll_read(cx, &mut read_buf) {
-            Poll::Ready(Ok(())) => {
-                if read_buf.filled().len() < msg_len {
-                    // partial read, need to handle this better in a real impl
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
+        // read data into pending_frame buffer until we have a complete frame
+        // check if we have the complete frame
+        loop {
+            // extract the ciphertext
+            if this.pending_frame.len() >= 3 {
+                let msg_type = this.pending_frame[0];
+                if msg_type != MSG_TYPE_RECORD {
+                    return Poll::Ready(Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!(
+                            "unexpected Noise message type: expected 0x{:02x}, got 0x{:02x}",
+                            MSG_TYPE_RECORD, msg_type
+                        ),
+                    )));
                 }
-            }
-            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
-            Poll::Pending => return Poll::Pending,
-        }
 
-        // decrypt
-        match this.transport.decrypt(&encrypted) {
-            Ok(plaintext) => {
-                let copy_len = std::cmp::min(buf.remaining(), plaintext.len());
-                buf.put_slice(&plaintext[..copy_len]);
-                if copy_len < plaintext.len() {
-                    this.read_buffer.extend_from_slice(&plaintext[copy_len..]);
+                let msg_len =
+                    u16::from_be_bytes([this.pending_frame[1], this.pending_frame[2]]) as usize;
+                let total_frame_len = 3 + msg_len;
+
+                // check if we have the complete frame
+                if this.pending_frame.len() >= total_frame_len {
+                    // extract the ciphertext
+                    let ciphertext = &this.pending_frame[3..total_frame_len];
+
+                    // decrypt
+                    match this.transport.decrypt(ciphertext) {
+                        Ok(plaintext) => {
+                            // remove the processed frame from pending_frame
+                            this.pending_frame.advance(total_frame_len);
+
+                            // copy decrypted data to output
+                            let copy_len = std::cmp::min(buf.remaining(), plaintext.len());
+                            buf.put_slice(&plaintext[..copy_len]);
+
+                            // buffer any overflow
+                            if copy_len < plaintext.len() {
+                                this.read_buffer.extend_from_slice(&plaintext[copy_len..]);
+                            }
+
+                            return Poll::Ready(Ok(()));
+                        }
+                        Err(e) => {
+                            return Poll::Ready(Err(io::Error::new(
+                                ErrorKind::InvalidData,
+                                format!("noise decrypt failed: {}", e),
+                            )));
+                        }
+                    }
                 }
-                Poll::Ready(Ok(()))
             }
-            Err(e) => Poll::Ready(Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("noise decrypt failed: {}", e),
-            ))),
+
+            // need more data - read from the underlying stream
+            let mut tmp_buf = [0u8; 4096];
+            let mut read_buf = ReadBuf::new(&mut tmp_buf);
+
+            match Pin::new(&mut this.io).poll_read(cx, &mut read_buf) {
+                Poll::Ready(Ok(())) => {
+                    let bytes_read = read_buf.filled();
+                    if bytes_read.is_empty() {
+                        // eof
+                        if this.pending_frame.is_empty() {
+                            return Poll::Ready(Ok(()));
+                        } else {
+                            return Poll::Ready(Err(io::Error::new(
+                                ErrorKind::UnexpectedEof,
+                                "connection closed with incomplete Noise frame",
+                            )));
+                        }
+                    }
+                    // append to pending_frame and loop to check if we have a complete frame
+                    this.pending_frame.extend_from_slice(bytes_read);
+                }
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            }
         }
     }
 }
@@ -586,7 +602,7 @@ impl AsyncWrite for HttpNoiseStream {
         // build the framed message: [type:1][len:2][ciphertext]
         let len = ciphertext.len() as u16;
         let mut msg = Vec::with_capacity(3 + ciphertext.len());
-        msg.push(MSG_TYPE_RECORD); // 0x03 for data records
+        msg.push(MSG_TYPE_RECORD); // 0x04 for data records
         msg.extend_from_slice(&len.to_be_bytes());
         msg.extend_from_slice(&ciphertext);
 
