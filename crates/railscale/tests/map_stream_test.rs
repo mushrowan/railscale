@@ -107,7 +107,7 @@ impl MapTestFixture {
         MapRequest {
             version: railscale_proto::CapabilityVersion(100),
             node_key: self.node_key.clone(),
-            disco_key: Some(self.disco_key.as_bytes().to_vec()),
+            disco_key: Some(self.disco_key.clone()),
             endpoints: vec![],
             hostinfo: None,
             omit_peers: false,
@@ -173,7 +173,7 @@ async fn test_streaming_map_request_returns_length_prefixed_response() {
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
     assert_eq!(response_node.id, fixture.node.id.0);
-    assert_eq!(response_node.node_key, fixture.node_key.as_bytes());
+    assert_eq!(response_node.node_key, fixture.node_key);
 
     // keep_alive should be true for streaming
     assert!(map_response.keep_alive);

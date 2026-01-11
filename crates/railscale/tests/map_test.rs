@@ -55,7 +55,7 @@ async fn test_map_request_returns_node() {
     let map_request = MapRequest {
         version: railscale_proto::CapabilityVersion(100),
         node_key: node_key.clone(),
-        disco_key: Some(disco_key.as_bytes().to_vec()),
+        disco_key: Some(disco_key.clone()),
         endpoints: vec![],
         hostinfo: None,
         omit_peers: false,
@@ -112,9 +112,9 @@ async fn test_map_request_returns_node() {
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
     assert_eq!(response_node.id, node.id.0);
-    assert_eq!(response_node.node_key, node_key.as_bytes());
-    assert_eq!(response_node.machine_key, machine_key.as_bytes());
-    assert_eq!(response_node.disco_key, disco_key.as_bytes());
+    assert_eq!(response_node.node_key, node_key);
+    assert_eq!(response_node.machine_key, machine_key);
+    assert_eq!(response_node.disco_key, disco_key);
 
     // should have addresses
     assert!(!response_node.addresses.is_empty());
@@ -246,7 +246,7 @@ async fn test_map_request_returns_peers() {
     // should include peers (node2)
     assert_eq!(map_response.peers.len(), 1);
     let peer = &map_response.peers[0];
-    assert_eq!(peer.node_key, node2_key.as_bytes());
+    assert_eq!(peer.node_key, node2_key);
 }
 
 #[tokio::test]
@@ -301,7 +301,7 @@ async fn test_map_request_returns_dns_config() {
     let map_req = MapRequest {
         version: railscale_proto::CapabilityVersion::CURRENT,
         node_key: node_key.clone(),
-        disco_key: Some(disco_key.as_bytes().to_vec()),
+        disco_key: Some(disco_key.clone()),
         endpoints: vec![],
         hostinfo: None,
         omit_peers: false,
@@ -383,7 +383,7 @@ async fn test_map_request_returns_derp_map() {
     let map_req = MapRequest {
         version: railscale_proto::CapabilityVersion::CURRENT,
         node_key: node_key.clone(),
-        disco_key: Some(disco_key.as_bytes().to_vec()),
+        disco_key: Some(disco_key.clone()),
         endpoints: vec![],
         hostinfo: None,
         omit_peers: false,

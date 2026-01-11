@@ -7,7 +7,7 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
-use railscale_types::{HostInfo, NodeKey};
+use railscale_types::{DiscoKey, HostInfo, MachineKey, NodeKey};
 
 use crate::CapabilityVersion;
 
@@ -27,7 +27,7 @@ pub struct MapRequest {
 
     /// client's disco key (for peer discovery).
     #[serde(default)]
-    pub disco_key: Option<Vec<u8>>,
+    pub disco_key: Option<DiscoKey>,
 
     /// client's current endpoints.
     #[serde(default)]
@@ -121,17 +121,19 @@ pub struct MapResponseNode {
     #[serde(rename = "StableID")]
     pub stable_id: String,
 
-    /// node's display name.
+    /// node key (serialized as prefixed hex, e.g., "nodekey:...")
     pub name: String,
 
-    /// node key.
-    pub node_key: Vec<u8>,
+    /// machine key (serialized as prefixed hex, e.g., "mkey:...")
+    #[serde(rename = "Key")]
+    pub node_key: NodeKey,
 
-    /// machine key.
-    pub machine_key: Vec<u8>,
+    /// machine key (serialized as prefixed hex, e.g., "mkey:...").
+    #[serde(rename = "Machine")]
+    pub machine_key: MachineKey,
 
-    /// disco key.
-    pub disco_key: Vec<u8>,
+    /// disco key (serialized as prefixed hex, e.g., "discokey:...").
+    pub disco_key: DiscoKey,
 
     /// assigned addresses.
     pub addresses: Vec<String>,

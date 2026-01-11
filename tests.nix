@@ -90,8 +90,22 @@ pkgs.testers.runNixOSTest {
     client1.wait_for_unit("tailscaled.service")
     client2.wait_for_unit("tailscaled.service")
 
+    # Wait for DHCP to complete on all machines to prevent link changes during registration
+    # The eth0 interface gets DHCP, which can cause Tailscale to detect a "major link change"
+    # and close connections mid-registration
+    server.wait_for_unit("dhcpcd.service")
+    client1.wait_for_unit("dhcpcd.service")
+    client2.wait_for_unit("dhcpcd.service")
+
+    # Use the server's private IP (192.168.1.3) instead of hostname "server"
+    # This is necessary because Tailscale's control client only recognizes IPs, loopback,
+    # or "localhost" as private hosts. For non-private hosts, it falls back to port 443
+    # after a connection failure, which we don't have open.
+    # See: tailscale/control/ts2021/client.go lines 129-151
+
     # Connect client1 to railscale (10 second timeout) with verbose output
-    client1.execute("timeout 10 tailscale up --login-server=http://server:8080 --authkey=preauth-key-client1 --hostname=client1 2>&1 || true")
+    client1.execute("timeout 10 tailscale up --login-server=http://192.168.1.3:8080 --authkey=preauth-key-client1 --hostname=client1 2>&1 || true")
+    client2.execute("timeout 10 tailscale up --login-server=http://192.168.1.3:8080 --authkey=preauth-key-client2 --hostname=client2 2>&1 || true")
 
     # Show client1 daemon logs for debugging
     client1.execute("journalctl -u tailscaled.service --no-pager -n 50 || true")
