@@ -334,14 +334,24 @@ fn encode_length_prefixed(response: &MapResponse, compression: &Compression) -> 
     Some(Bytes::from(body))
 }
 
+/// convert an ip address to cidr notation (host route).
+fn ip_to_cidr(ip: std::net::IpAddr) -> String {
+    use ipnet::{Ipv4Net, Ipv6Net};
+    match ip {
+        std::net::IpAddr::V4(v4) => Ipv4Net::from(v4).to_string(),
+        std::net::IpAddr::V6(v6) => Ipv6Net::from(v6).to_string(),
+    }
+}
+
 /// convert a node to mapresponsenode.
 fn node_to_map_response_node(node: &Node, preferred_derp: &str) -> MapResponseNode {
+    // addresses must be in cidr notation for tailscale client
     let mut addresses = Vec::new();
-    if let Some(ipv4) = node.ipv4 {
-        addresses.push(ipv4.to_string());
+    if let Some(ip) = node.ipv4 {
+        addresses.push(ip_to_cidr(ip));
     }
-    if let Some(ipv6) = node.ipv6 {
-        addresses.push(ipv6.to_string());
+    if let Some(ip) = node.ipv6 {
+        addresses.push(ip_to_cidr(ip));
     }
 
     let mut allowed_ips = addresses.clone();

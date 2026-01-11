@@ -118,9 +118,13 @@ async fn test_map_request_returns_node() {
     assert_eq!(response_node.machine_key, machine_key);
     assert_eq!(response_node.disco_key, disco_key);
 
-    // should have addresses
+    // should have addresses in CIDR notation
     assert!(!response_node.addresses.is_empty());
-    assert!(response_node.addresses.contains(&"100.64.0.1".to_string()));
+    assert!(
+        response_node
+            .addresses
+            .contains(&"100.64.0.1/32".to_string())
+    );
 }
 
 #[tokio::test]
@@ -736,7 +740,7 @@ async fn test_map_request_updates_disco_key() {
 
     db.create_node(&node).await.unwrap();
 
-    // build maprequest with disco_key
+    // the disco key that the client will send
     let client_disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
 
     // build maprequest with disco_key
@@ -810,5 +814,138 @@ async fn test_map_request_updates_disco_key() {
     assert_eq!(
         updated_node.disco_key, client_disco_key,
         "Node in database should have the disco_key updated"
+    );
+}
+
+#[tokio::test]
+async fn test_map_response_addresses_are_cidr() {
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create a user
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    // create a node with both IPv4 and IPv6
+    let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
+    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+
+    let now = chrono::Utc::now();
+    let node = Node {
+        id: NodeId(0),
+        machine_key: machine_key.clone(),
+        node_key: node_key.clone(),
+        disco_key: disco_key.clone(),
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "test-node".to_string(),
+        given_name: "test-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+
+    db.create_node(&node).await.unwrap();
+
+    // build maprequest
+    let map_request = MapRequest {
+        version: railscale_proto::CapabilityVersion(100),
+        node_key: node_key.clone(),
+        disco_key: Some(disco_key.clone()),
+        endpoints: vec![],
+        hostinfo: None,
+        omit_peers: false,
+        stream: false,
+        debug_flags: vec![],
+        compress: None,
+    };
+
+    // create grants engine with wildcard policy (allow all)
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
+    // create app with default config
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(
+        db,
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    // send request
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // verify response
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+
+    // verify addresses are in cidr notation
+    let response_node = map_response.node.expect("should have node");
+    assert!(
+        response_node
+            .addresses
+            .iter()
+            .all(|addr| addr.contains('/')),
+        "All addresses should be in CIDR notation, got: {:?}",
+        response_node.addresses
+    );
+    assert!(
+        response_node
+            .addresses
+            .contains(&"100.64.0.1/32".to_string()),
+        "Should contain IPv4 with /32 prefix"
+    );
+    assert!(
+        response_node
+            .addresses
+            .contains(&"fd7a:115c:a1e0::1/128".to_string()),
+        "Should contain IPv6 with /128 prefix"
+    );
+
+    // allowedips should also be in cidr notation
+    assert!(
+        response_node
+            .allowed_ips
+            .iter()
+            .all(|addr| addr.contains('/')),
+        "All allowed_ips should be in CIDR notation, got: {:?}",
+        response_node.allowed_ips
     );
 }
