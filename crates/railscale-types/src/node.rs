@@ -201,37 +201,142 @@ fn is_exit_route(route: &IpNet) -> bool {
 }
 
 /// host information reported by the tailscale client.
+///tailscale client version (e.g., "1.80.0")
+/// field names match tailscale's go struct (pascalcase in json).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct HostInfo {
+    /// tailscale client version (e.g., "1.80.0").
+    #[serde(rename = "IPNVersion", default)]
+    pub ipn_version: Option<String>,
+
+    /// frontend log id.
+    #[serde(rename = "FrontendLogID", default)]
+    pub frontend_log_id: Option<String>,
+
+    /// oS version (e.g., "6.18.4" for Linux kernel)
+    #[serde(rename = "BackendLogID", default)]
+    pub backend_log_id: Option<String>,
+
     /// operating system (e.g., "linux", "windows", "darwin").
+    #[serde(rename = "OS", default)]
     pub os: Option<String>,
 
-    /// os version.
+    /// os version (e.g., "6.18.4" for linux kernel).
+    #[serde(rename = "OSVersion", default)]
     pub os_version: Option<String>,
 
-    /// device model.
+    /// whether running in a container.
+    #[serde(default)]
+    pub container: Option<bool>,
+
+    /// environment type (e.g., "kn" for kubernetes).
+    #[serde(default)]
+    pub env: Option<String>,
+
+    /// linux distribution (e.g., "debian", "ubuntu", "nixos").
+    #[serde(default)]
+    pub distro: Option<String>,
+
+    /// distribution version (e.g., "24.11").
+    #[serde(default)]
+    pub distro_version: Option<String>,
+
+    /// distribution codename (e.g., "jammy", "bullseye").
+    #[serde(default)]
+    pub distro_code_name: Option<String>,
+
+    /// app identifier for tsnet apps (e.g., "k8s-operator").
+    #[serde(default)]
+    pub app: Option<String>,
+
+    /// hostname of the device
+    #[serde(default)]
+    pub desktop: Option<bool>,
+
+    /// whether the host blocks incoming connections
+    #[serde(default)]
+    pub package: Option<String>,
+
+    /// whether this node is shared to the current user
+    #[serde(default)]
     pub device_model: Option<String>,
 
-    /// tailscale client version.
-    pub tailscale_version: Option<String>,
+    /// user opted out of logs/support
+    #[serde(default)]
+    pub hostname: Option<String>,
+
+    /// machine type (uname -m)
+    #[serde(default)]
+    pub shields_up: bool,
+
+    /// gOARCH of the binary
+    #[serde(default)]
+    pub sharee_node: bool,
+
+    /// gOARM, GOAMD64, etc
+    #[serde(default)]
+    pub no_logs_no_support: bool,
+
+    /// go version used to build the binary
+    #[serde(default)]
+    pub machine: Option<String>,
+
+    /// goarch of the binary.
+    #[serde(default)]
+    pub go_arch: Option<String>,
+
+    /// goarm, goamd64, etc.
+    #[serde(default)]
+    pub go_arch_var: Option<String>,
+
+    /// go version used to build the binary.
+    #[serde(default)]
+    pub go_version: Option<String>,
 
     /// routes this node wants to advertise.
+    #[serde(rename = "RoutableIPs", default)]
     pub routable_ips: Vec<IpNet>,
 
     /// tags the node is requesting (for acl tag owners).
+    #[serde(default)]
     pub request_tags: Vec<String>,
 
     /// network information.
+    #[serde(default)]
     pub net_info: Option<NetInfo>,
+
+    /// ssh host keys.
+    #[serde(rename = "sshHostKeys", default)]
+    pub ssh_host_keys: Vec<String>,
+
+    /// cloud provider (e.g., "aws", "gcp").
+    #[serde(default)]
+    pub cloud: Option<String>,
+
+    /// whether running in userspace (netstack) mode.
+    #[serde(default)]
+    pub userspace: Option<bool>,
+
+    /// whether subnet router is in userspace mode.
+    #[serde(default)]
+    pub userspace_router: Option<bool>,
+
+    /// whether running app-connector service.
+    #[serde(default)]
+    pub app_connector: Option<bool>,
 }
 
 /// network information for a node.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct NetInfo {
     /// preferred derp region.
+    #[serde(rename = "PreferredDERP", default)]
     pub preferred_derp: i32,
 
     /// latency to each derp region in seconds.
+    #[serde(rename = "DERPLatency", default)]
     pub derp_latency: std::collections::HashMap<String, f64>,
 }
 
@@ -292,6 +397,36 @@ impl std::ops::Deref for NodeView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_hostinfo_deserialize_tailscale_format() {
+        // tailscale client sends pascalcase field names
+        let json = r#"{
+            "OS": "linux",
+            "OSVersion": "6.18.4",
+            "DeviceModel": "",
+            "IPNVersion": "1.80.0",
+            "RoutableIPs": ["192.168.1.0/24", "10.0.0.0/8"],
+            "RequestTags": ["tag:server"],
+            "NetInfo": {
+                "PreferredDERP": 1,
+                "DERPLatency": {"1": 0.025, "2": 0.050}
+            },
+            "Hostname": "test-node",
+            "GoArch": "amd64",
+            "Distro": "nixos",
+            "DistroVersion": "24.11"
+        }"#;
+
+        let hostinfo: HostInfo = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(hostinfo.os, Some("linux".to_string()));
+        assert_eq!(hostinfo.os_version, Some("6.18.4".to_string()));
+        assert_eq!(hostinfo.routable_ips.len(), 2);
+        assert_eq!(hostinfo.request_tags, vec!["tag:server".to_string()]);
+        assert!(hostinfo.net_info.is_some());
+        let net_info = hostinfo.net_info.unwrap();
+        assert_eq!(net_info.preferred_derp, 1);
+    }
 
     fn test_node() -> Node {
         Node {
