@@ -176,8 +176,12 @@ async fn test_streaming_map_request_returns_length_prefixed_response() {
     assert_eq!(response_node.id, fixture.node.id.0);
     assert_eq!(response_node.node_key, fixture.node_key);
 
-    // keep_alive should be true for streaming
-    assert!(map_response.keep_alive);
+    // first streaming response must have keep_alive=false so client processes node data.
+    // tailscale client skips netmap callback when keep_alive=true, treating it as a ping.
+    assert!(
+        !map_response.keep_alive,
+        "first streaming response must have keep_alive=false for client to process nodes"
+    );
 
     // no remaining bytes after initial response (for this simple test)
     assert!(remaining.is_empty());
@@ -215,7 +219,7 @@ async fn test_non_streaming_map_request_returns_length_prefixed() {
     let response_node = map_response.node.unwrap();
     assert_eq!(response_node.id, fixture.node.id.0);
 
-    // no remaining bytes for single response
+    // keep_alive should be false for non-streaming
     assert!(!map_response.keep_alive);
 
     // no remaining bytes for single response
@@ -261,9 +265,10 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     let (first_response, _) =
         read_length_prefixed_response(&first_chunk).expect("failed to parse first response");
     assert!(first_response.node.is_some());
+    // first streaming response with data must have keep_alive=false so client processes it
     assert!(
-        first_response.keep_alive,
-        "streaming response should have keep_alive=true"
+        !first_response.keep_alive,
+        "streaming response with node data must have keep_alive=false"
     );
 
     // now add a second node to trigger a state update
@@ -311,6 +316,12 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     assert!(
         !second_response.peers.is_empty(),
         "should have at least one peer after state change"
+    );
+
+    // response with data must have keep_alive=false
+    assert!(
+        !second_response.keep_alive,
+        "streaming response with node data must have keep_alive=false"
     );
 
     // clean up

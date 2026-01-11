@@ -75,12 +75,11 @@ pub async fn map(
     let compression = Compression::from(req.compress.as_ref());
 
     if req.stream {
-        // non-streaming mode: return single length-prefixed response
+        // streaming mode: keep connection open and push updates
         Ok(streaming_response(state, node.node_key, compression).into_response())
     } else {
         // non-streaming mode: return single length-prefixed response
-        let mut response = build_map_response(&state, &req.node_key).await?;
-        response.keep_alive = false;
+        let response = build_map_response(&state, &req.node_key).await?;
         // use length-prefixed framing - client expects 4-byte le size prefix
         let bytes = encode_length_prefixed(&response, &compression)
             .ok_or_else(|| super::ApiError::internal("failed to encode response"))?;
@@ -266,7 +265,10 @@ async fn build_map_response(
     let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1); // Default to region 1 if none configured
 
     Ok(MapResponse {
-        keep_alive: true,
+        // keep_alive=false signals "this response has real data, process it"
+        // keep_alive=true (only in MapResponse::keepalive()) signals "just a ping, skip processing"
+        // tailscale client skips netmap callback when keep_alive=true
+        keep_alive: false,
         node: Some(node_to_map_response_node(&node, home_derp)),
         peers: visible_peers
             .iter()
