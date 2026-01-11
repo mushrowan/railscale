@@ -1,16 +1,55 @@
-//! cryptographic key types for tailscale protocol.
+//! keys serialize to tailscale's prefixed hex format (e.g., `"nodekey:abc123..."`)
 //!
 //! these types wrap the raw key bytes and provide serialization support.
+//! keys serialize to tailscale's prefixed hex format (e.g., `"nodekey:abc123..."`).
 //! the actual cryptographic operations will be implemented in railscale-proto.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
+/// helper to implement tailscale key serialization with a given prefix.
+macro_rules! impl_key_serde {
+    ($type:ty, $prefix:expr) => {
+        impl Serialize for $type {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: Serializer,
+            {
+                let hex = hex::encode(&self.0);
+                let s = format!("{}:{}", $prefix, hex);
+                serializer.serialize_str(&s)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $type {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                let s = String::deserialize(deserializer)?;
+                let expected_prefix = concat!($prefix, ":");
+                let hex_str = s.strip_prefix(expected_prefix).ok_or_else(|| {
+                    de::Error::custom(format!(
+                        "key must start with '{}', got '{}'",
+                        expected_prefix, s
+                    ))
+                })?;
+                let bytes = hex::decode(hex_str)
+                    .map_err(|e| de::Error::custom(format!("invalid hex in key: {}", e)))?;
+                Ok(Self(bytes))
+            }
+        }
+    };
+}
 
 /// machine key - identifies a physical device.
 ///
 /// this key is stable across node key rotations and is used
 /// for machine-level authentication.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+/// serializes as `"mkey:<64 hex chars>"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct MachineKey(Vec<u8>);
+
+impl_key_serde!(MachineKey, "mkey");
 
 impl MachineKey {
     /// create a new machine key from raw bytes.
@@ -33,11 +72,14 @@ impl MachineKey {
     }
 }
 
-/// node key - identifies a node's current session.
+/// serializes as `"nodekey:<64 hex chars>"`
 ///
 /// this key can be rotated and is used for the noise protocol handshake.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+/// serializes as `"nodekey:<64 hex chars>"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct NodeKey(Vec<u8>);
+
+impl_key_serde!(NodeKey, "nodekey");
 
 impl NodeKey {
     /// create a new node key from raw bytes.
@@ -58,11 +100,19 @@ impl NodeKey {
             "nodekey:???".to_string()
         }
     }
+
+    /// check if this is a zero key.
+    pub fn is_zero(&self) -> bool {
+        self.0.iter().all(|&b| b == 0)
+    }
 }
 
-/// disco key - used for peer discovery (STUN/DERP coordination) or alternatively partying
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+/// disco key - used for peer discovery (STUN/DERP coordination) or alternatively partying.
+/// serializes as `"discokey:<64 hex chars>"`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct DiscoKey(Vec<u8>);
+
+impl_key_serde!(DiscoKey, "discokey");
 
 impl DiscoKey {
     /// create a new disco key from raw bytes.
@@ -111,5 +161,46 @@ mod tests {
     fn test_empty_key_short_string() {
         let key = MachineKey::default();
         assert_eq!(key.short_string(), "mkey:???");
+    }
+
+    #[test]
+    fn test_node_key_serialize() {
+        let key = NodeKey::from_bytes(vec![0x02; 32]);
+        let json = serde_json::to_string(&key).unwrap();
+        assert_eq!(
+            json,
+            "\"nodekey:0202020202020202020202020202020202020202020202020202020202020202\""
+        );
+    }
+
+    #[test]
+    fn test_node_key_deserialize() {
+        let json = "\"nodekey:0202020202020202020202020202020202020202020202020202020202020202\"";
+        let key: NodeKey = serde_json::from_str(json).unwrap();
+        assert_eq!(key.as_bytes(), &[0x02; 32]);
+    }
+
+    #[test]
+    fn test_machine_key_roundtrip() {
+        let original = MachineKey::from_bytes(vec![0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90]);
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: MachineKey = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_node_key_is_zero() {
+        let zero_key = NodeKey::from_bytes(vec![0; 32]);
+        assert!(zero_key.is_zero());
+
+        let non_zero_key = NodeKey::from_bytes(vec![0x02; 32]);
+        assert!(!non_zero_key.is_zero());
+    }
+
+    #[test]
+    fn test_key_deserialize_invalid_prefix() {
+        let json = "\"wrong:0202020202020202020202020202020202020202020202020202020202020202\"";
+        let result: Result<NodeKey, _> = serde_json::from_str(json);
+        assert!(result.is_err());
     }
 }

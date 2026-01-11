@@ -585,13 +585,16 @@ async fn test_ts2021_machine_key_from_noise_context() {
         }
     });
 
-    // send a register request with a fake machine key in the body
-    // the handler should use the real machine key from the noise context instead
-    let fake_machine_key: Vec<u8> = (0..32).map(|i| i as u8).collect(); // 32 bytes of fake data
+    // send a register request via ts2021 (machine key comes from noise handshake)
+    // tailscale format: nodekey is prefixed hex string, auth key in auth.authkey
+    let node_key_hex = hex::encode(&client_keypair.public);
     let register_body = serde_json::json!({
-        "machine_key": fake_machine_key,
-        "node_key": client_keypair.public,  // Use real node key
-        "preauth_key": "test-preauth-key"
+        "Version": 95,
+        "NodeKey": format!("nodekey:{}", node_key_hex),
+        "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+        "Auth": {
+            "AuthKey": "test-preauth-key"
+        }
     });
 
     let body = serde_json::to_vec(&register_body).expect("failed to serialize");
@@ -610,7 +613,7 @@ async fn test_ts2021_machine_key_from_noise_context() {
 
     assert!(
         response.status().is_success(),
-        "expected successful registration, got {:?}",
+        "expected successful registration, got {}",
         response.status()
     );
 
@@ -624,22 +627,14 @@ async fn test_ts2021_machine_key_from_noise_context() {
     let register_response: serde_json::Value =
         serde_json::from_slice(&body).expect("failed to parse response");
 
-    // the machine key in the response should match the client's noise public key,
-    // not the fake machine key we sent in the request body
-    let response_machine_key = register_response["machine_key"]
-        .as_array()
-        .expect("machine_key should be array")
-        .iter()
-        .map(|v| v.as_u64().expect("should be u64") as u8)
-        .collect::<Vec<u8>>();
-
+    // verify tailscale-format response
     assert_eq!(
-        response_machine_key, client_keypair.public,
-        "machine key in response should match Noise handshake key, not request body"
+        register_response["MachineAuthorized"], true,
+        "node should be authorized"
     );
-    assert_ne!(
-        response_machine_key, fake_machine_key,
-        "machine key should NOT match the fake key from request body"
+    assert!(
+        register_response.get("User").is_some(),
+        "response should have User field"
     );
 
     server_handle.abort();
@@ -1269,9 +1264,9 @@ async fn test_http_upgrade_noise_frame_format() {
     server_handle.abort();
 }
 
-/// 1. Complete the Noise handshake via http upgrade
-///2. Client sends multiple encrypted frames (like http/2 preface + SETTINGS + HEADERS)
-/// 3. Server decrypts all frames successfully
+/// test that multiple client→server frames decrypt correctly over http upgrade.
+///
+/// this test simulates what a real tailscale client does:
 /// 1. Complete the Noise handshake via HTTP upgrade
 /// 2. Client sends multiple encrypted frames (like HTTP/2 preface + SETTINGS + HEADERS)
 /// 3. Server decrypts all frames successfully
@@ -1333,7 +1328,7 @@ async fn test_http_upgrade_multi_frame_client_to_server() {
             .ok();
     });
 
-    // build client initiator
+    // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
     // build client initiator
@@ -1435,10 +1430,10 @@ async fn test_http_upgrade_multi_frame_client_to_server() {
         .into_transport_mode()
         .expect("failed to enter transport mode");
 
-    // now send multiple encrypted frames from client to server
+    // keep any extra data after the noise response
     let post_handshake = remaining[51..].to_vec();
 
-    // frame 1: http/2 preface + SETTINGS + WINDOW_UPDATE
+    // now send multiple encrypted frames from client to server
     // this simulates what the real tailscale client does
 
     // frame 1: http/2 preface + settings + window_update

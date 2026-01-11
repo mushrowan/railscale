@@ -12,5 +12,6 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 ipnet = { workspace = true }
 base64 = "0.22"
+hex = "0.4"
 
 [dev-dependencies]

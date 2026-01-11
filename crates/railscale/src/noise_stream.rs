@@ -147,9 +147,7 @@ where
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Err(io::Error::other(e.to_string())))
-            }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(io::Error::other(e.to_string()))),
             Poll::Ready(None) => {
                 // stream ended
                 Poll::Ready(Ok(()))
@@ -198,14 +196,10 @@ where
                             .start_send(Message::Binary(ciphertext.into()))
                         {
                             Ok(()) => Poll::Ready(Ok(to_write)),
-                            Err(e) => {
-                                Poll::Ready(Err(io::Error::other(e.to_string())))
-                            }
+                            Err(e) => Poll::Ready(Err(io::Error::other(e.to_string()))),
                         }
                     }
-                    Poll::Ready(Err(e)) => {
-                        Poll::Ready(Err(io::Error::other(e.to_string())))
-                    }
+                    Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e.to_string()))),
                     Poll::Pending => Poll::Pending,
                 }
             }
@@ -229,9 +223,7 @@ where
 
         match Pin::new(&mut guard.writer).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::other(e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -249,9 +241,7 @@ where
 
         match Pin::new(&mut guard.writer).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::other(e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }

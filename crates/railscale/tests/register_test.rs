@@ -6,23 +6,8 @@ use axum::{
 };
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
-use railscale_types::{MachineKey, NodeKey, PreAuthKey, User, UserId};
-use serde::{Deserialize, Serialize};
+use railscale_types::{PreAuthKey, User, UserId};
 use tower::ServiceExt;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct RegisterRequest {
-    machine_key: Vec<u8>,
-    node_key: Vec<u8>,
-    preauth_key: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct RegisterResponse {
-    node_id: u64,
-    machine_key: Vec<u8>,
-    node_key: Vec<u8>,
-}
 
 #[tokio::test]
 async fn test_register_with_preauth_key() {
@@ -38,19 +23,6 @@ async fn test_register_with_preauth_key() {
     let mut preauth = PreAuthKey::new(1, "test-preauth-key-12345".to_string(), user.id);
     preauth.tags = vec![]; // user-owned node
     let preauth = db.create_preauth_key(&preauth).await.unwrap();
-
-    // create test keys (32 bytes for curve25519)
-    let machine_key_bytes = vec![1u8; 32];
-    let node_key_bytes = vec![2u8; 32];
-    let machine_key = MachineKey::from_bytes(machine_key_bytes.clone());
-    let node_key = NodeKey::from_bytes(node_key_bytes.clone());
-
-    // build request
-    let request_body = RegisterRequest {
-        machine_key: machine_key_bytes.clone(),
-        node_key: node_key_bytes.clone(),
-        preauth_key: preauth.key.clone(),
-    };
 
     // create grants engine with wildcard policy (allow all)
     let mut policy = Policy::empty();
@@ -76,6 +48,17 @@ async fn test_register_with_preauth_key() {
     )
     .await;
 
+    // tailscale-format registerrequest json
+    // nodekey is "nodekey:" + 64 hex chars (32 bytes)
+    let tailscale_request = serde_json::json!({
+        "Version": 95,
+        "NodeKey": "nodekey:0101010101010101010101010101010101010101010101010101010101010101",
+        "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+        "Auth": {
+            "AuthKey": preauth.key
+        }
+    });
+
     // send request
     let response = app
         .oneshot(
@@ -83,7 +66,7 @@ async fn test_register_with_preauth_key() {
                 .method("POST")
                 .uri("/machine/register")
                 .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&request_body).unwrap()))
+                .body(Body::from(tailscale_request.to_string()))
                 .unwrap(),
         )
         .await
@@ -95,9 +78,108 @@ async fn test_register_with_preauth_key() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let register_response: RegisterResponse = serde_json::from_slice(&body).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
 
-    assert_eq!(register_response.machine_key, machine_key.as_bytes());
-    assert_eq!(register_response.node_key, node_key.as_bytes());
-    assert!(register_response.node_id > 0);
+    // verify tailscale-format response fields
+    assert!(json.get("MachineAuthorized").is_some());
+    assert_eq!(json["MachineAuthorized"], true);
+    assert!(json.get("User").is_some());
+}
+
+/// - Keys as prefixed hex strings (e.g., "nodekey:abc123...")
+///- Auth key nested in Auth.AuthKey
+/// - PascalCase field names
+/// - Keys as prefixed hex strings (e.g., "nodekey:abc123...")
+/// - Auth key nested in Auth.AuthKey
+//set up test database
+#[tokio::test]
+async fn test_register_with_tailscale_format() {
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create a user
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    // create a preauth key
+    let mut preauth = PreAuthKey::new(1, "tskey-auth-test123".to_string(), user.id);
+    preauth.tags = vec![];
+    let preauth = db.create_preauth_key(&preauth).await.unwrap();
+
+    // create grants engine with wildcard policy
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
+    // create app
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(
+        db,
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    // tailscale-format registerrequest json
+    // nodekey is "nodekey:" + 64 hex chars (32 bytes)
+    let tailscale_request = serde_json::json!({
+        "Version": 95,
+        "NodeKey": "nodekey:0202020202020202020202020202020202020202020202020202020202020202",
+        "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+        "Auth": {
+            "AuthKey": preauth.key
+        },
+        "Hostinfo": {
+            "Hostname": "test-machine",
+            "OS": "linux",
+            "GoArch": "amd64"
+        }
+    });
+
+    // send request
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/register")
+                .header("content-type", "application/json")
+                .body(Body::from(tailscale_request.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // should succeed with 200 ok
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Expected 200 OK for Tailscale-format request"
+    );
+
+    // parse response - should have user, login, machineauthorized fields
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // verify tailscale-format response fields
+    assert!(
+        json.get("MachineAuthorized").is_some(),
+        "Response should have MachineAuthorized field"
+    );
+    assert!(
+        json.get("User").is_some(),
+        "Response should have User field"
+    );
 }

@@ -887,9 +887,7 @@ where
                 cx.waker().wake_by_ref();
                 Poll::Pending
             }
-            Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Err(io::Error::other(e.to_string())))
-            }
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(io::Error::other(e.to_string()))),
             Poll::Ready(None) => Poll::Ready(Ok(())),
             Poll::Pending => Poll::Pending,
         }
@@ -920,9 +918,7 @@ where
                         Err(e) => Poll::Ready(Err(io::Error::other(e.to_string()))),
                     }
                 }
-                Poll::Ready(Err(e)) => {
-                    Poll::Ready(Err(io::Error::other(e.to_string())))
-                }
+                Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e.to_string()))),
                 Poll::Pending => Poll::Pending,
             },
             Err(e) => Poll::Ready(Err(io::Error::new(
@@ -935,9 +931,7 @@ where
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match Pin::new(&mut self.writer).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::other(e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -945,9 +939,7 @@ where
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         match Pin::new(&mut self.writer).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
-            Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::other(e.to_string())))
-            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(io::Error::other(e.to_string()))),
             Poll::Pending => Poll::Pending,
         }
     }

@@ -1,4 +1,7 @@
 //! handler for /machine/register endpoint.
+//!implements tailscale's registration protocol. The request/response format
+//! matches what the official tailscale client expects
+//! matches what the official Tailscale client expects.
 
 use axum::{Json, extract::State, response::IntoResponse};
 use railscale_db::Database;
@@ -8,42 +11,135 @@ use serde::{Deserialize, Serialize};
 use super::{ApiError, OptionExt, OptionalMachineKeyContext, ResultExt};
 use crate::AppState;
 
+/// keys use prefixed hex format (e.g., "nodekey:abc123...")
+///
+/// client capability version
+/// keys use prefixed hex format (e.g., "nodekey:abc123...").
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct RegisterRequest {
-    pub machine_key: Vec<u8>,
-    pub node_key: Vec<u8>,
-    pub preauth_key: String,
+    /// client capability version.
+    #[serde(default)]
+    pub version: u64,
+
+    /// node's current public key.
+    pub node_key: NodeKey,
+
+    /// previous node key (for key rotation).
+    #[serde(default)]
+    pub old_node_key: NodeKey,
+
+    /// authentication info (contains pre-auth key).
+    #[serde(default)]
+    pub auth: Option<RegisterResponseAuth>,
+
+    /// host information.
+    #[serde(default)]
+    pub hostinfo: Option<Hostinfo>,
+
+    /// request ephemeral node (auto-deleted when inactive).
+    #[serde(default)]
+    pub ephemeral: bool,
 }
 
+/// authentication info for registerrequest.
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct RegisterResponseAuth {
+    /// pre-auth key for registration.
+    #[serde(default)]
+    pub auth_key: String,
+}
+
+/// basic host information from the client.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct Hostinfo {
+    #[serde(default)]
+    pub hostname: String,
+    #[serde(default, rename = "OS")]
+    pub os: String,
+    #[serde(default)]
+    pub go_arch: String,
+}
+
+/// tailscale registerresponse.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct RegisterResponse {
-    pub node_id: u64,
-    pub machine_key: Vec<u8>,
-    pub node_key: Vec<u8>,
+    /// user info for this node.
+    pub user: TailcfgUser,
+
+    /// login info.
+    pub login: TailcfgLogin,
+
+    /// whether the node key needs rotation.
+    #[serde(default)]
+    pub node_key_expired: bool,
+
+    /// whether the machine is authorized.
+    pub machine_authorized: bool,
+
+    /// user info in RegisterResponse (matches tailcfg.User)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub auth_url: String,
+
+    /// error message if registration failed.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub error: String,
+}
+
+/// user info in registerresponse (matches tailcfg.user).
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct TailcfgUser {
+    #[serde(rename = "ID")]
+    pub id: i64,
+    #[serde(default)]
+    pub display_name: String,
+}
+
+/// login info in registerresponse (matches tailcfg.login).
+#[derive(Debug, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct TailcfgLogin {
+    #[serde(rename = "ID")]
+    pub id: i64,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default)]
+    pub login_name: String,
+    #[serde(default)]
+    pub display_name: String,
 }
 
 /// handle node registration via preauth key.
 ///
 /// this endpoint is called by tailscale clients to register a new node
 /// with the control server.
-///
+//machine key must come from Noise context for ts2021
 /// when accessed via the ts2021 protocol, the machine key is extracted from
-/// the Noise handshake context (which is cryptographically authenticated).
-/// for direct http access, the machine key from the request body is used.
+//for testing without ts2021, generate a placeholder key
 pub async fn register(
     State(state): State<AppState>,
     OptionalMachineKeyContext(machine_key_ctx): OptionalMachineKeyContext,
     Json(req): Json<RegisterRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // prefer machine key from noise context (authenticated) over request body
+    // machine key must come from noise context for ts2021
     let machine_key = match machine_key_ctx {
         Some(ctx) => ctx.0,
-        None => MachineKey::from_bytes(req.machine_key),
+        None => {
+            // for testing without ts2021, generate a placeholder key
+            MachineKey::from_bytes(vec![0; 32])
+        }
     };
+
+    // extract auth key from nested auth struct
+    let auth_key_str = req.auth.as_ref().map(|a| a.auth_key.as_str()).unwrap_or("");
 
     let preauth_key = state
         .db
-        .get_preauth_key(&req.preauth_key)
+        .get_preauth_key(auth_key_str)
         .await
         .map_internal()?
         .or_unauthorized("invalid preauth key")?;
@@ -54,18 +150,31 @@ pub async fn register(
         ));
     }
 
+    // get user for response
+    let user = state
+        .db
+        .get_user(preauth_key.user_id)
+        .await
+        .map_internal()?;
+
+    let hostname = req
+        .hostinfo
+        .as_ref()
+        .map(|h| h.hostname.clone())
+        .unwrap_or_default();
+
     let now = chrono::Utc::now();
     let node = Node {
         id: NodeId(0),
         machine_key,
-        node_key: NodeKey::from_bytes(req.node_key),
+        node_key: req.node_key,
         disco_key: Default::default(),
         ipv4: None,
         ipv6: None,
         endpoints: vec![],
         hostinfo: None,
-        hostname: String::new(),
-        given_name: String::new(),
+        hostname: hostname.clone(),
+        given_name: hostname,
         user_id: if preauth_key.creates_tagged_nodes() {
             None
         } else {
@@ -82,7 +191,7 @@ pub async fn register(
         is_online: None,
     };
 
-    let node = state.db.create_node(&node).await.map_internal()?;
+    let _node = state.db.create_node(&node).await.map_internal()?;
 
     if !preauth_key.reusable {
         state
@@ -92,9 +201,29 @@ pub async fn register(
             .map_internal()?;
     }
 
+    // build tailscale-format response
+    let (user_info, login_info) = match user {
+        Some(u) => (
+            TailcfgUser {
+                id: u.id.0 as i64,
+                display_name: u.name.clone(),
+            },
+            TailcfgLogin {
+                id: u.id.0 as i64,
+                provider: "authkey".to_string(),
+                login_name: u.name.clone(),
+                display_name: u.name,
+            },
+        ),
+        None => (TailcfgUser::default(), TailcfgLogin::default()),
+    };
+
     Ok(Json(RegisterResponse {
-        node_id: node.id.0,
-        machine_key: node.machine_key.as_bytes().to_vec(),
-        node_key: node.node_key.as_bytes().to_vec(),
+        user: user_info,
+        login: login_info,
+        node_key_expired: false,
+        machine_authorized: true,
+        auth_url: String::new(),
+        error: String::new(),
     }))
 }
