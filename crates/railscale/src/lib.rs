@@ -15,16 +15,19 @@ pub use noise_stream::NoiseStream;
 pub use notifier::StateNotifier;
 pub use railscale_proto::Keypair;
 
+use std::path::Path;
+use std::sync::Arc;
+
 use axum::{
     Router,
     routing::{get, post},
 };
-use railscale_db::RailscaleDb;
+use railscale_db::{Database, IpAllocator, RailscaleDb};
 use railscale_grants::GrantsEngine;
 use railscale_types::Config;
-use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 
 /// application state shared across handlers.
 #[derive(Clone)]
@@ -34,6 +37,8 @@ pub struct AppState {
     pub config: Config,
     pub oidc: Option<oidc::AuthProviderOidc>,
     pub notifier: StateNotifier,
+    /// ip address allocator for new nodes.
+    pub ip_allocator: Arc<Mutex<IpAllocator>>,
     /// server's noise public key for ts2021 protocol.
     pub noise_public_key: Vec<u8>,
     /// server's noise private key for ts2021 protocol handshakes.
@@ -100,12 +105,26 @@ pub async fn create_app(
         railscale_proto::generate_keypair().expect("failed to generate noise keypair")
     });
 
+    // load already-allocated IPs from the database
+    let mut ip_allocator = IpAllocator::new(config.prefix_v4, config.prefix_v6);
+
+    // load already-allocated ips from the database
+    if let Ok(nodes) = db.list_nodes().await {
+        let allocated_ips: Vec<std::net::IpAddr> = nodes
+            .iter()
+            .flat_map(|n| [n.ipv4, n.ipv6])
+            .flatten()
+            .collect();
+        ip_allocator.load_allocated(allocated_ips);
+    }
+
     let state = AppState {
         db,
         grants,
         config,
         oidc,
         notifier,
+        ip_allocator: Arc::new(Mutex::new(ip_allocator)),
         noise_public_key: keypair.public,
         noise_private_key: keypair.private,
     };

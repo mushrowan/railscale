@@ -119,10 +119,10 @@ pub struct TailcfgLogin {
 /// this endpoint is called by tailscale clients to register a new node
 /// with the control server.
 ///
-/// note: We use `Bytes` instead of `Json<RegisterRequest>` because the real
-/// tailscale client does not send a Content-Type header over ts2021/http/2
+/// when accessed via the ts2021 protocol, the machine key is extracted from
+/// the Noise handshake context (which is cryptographically authenticated).
 ///
-//parse json manually since tailscale client doesn't send Content-Type header
+/// NOTE: we use `bytes` instead of `json<registerrequest>` because the real
 /// tailscale client does not send a content-type header over ts2021/http/2.
 pub async fn register(
     State(state): State<AppState>,
@@ -170,14 +170,22 @@ pub async fn register(
         .map(|h| h.hostname.clone())
         .unwrap_or_default();
 
+    // allocate ip addresses for the new node
+    let (ipv4, ipv6) = {
+        let mut allocator = state.ip_allocator.lock().await;
+        allocator
+            .allocate()
+            .map_err(|e| ApiError::internal(e.to_string()))?
+    };
+
     let now = chrono::Utc::now();
     let node = Node {
         id: NodeId(0),
         machine_key,
         node_key: req.node_key,
         disco_key: Default::default(),
-        ipv4: None,
-        ipv6: None,
+        ipv4,
+        ipv6,
         endpoints: vec![],
         hostinfo: None,
         hostname: hostname.clone(),

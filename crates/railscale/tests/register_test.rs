@@ -184,11 +184,128 @@ async fn test_register_with_tailscale_format() {
     );
 }
 
-/// requests over the ts2021 http/2 connection. The body is json, but the header
-///is missing
+/// from the configured prefixes
+///
+/// when a node registers, it should be assigned ipv4 and ipv6 addresses
+//set up test database
+#[tokio::test]
+async fn test_register_allocates_ip_addresses() {
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create a user
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    // create a preauth key
+    let mut preauth = PreAuthKey::new(1, "tskey-ip-alloc-test".to_string(), user.id);
+    preauth.tags = vec![];
+    let preauth = db.create_preauth_key(&preauth).await.unwrap();
+
+    // create grants engine with wildcard policy
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
+    // create app
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(
+        db.clone(),
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    // register a node
+    let node_key = "nodekey:0404040404040404040404040404040404040404040404040404040404040404";
+    let tailscale_request = serde_json::json!({
+        "Version": 95,
+        "NodeKey": node_key,
+        "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+        "Auth": {
+            "AuthKey": preauth.key
+        },
+        "Hostinfo": {
+            "Hostname": "ip-alloc-test"
+        }
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/register")
+                .header("content-type", "application/json")
+                .body(Body::from(tailscale_request.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // verify the node was created with ip addresses
+    // parse node key using serde (same format the server uses)
+    let node_key_parsed: railscale_types::NodeKey =
+        serde_json::from_value(serde_json::json!(node_key)).expect("valid node key");
+    let node = db
+        .get_node_by_node_key(&node_key_parsed)
+        .await
+        .expect("db query should succeed")
+        .expect("node should exist");
+
+    // node should have both ipv4 and ipv6 addresses assigned
+    assert!(
+        node.ipv4.is_some(),
+        "Node should have an IPv4 address assigned"
+    );
+    assert!(
+        node.ipv6.is_some(),
+        "Node should have an IPv6 address assigned"
+    );
+
+    // ipv4 should be in the tailscale cgnat range (100.64.0.0/10)
+    if let Some(ipv4) = node.ipv4 {
+        let ip: std::net::Ipv4Addr = match ipv4 {
+            std::net::IpAddr::V4(v4) => v4,
+            _ => panic!("Expected IPv4 address"),
+        };
+        assert!(
+            ip.octets()[0] == 100 && ip.octets()[1] >= 64 && ip.octets()[1] < 128,
+            "IPv4 should be in 100.64.0.0/10 range, got {ip}"
+        );
+    }
+
+    // ipv6 should be in the tailscale ula range (fd7a:115c:a1e0::/48)
+    if let Some(ipv6) = node.ipv6 {
+        let ip: std::net::Ipv6Addr = match ipv6 {
+            std::net::IpAddr::V6(v6) => v6,
+            _ => panic!("Expected IPv6 address"),
+        };
+        let segments = ip.segments();
+        assert!(
+            segments[0] == 0xfd7a && segments[1] == 0x115c && segments[2] == 0xa1e0,
+            "IPv6 should be in fd7a:115c:a1e0::/48 range, got {ip}"
+        );
+    }
+}
+
+/// test that register accepts requests without content-type header.
+///
 /// the real tailscale client does not send a content-type header when making
 /// requests over the ts2021 HTTP/2 connection. The body is JSON, but the header
-//set up test database
+/// is missing.
 #[tokio::test]
 async fn test_register_without_content_type_header() {
     // set up test database
