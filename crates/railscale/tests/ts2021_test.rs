@@ -838,11 +838,11 @@ async fn test_ts2021_http_upgrade_protocol() {
     server_handle.abort();
 }
 
+/// test that large writes through noise transport are chunked into multiple frames.
+///
+/// tailscale's noise transport has a maximum frame size:
 /// - Max plaintext per frame: 4077 bytes
-///- Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
-/// - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
-/// - Max plaintext per frame: 4077 bytes
-/// this test verifies frame chunking works correctly via http/2 over Noise
+/// - Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
 /// - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
 ///
 /// this test verifies frame chunking works correctly via http/2 over noise.
@@ -908,7 +908,7 @@ async fn test_noise_transport_chunks_large_writes() {
             .ok();
     });
 
-    // build client initiator
+    // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
     // build client initiator
@@ -1027,6 +1027,243 @@ async fn test_noise_transport_chunks_large_writes() {
         observed_max,
         MAX_CIPHERTEXT_SIZE,
         MAX_CIPHERTEXT_SIZE
+    );
+
+    server_handle.abort();
+}
+
+/// - Frame format: `[type:1][len:2 BE][ciphertext:N]`
+///- Type byte 0x03 = msgTypeRecord for data frames
+/// for raw tcp connections (http upgrade, not websocket), tailscale expects:
+/// this test verifies the server sends correctly formatted frames that
+/// the real tailscale client can parse
+///
+/// this test verifies the server sends correctly formatted frames that
+/// the real Tailscale client can parse.
+#[tokio::test]
+async fn test_http_upgrade_noise_frame_format() {
+    use snow::Builder;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    const PROTOCOL_VERSION: u16 = 131; // Use real Tailscale version
+    const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+    const MSG_TYPE_RECORD: u8 = 0x03;
+    const MAX_FRAME_SIZE: usize = 4096; // type + len + ciphertext
+
+    // create server keypair
+    let server_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate server keypair");
+
+    // create client keypair
+    let client_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate client keypair");
+
+    // create app with the server keypair
+    let db = RailscaleDb::new_in_memory()
+        .await
+        .expect("failed to create in-memory database");
+    let grants = GrantsEngine::new(Policy::empty());
+    let config = Config::default();
+    let notifier = StateNotifier::new();
+
+    let keypair = railscale::Keypair {
+        private: server_keypair.private.clone(),
+        public: server_keypair.public.clone(),
+    };
+
+    let app = railscale::create_app(db, grants, config, None, notifier, Some(keypair)).await;
+
+    // bind to a random port
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind");
+    let addr = listener.local_addr().expect("failed to get local addr");
+
+    // spawn the server
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("failed to accept");
+        let io = hyper_util::rt::TokioIo::new(stream);
+        hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+            .serve_connection_with_upgrades(
+                io,
+                hyper::service::service_fn(move |req| {
+                    let app = app.clone();
+                    async move {
+                        use tower::ServiceExt;
+                        app.oneshot(req).await
+                    }
+                }),
+            )
+            .await
+            .ok();
+    });
+
+    // build client initiator
+    let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
+
+    // build client initiator
+    let params: snow::params::NoiseParams = NOISE_PATTERN.parse().expect("valid pattern");
+    let mut client_handshake = Builder::new(params)
+        .local_private_key(&client_keypair.private)
+        .expect("valid key")
+        .remote_public_key(&server_keypair.public)
+        .expect("valid key")
+        .prologue(prologue.as_bytes())
+        .expect("valid prologue")
+        .build_initiator()
+        .expect("build initiator");
+
+    // generate the first message
+    let mut noise_payload = vec![0u8; 65535];
+    let len = client_handshake
+        .write_message(&[], &mut noise_payload)
+        .expect("write message");
+    noise_payload.truncate(len);
+
+    // build framed initiation message
+    let payload_len = noise_payload.len() as u16;
+    let mut init_msg = Vec::with_capacity(5 + noise_payload.len());
+    init_msg.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    init_msg.push(0x01); // msgTypeInitiation
+    init_msg.extend_from_slice(&payload_len.to_be_bytes());
+    init_msg.extend_from_slice(&noise_payload);
+
+    let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
+
+    // connect via raw tcp and send http upgrade request
+    let mut stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("failed to connect");
+
+    // send http upgrade request
+    let request = format!(
+        "POST /ts2021 HTTP/1.1\r\n\
+         Host: {}\r\n\
+         Upgrade: tailscale-control-protocol\r\n\
+         Connection: upgrade\r\n\
+         X-Tailscale-Handshake: {}\r\n\
+         \r\n",
+        addr, init_b64
+    );
+
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .expect("failed to send request");
+
+    // read the http response + noise handshake response
+    let mut response_buf = vec![0u8; 4096];
+    let n = stream
+        .read(&mut response_buf)
+        .await
+        .expect("failed to read response");
+
+    // parse http response
+    let response_str = String::from_utf8_lossy(&response_buf[..n]);
+    assert!(
+        response_str.starts_with("HTTP/1.1 101"),
+        "expected 101, got: {}",
+        response_str.lines().next().unwrap_or(&response_str)
+    );
+
+    // find where http headers end
+    let header_end = response_str.find("\r\n\r\n").expect("no header end") + 4;
+    let mut remaining = response_buf[header_end..n].to_vec();
+
+    // read more if needed to get the full noise response (51 bytes)
+    while remaining.len() < 51 {
+        let mut more = vec![0u8; 1024];
+        let n = stream.read(&mut more).await.expect("failed to read more");
+        if n == 0 {
+            panic!("connection closed early");
+        }
+        remaining.extend_from_slice(&more[..n]);
+    }
+
+    // parse noise handshake response (doesn't use type byte for handshake messages)
+    let noise_response = &remaining[..51];
+    assert_eq!(noise_response[0], 0x02, "handshake response type");
+
+    // complete the handshake
+    let response_payload = &noise_response[3..];
+    let mut buf = vec![0u8; 65535];
+    client_handshake
+        .read_message(response_payload, &mut buf)
+        .expect("failed to read server response");
+
+    assert!(
+        client_handshake.is_handshake_finished(),
+        "handshake should be complete"
+    );
+
+    let mut client_transport = client_handshake
+        .into_transport_mode()
+        .expect("failed to enter transport mode");
+
+    // now read the http/2 SETTINGS frame from the server
+    let post_handshake = &remaining[51..];
+
+    // now read the http/2 settings frame from the server
+    // server should send http/2 preface: settings frame
+    // this should be in format [type:1=0x03][len:2][ciphertext]
+
+    let mut data_buf = post_handshake.to_vec();
+    while data_buf.len() < 3 {
+        let mut more = vec![0u8; 4096];
+        let n = stream.read(&mut more).await.expect("failed to read data");
+        if n == 0 {
+            panic!(
+                "connection closed before receiving data frame, got {} bytes",
+                data_buf.len()
+            );
+        }
+        data_buf.extend_from_slice(&more[..n]);
+    }
+
+    // verify frame format: [type:1][len:2][ciphertext]
+    let frame_type = data_buf[0];
+    let frame_len = u16::from_be_bytes([data_buf[1], data_buf[2]]) as usize;
+
+    assert_eq!(
+        frame_type, MSG_TYPE_RECORD,
+        "Expected frame type 0x03 (msgTypeRecord), got 0x{:02x}.\n\
+         HTTP upgraded Noise frames must use format [type:1][len:2][ciphertext]",
+        frame_type
+    );
+
+    assert!(
+        frame_len <= MAX_FRAME_SIZE - 3,
+        "Frame length {} exceeds max {} bytes",
+        frame_len,
+        MAX_FRAME_SIZE - 3
+    );
+
+    // read the full ciphertext
+    while data_buf.len() < 3 + frame_len {
+        let mut more = vec![0u8; 4096];
+        let n = stream.read(&mut more).await.expect("failed to read more");
+        if n == 0 {
+            panic!("connection closed before full frame");
+        }
+        data_buf.extend_from_slice(&more[..n]);
+    }
+
+    let ciphertext = &data_buf[3..3 + frame_len];
+
+    // try to decrypt - should succeed with properly formatted frames
+    let mut decrypted = vec![0u8; ciphertext.len()];
+    let decrypted_len = client_transport
+        .read_message(ciphertext, &mut decrypted)
+        .expect("failed to decrypt frame");
+    decrypted.truncate(decrypted_len);
+
+    // the decrypted data should be http/2 settings frame
+    // http/2 connection preface starts with "pri * http/2.0\r\n\r\nsm\r\n\r\n" for client
+    // server sends settings frame which starts with frame header
+    assert!(
+        !decrypted.is_empty(),
+        "decrypted frame should contain HTTP/2 data"
     );
 
     server_handle.abort();

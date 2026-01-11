@@ -16,14 +16,14 @@
 //! ```text
 //! post /ts2021
 //! upgrade: tailscale-control-protocol
-//! ## Frame Size Limits
+//! x-tailscale-handshake: <base64>
 //! ```
-//!tailscale's Noise transport has strict frame size limits:
+//!
+//! ## Frame Size Limits
+//!
+//! tailscale's noise transport has strict frame size limits:
 //! - Max plaintext per frame: 4077 bytes
-//!- Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
-//! - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
-//! - Max plaintext per frame: 4077 bytes
-//! large writes are automatically chunked into multiple frames
+//! - Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
 //! - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
 //!
 //! large writes are automatically chunked into multiple frames.
@@ -52,9 +52,11 @@ use tracing::{debug, error, info, trace};
 use super::MachineKeyContext;
 use crate::AppState;
 
-/// ts2021 message types.
+/// post-handshake data record type
 const MSG_TYPE_INITIATION: u8 = 0x01;
 const MSG_TYPE_RESPONSE: u8 = 0x02;
+/// post-handshake data record type.
+const MSG_TYPE_RECORD: u8 = 0x03;
 
 /// maximum plaintext bytes per noise frame (from tailscale's control/controlbase/conn.go).
 const MAX_PLAINTEXT_SIZE: usize = 4077;
@@ -488,20 +490,20 @@ impl AsyncRead for HttpNoiseStream {
             return Poll::Ready(Ok(()));
         }
 
-        // read a length-prefixed encrypted message from the stream
-        // format: [len:2 be][encrypted data]
-        let mut len_buf = [0u8; 2];
+        // read the 3-byte header (type + length)
+        // format: [type:1][len:2 be][encrypted data]
+        let mut header_buf = [0u8; 3];
 
-        // read the length prefix
+        // read the 3-byte header (type + length)
         let this = self.get_mut();
-        let mut read_buf = ReadBuf::new(&mut len_buf);
+        let mut read_buf = ReadBuf::new(&mut header_buf);
         match Pin::new(&mut this.io).poll_read(cx, &mut read_buf) {
             Poll::Ready(Ok(())) => {
                 if read_buf.filled().is_empty() {
                     // eof
                     return Poll::Ready(Ok(()));
                 }
-                if read_buf.filled().len() < 2 {
+                if read_buf.filled().len() < 3 {
                     // need more data (partial read)
                     cx.waker().wake_by_ref();
                     return Poll::Pending;
@@ -511,7 +513,18 @@ impl AsyncRead for HttpNoiseStream {
             Poll::Pending => return Poll::Pending,
         }
 
-        let msg_len = u16::from_be_bytes(len_buf) as usize;
+        let msg_type = header_buf[0];
+        if msg_type != MSG_TYPE_RECORD {
+            return Poll::Ready(Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "unexpected Noise message type: expected 0x{:02x}, got 0x{:02x}",
+                    MSG_TYPE_RECORD, msg_type
+                ),
+            )));
+        }
+
+        let msg_len = u16::from_be_bytes([header_buf[1], header_buf[2]]) as usize;
         if msg_len == 0 {
             return Poll::Ready(Ok(()));
         }
@@ -570,9 +583,10 @@ impl AsyncWrite for HttpNoiseStream {
             }
         };
 
-        // length-prefix the message
+        // build the framed message: [type:1][len:2][ciphertext]
         let len = ciphertext.len() as u16;
-        let mut msg = Vec::with_capacity(2 + ciphertext.len());
+        let mut msg = Vec::with_capacity(3 + ciphertext.len());
+        msg.push(MSG_TYPE_RECORD); // 0x03 for data records
         msg.extend_from_slice(&len.to_be_bytes());
         msg.extend_from_slice(&ciphertext);
 

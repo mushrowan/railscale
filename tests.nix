@@ -5,7 +5,7 @@
 pkgs.testers.runNixOSTest {
   name = "railscale-tailscale-integration";
 
-  nodes = {
+  nodes = let commonClientFlags = ["--verbose=3"]; in {
     server = {
       config,
       pkgs,
@@ -54,7 +54,7 @@ pkgs.testers.runNixOSTest {
     }: {
       services.tailscale = {
         enable = true;
-        extraDaemonFlags = ["-verbose"  "2"];
+        extraDaemonFlags = commonClientFlags;
       };
 
       environment.systemPackages = [pkgs.tailscale];
@@ -67,7 +67,7 @@ pkgs.testers.runNixOSTest {
     }: {
       services.tailscale = {
         enable = true;
-        extraDaemonFlags = ["-verbose" "2"];
+        extraDaemonFlags = commonClientFlags;
       };
 
       environment.systemPackages = [pkgs.tailscale];
