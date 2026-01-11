@@ -181,21 +181,37 @@ pub struct MapResponseNode {
     pub user: u64,
 }
 
+/// a dns resolver entry (matches tailscale's dnstype.resolver).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct DnsResolver {
+    /// resolver address (ip, ip:port, or https://... for doh).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub addr: String,
+}
+
+impl DnsResolver {
+    /// create a new dns resolver from an address string.
+    pub fn new(addr: impl Into<String>) -> Self {
+        Self { addr: addr.into() }
+    }
+}
+
 /// dns configuration for clients.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct DnsConfig {
-    /// nameservers to use.
-    #[serde(default)]
-    pub nameservers: Vec<String>,
+    /// dns resolvers to use, in order of preference.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub resolvers: Vec<DnsResolver>,
 
     /// search domains.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub domains: Vec<String>,
 
-    /// whether to use the routes for dns.
-    #[serde(default)]
-    pub routes: std::collections::HashMap<String, Vec<String>>,
+    /// split dns routes: maps dns name suffixes to resolvers.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub routes: std::collections::HashMap<String, Vec<DnsResolver>>,
 }
 
 /// derp map for relay servers.

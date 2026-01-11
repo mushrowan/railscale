@@ -334,7 +334,10 @@ async fn test_map_request_returns_dns_config() {
 
     // verify dns config
     let dns = response.dns_config.expect("Missing DNS config");
-    assert!(dns.nameservers.contains(&"100.100.100.100".to_string()));
+    assert!(
+        dns.resolvers.iter().any(|r| r.addr == "100.100.100.100"),
+        "Should have MagicDNS resolver"
+    );
     assert!(dns.domains.contains(&"railscale.net".to_string()));
     assert!(dns.routes.contains_key("railscale.net"));
 }

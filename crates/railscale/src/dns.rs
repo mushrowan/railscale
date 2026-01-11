@@ -1,9 +1,12 @@
 //! dns configuration generation for magicdns.
 
 use ipnet::IpNet;
-use railscale_proto::DnsConfig;
+use railscale_proto::{DnsConfig, DnsResolver};
 use railscale_types::Config;
 use std::collections::HashMap;
+
+/// the magicdns resolver address.
+const MAGIC_DNS_RESOLVER: &str = "100.100.100.100";
 
 /// generate dns configuration for a client.
 pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
@@ -11,8 +14,16 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
         return None;
     }
 
-    let mut nameservers = vec!["100.100.100.100".to_string()];
-    nameservers.extend(config.dns.nameservers.iter().map(|ip| ip.to_string()));
+    let magic_resolver = DnsResolver::new(MAGIC_DNS_RESOLVER);
+
+    let mut resolvers = vec![magic_resolver.clone()];
+    resolvers.extend(
+        config
+            .dns
+            .nameservers
+            .iter()
+            .map(|ip| DnsResolver::new(ip.to_string())),
+    );
 
     let mut domains = vec![config.base_domain.clone()];
     domains.extend(config.dns.search_domains.clone());
@@ -20,16 +31,13 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
     let mut routes = HashMap::new();
 
     // add base domain route
-    routes.insert(
-        config.base_domain.clone(),
-        vec!["100.100.100.100".to_string()],
-    );
+    routes.insert(config.base_domain.clone(), vec![magic_resolver.clone()]);
 
     // generate reverse dns routes for ipv4 prefix
     if let Some(prefix_v4) = config.prefix_v4 {
         let v4_routes = generate_ipv4_reverse_dns_routes(prefix_v4);
         for route in v4_routes {
-            routes.insert(route, vec!["100.100.100.100".to_string()]);
+            routes.insert(route, vec![magic_resolver.clone()]);
         }
     }
 
@@ -37,12 +45,12 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
     if let Some(prefix_v6) = config.prefix_v6 {
         let v6_routes = generate_ipv6_reverse_dns_routes(prefix_v6);
         for route in v6_routes {
-            routes.insert(route, vec!["100.100.100.100".to_string()]);
+            routes.insert(route, vec![magic_resolver.clone()]);
         }
     }
 
     Some(DnsConfig {
-        nameservers,
+        resolvers,
         domains,
         routes,
     })
