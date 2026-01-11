@@ -16,7 +16,8 @@ use crate::CapabilityVersion;
 /// clients send maprequests periodically (every 15-60 seconds) to:
 /// - report their current state (endpoints, hostinfo)
 /// - request the current network map (list of peers)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct MapRequest {
     /// client's capability version.
     pub version: CapabilityVersion,
@@ -25,21 +26,27 @@ pub struct MapRequest {
     pub node_key: NodeKey,
 
     /// client's disco key (for peer discovery).
+    #[serde(default)]
     pub disco_key: Option<Vec<u8>>,
 
     /// client's current endpoints.
+    #[serde(default)]
     pub endpoints: Vec<SocketAddr>,
 
     /// client's host information.
+    #[serde(default)]
     pub hostinfo: Option<HostInfo>,
 
     /// whether to omit peers in the response (for lightweight keepalives).
+    #[serde(default)]
     pub omit_peers: bool,
 
     /// whether this is a streaming request.
+    #[serde(rename = "Stream", default)]
     pub stream: bool,
 
     /// debug flags.
+    #[serde(default)]
     pub debug_flags: Vec<String>,
 }
 
@@ -53,7 +60,8 @@ impl MapRequest {
 /// a mapresponse sent to tailscale clients.
 ///
 /// contains the network map: list of peers, dns config, derp map, etc.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct MapResponse {
     /// whether to keep the connection alive for streaming updates.
     pub keep_alive: bool,
@@ -65,18 +73,23 @@ pub struct MapResponse {
     pub peers: Vec<MapResponseNode>,
 
     /// dns configuration.
+    #[serde(rename = "DNSConfig", default, skip_serializing_if = "Option::is_none")]
     pub dns_config: Option<DnsConfig>,
 
     /// derp map for relay servers.
+    #[serde(rename = "DERPMap", default, skip_serializing_if = "Option::is_none")]
     pub derp_map: Option<DerpMap>,
 
     /// packet filter rules (simplified for now).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub packet_filter: Vec<FilterRule>,
 
     /// user profiles for display.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_profiles: Vec<UserProfile>,
 
     /// control server time (for clock sync).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_time: Option<String>,
 }
 
@@ -97,12 +110,15 @@ impl MapResponse {
 }
 
 /// node information in a mapresponse.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct MapResponseNode {
     /// node id.
+    #[serde(rename = "ID")]
     pub id: u64,
 
     /// stable node id (string form).
+    #[serde(rename = "StableID")]
     pub stable_id: String,
 
     /// node's display name.
@@ -121,30 +137,38 @@ pub struct MapResponseNode {
     pub addresses: Vec<String>,
 
     /// allowed ips (addresses + routes).
+    #[serde(rename = "AllowedIPs")]
     pub allowed_ips: Vec<String>,
 
     /// network endpoints.
     pub endpoints: Vec<String>,
 
     /// preferred derp region.
+    #[serde(rename = "DERP")]
     pub derp: String,
 
     /// host information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hostinfo: Option<HostInfo>,
 
     /// whether the node is online.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub online: Option<bool>,
 
     /// tags on this node.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
 
     /// primary routes this node serves.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub primary_routes: Vec<String>,
 
     /// when the node key expires.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_expiry: Option<String>,
 
     /// whether the node is expired.
+    #[serde(default)]
     pub expired: bool,
 
     /// user id that owns this node.
@@ -152,15 +176,19 @@ pub struct MapResponseNode {
 }
 
 /// dns configuration for clients.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct DnsConfig {
     /// nameservers to use.
+    #[serde(default)]
     pub nameservers: Vec<String>,
 
     /// search domains.
+    #[serde(default)]
     pub domains: Vec<String>,
 
     /// whether to use the routes for dns.
+    #[serde(default)]
     pub routes: std::collections::HashMap<String, Vec<String>>,
 }
 
@@ -197,11 +225,11 @@ pub struct DerpNode {
     /// node name.
     pub name: String,
 
-    /// derp port (0 means 443)
+    /// region id.
     #[serde(rename = "RegionID")]
     pub region_id: i32,
 
-    /// whether the node can serve on port 80 (for captive portal checks)
+    /// hostname.
     pub host_name: String,
 
     /// ipv4 address.
@@ -230,9 +258,11 @@ pub struct DerpNode {
 }
 
 /// a packet filter rule (simplified).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct FilterRule {
     /// source cidrs.
+    #[serde(rename = "SrcIPs")]
     pub src_ips: Vec<String>,
 
     /// destination ports.
@@ -240,9 +270,11 @@ pub struct FilterRule {
 }
 
 /// a port range for filter rules.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct PortRange {
     /// ip (can be cidr).
+    #[serde(rename = "IP")]
     pub ip: String,
 
     /// port range.
@@ -250,9 +282,11 @@ pub struct PortRange {
 }
 
 /// user profile for display in clients.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
 pub struct UserProfile {
     /// user id.
+    #[serde(rename = "ID")]
     pub id: u64,
 
     /// login name / username.
@@ -262,5 +296,10 @@ pub struct UserProfile {
     pub display_name: String,
 
     /// profile picture url.
+    #[serde(
+        rename = "ProfilePicURL",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub profile_pic_url: Option<String>,
 }
