@@ -28,12 +28,18 @@ use crate::AppState;
 /// - dns configuration
 /// - derp relay information
 ///
-/// when `stream: true`, the connection stays open and updates are pushed
-/// when state changes (nodes added/removed/updated).
+/// note: We use `Bytes` instead of `Json<maprequest>` because the real
+/// tailscale client does not send a Content-Type header over ts2021/http/2
+///
+//parse json manually since tailscale client doesn't send Content-Type header
+/// tailscale client does not send a content-type header over ts2021/http/2.
 pub async fn map(
     State(state): State<AppState>,
-    Json(req): Json<MapRequest>,
+    body: Bytes,
 ) -> Result<impl IntoResponse, super::ApiError> {
+    // parse json manually since tailscale client doesn't send content-type header
+    let req: MapRequest =
+        serde_json::from_slice(&body).map_err(|e| super::ApiError::bad_request(e.to_string()))?;
     // validate the node exists
     let node = state
         .db
