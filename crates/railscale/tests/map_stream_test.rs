@@ -184,7 +184,7 @@ async fn test_streaming_map_request_returns_length_prefixed_response() {
 }
 
 #[tokio::test]
-async fn test_non_streaming_map_request_returns_plain_json() {
+async fn test_non_streaming_map_request_returns_length_prefixed() {
     let fixture = MapTestFixture::new().await;
     let map_request = fixture.map_request(false);
 
@@ -207,15 +207,19 @@ async fn test_non_streaming_map_request_returns_plain_json() {
         .await
         .unwrap();
 
-    // non-streaming should return plain json (no length prefix)
-    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+    // non-streaming should also use length-prefixed framing (client expects it)
+    let (map_response, remaining) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
 
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
     assert_eq!(response_node.id, fixture.node.id.0);
 
-    // keep_alive should be false for non-streaming
+    // no remaining bytes for single response
     assert!(!map_response.keep_alive);
+
+    // no remaining bytes for single response
+    assert!(remaining.is_empty());
 }
 
 #[tokio::test]

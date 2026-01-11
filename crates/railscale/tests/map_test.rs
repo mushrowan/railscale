@@ -4,12 +4,30 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use bytes::Buf;
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use railscale_proto::{MapRequest, MapResponse};
 use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
 use tower::ServiceExt;
 use zstd::stream::decode_all;
+
+/// helper to read a length-prefixed json message from a buffer.
+/// returns the parsed mapresponse and remaining bytes.
+fn read_length_prefixed_response(buf: &[u8]) -> Option<(MapResponse, &[u8])> {
+    if buf.len() < 4 {
+        return None;
+    }
+
+    let len = (&buf[..4]).get_u32_le() as usize;
+    if buf.len() < 4 + len {
+        return None;
+    }
+
+    let json_bytes = &buf[4..4 + len];
+    let response: MapResponse = serde_json::from_slice(json_bytes).ok()?;
+    Some((response, &buf[4 + len..]))
+}
 
 #[tokio::test]
 async fn test_map_request_returns_node() {
@@ -108,7 +126,9 @@ async fn test_map_request_returns_node() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+    let (map_response, remaining) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
+    assert!(remaining.is_empty());
 
     // should include the node's own information
     assert!(map_response.node.is_some());
@@ -248,7 +268,8 @@ async fn test_map_request_returns_peers() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+    let (map_response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
 
     // should include peers (node2)
     assert_eq!(map_response.peers.len(), 1);
@@ -330,7 +351,8 @@ async fn test_map_request_returns_dns_config() {
     let body = axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024)
         .await
         .unwrap();
-    let response: MapResponse = serde_json::from_slice(&body).unwrap();
+    let (response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
 
     // verify dns config
     let dns = response.dns_config.expect("Missing DNS config");
@@ -416,7 +438,8 @@ async fn test_map_request_returns_derp_map() {
     let body = axum::body::to_bytes(resp.into_body(), 10 * 1024 * 1024)
         .await
         .unwrap();
-    let response: MapResponse = serde_json::from_slice(&body).unwrap();
+    let (response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
 
     // verify derp map
     let derp = response.derp_map.expect("Missing DERP map");
@@ -577,7 +600,9 @@ async fn test_map_request_respects_user_grants() {
             let body = axum::body::to_bytes(response.into_body(), usize::MAX)
                 .await
                 .unwrap();
-            serde_json::from_slice::<MapResponse>(&body).unwrap()
+            let (map_response, _) = read_length_prefixed_response(&body)
+                .expect("failed to parse length-prefixed response");
+            map_response
         }
     };
 
@@ -682,15 +707,20 @@ async fn test_map_request_with_zstd_compression() {
         .await
         .unwrap();
 
-    // verify response is zstd compressed
+    // verify response is zstd compressed and length-prefixed
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
 
-    // body should be zstd compressed - decompress it
-    let cursor = std::io::Cursor::new(&body[..]);
+    // body should be length-prefixed with zstd payload
+    assert!(body.len() >= 4, "Response should have length prefix");
+    let len = (&body[..4]).get_u32_le() as usize;
+    assert!(body.len() >= 4 + len, "Response should have full payload");
+
+    // extract and decompress zstd payload
+    let cursor = std::io::Cursor::new(&body[4..4 + len]);
     let decompressed = decode_all(cursor).expect("Should be valid zstd data");
 
     // parse the decompressed json
@@ -802,7 +832,8 @@ async fn test_map_request_updates_disco_key() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+    let (map_response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
 
     // should include the node's own information with the disco_key from the request
     assert!(map_response.node.is_some());
@@ -917,7 +948,8 @@ async fn test_map_response_addresses_are_cidr() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+    let (map_response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
 
     // verify addresses are in cidr notation
     let response_node = map_response.node.expect("should have node");

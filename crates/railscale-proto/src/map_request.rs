@@ -7,6 +7,11 @@ use std::net::SocketAddr;
 
 use serde::{Deserialize, Serialize};
 
+/// helper to skip serializing zero values.
+fn is_zero(n: &i32) -> bool {
+    *n == 0
+}
+
 use railscale_types::{DiscoKey, HostInfo, MachineKey, NodeKey};
 
 use crate::CapabilityVersion;
@@ -146,12 +151,17 @@ pub struct MapResponseNode {
     #[serde(rename = "AllowedIPs")]
     pub allowed_ips: Vec<String>,
 
-    /// network endpoints.
+    /// preferred derp region (legacy string format "127.3.3.40:N")
     pub endpoints: Vec<String>,
 
-    /// preferred derp region.
-    #[serde(rename = "DERP")]
+    /// home derp region id (modern integer format)
+    /// deprecated: use home_derp instead.
+    #[serde(rename = "DERP", default, skip_serializing_if = "String::is_empty")]
     pub derp: String,
+
+    /// home derp region id (modern integer format).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub home_derp: i32,
 
     /// host information.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,7 +297,7 @@ pub struct FilterRule {
     #[serde(rename = "SrcIPs")]
     pub src_ips: Vec<String>,
 
-    /// first port in range
+    /// destination ports.
     pub dst_ports: Vec<NetPortRange>,
 }
 
@@ -302,7 +312,7 @@ pub struct PortRange {
 }
 
 impl PortRange {
-    /// create a port range for all ports
+    /// create a port range for a single port.
     pub fn single(port: u16) -> Self {
         Self {
             first: port,

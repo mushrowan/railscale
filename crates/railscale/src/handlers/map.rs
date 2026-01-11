@@ -75,51 +75,21 @@ pub async fn map(
     let compression = Compression::from(req.compress.as_ref());
 
     if req.stream {
-        // streaming mode: keep connection open and push updates
+        // non-streaming mode: return single length-prefixed response
         Ok(streaming_response(state, node.node_key, compression).into_response())
     } else {
-        // non-streaming mode: return single response
+        // non-streaming mode: return single length-prefixed response
         let mut response = build_map_response(&state, &req.node_key).await?;
         response.keep_alive = false;
-        Ok(encode_response(&response, &compression).into_response())
-    }
-}
-
-/// encode a mapresponse with optional compression.
-fn encode_response(response: &MapResponse, compression: &Compression) -> Response {
-    let json_bytes = match serde_json::to_vec(response) {
-        Ok(b) => b,
-        Err(_) => {
-            return Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::empty())
-                .expect("valid status");
-        }
-    };
-
-    match compression {
-        Compression::Zstd => {
-            match compress_zstd(&json_bytes) {
-                Ok(compressed) => Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, "application/octet-stream")
-                    .body(Body::from(compressed))
-                    .expect("valid status and headers"),
-                Err(_) => {
-                    // fall back to uncompressed on compression error
-                    Response::builder()
-                        .status(StatusCode::OK)
-                        .header(header::CONTENT_TYPE, "application/json")
-                        .body(Body::from(json_bytes))
-                        .expect("valid status and headers")
-                }
-            }
-        }
-        Compression::None => Response::builder()
+        // use length-prefixed framing - client expects 4-byte le size prefix
+        let bytes = encode_length_prefixed(&response, &compression)
+            .ok_or_else(|| super::ApiError::internal("failed to encode response"))?;
+        Ok(Response::builder()
             .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from(json_bytes))
-            .expect("valid status and headers"),
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .body(Body::from(bytes))
+            .expect("valid status and headers")
+            .into_response())
     }
 }
 
@@ -293,19 +263,14 @@ async fn build_map_response(
 
     // generate derp map
     let derp_map = crate::derp::generate_derp_map(&state.config);
-    let preferred_derp = derp_map
-        .regions
-        .keys()
-        .next()
-        .map(|id| id.to_string())
-        .unwrap_or_default();
+    let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1); // Default to region 1 if none configured
 
     Ok(MapResponse {
         keep_alive: true,
-        node: Some(node_to_map_response_node(&node, &preferred_derp)),
+        node: Some(node_to_map_response_node(&node, home_derp)),
         peers: visible_peers
             .iter()
-            .map(|n| node_to_map_response_node(n, &preferred_derp))
+            .map(|n| node_to_map_response_node(n, home_derp))
             .collect(),
         dns_config,
         derp_map: Some(derp_map),
@@ -344,7 +309,7 @@ fn ip_to_cidr(ip: std::net::IpAddr) -> String {
 }
 
 /// convert a node to mapresponsenode.
-fn node_to_map_response_node(node: &Node, preferred_derp: &str) -> MapResponseNode {
+fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
     // addresses must be in cidr notation for tailscale client
     let mut addresses = Vec::new();
     if let Some(ip) = node.ipv4 {
@@ -371,7 +336,8 @@ fn node_to_map_response_node(node: &Node, preferred_derp: &str) -> MapResponseNo
         addresses,
         allowed_ips,
         endpoints: node.endpoints.iter().map(|e| e.to_string()).collect(),
-        derp: preferred_derp.to_string(),
+        derp: String::new(), // Deprecated - use home_derp instead
+        home_derp,
         hostinfo: node.hostinfo.clone(),
         online: node.is_online,
         tags: node.tags.clone(),
