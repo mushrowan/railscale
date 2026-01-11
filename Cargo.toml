@@ -64,3 +64,6 @@ railscale-db = { path = "crates/railscale-db" }
 railscale-state = { path = "crates/railscale-state" }
 railscale-proto = { path = "crates/railscale-proto" }
 railscale-grants = { path = "crates/railscale-grants" }
+
+[patch.crates-io]
+snow = { path = "vendor/snow" }

@@ -1,14 +1,14 @@
 //! noisestream - asyncread/asyncwrite adapter for noise-encrypted websocket.
 //!
 //! this module provides a stream adapter that bridges websocket binary messages
-//! ## Frame Size Limits
+//! with Noise encryption, presenting an AsyncRead + AsyncWrite interface suitable
 //! for running HTTP/2 over the encrypted channel.
-//!tailscale's Noise transport has strict frame size limits:
+//!
+//! ## Frame Size Limits
+//!
+//! tailscale's noise transport has strict frame size limits:
 //! - Max plaintext per frame: 4077 bytes
-//!- Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
-//! - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
-//! - Max plaintext per frame: 4077 bytes
-//! large writes are automatically chunked into multiple frames to respect these limits
+//! - Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
 //! - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
 //!
 //! large writes are automatically chunked into multiple frames to respect these limits.
@@ -148,7 +148,7 @@ where
                 Poll::Pending
             }
             Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                Poll::Ready(Err(io::Error::other(e.to_string())))
             }
             Poll::Ready(None) => {
                 // stream ended
@@ -199,12 +199,12 @@ where
                         {
                             Ok(()) => Poll::Ready(Ok(to_write)),
                             Err(e) => {
-                                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                                Poll::Ready(Err(io::Error::other(e.to_string())))
                             }
                         }
                     }
                     Poll::Ready(Err(e)) => {
-                        Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                        Poll::Ready(Err(io::Error::other(e.to_string())))
                     }
                     Poll::Pending => Poll::Pending,
                 }
@@ -230,7 +230,7 @@ where
         match Pin::new(&mut guard.writer).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                Poll::Ready(Err(io::Error::other(e.to_string())))
             }
             Poll::Pending => Poll::Pending,
         }
@@ -250,7 +250,7 @@ where
         match Pin::new(&mut guard.writer).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                Poll::Ready(Err(io::Error::other(e.to_string())))
             }
             Poll::Pending => Poll::Pending,
         }
@@ -266,7 +266,7 @@ mod tests {
 
     const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
-    /// a simple in-memory sink that captures messages for testing
+    /// tailscale's maximum ciphertext size per frame (4077 plaintext + 16 tag)
     const MAX_CIPHERTEXT_SIZE: usize = 4093;
 
     /// a simple in-memory sink that captures messages for testing.
@@ -372,7 +372,7 @@ mod tests {
         stream.write_all(&large_data).await.unwrap();
         stream.flush().await.unwrap();
 
-        // with current (broken) implementation: 1 frame with size > MAX_CIPHERTEXT_SIZE
+        // check what was captured
         let messages = captured.lock().unwrap();
 
         // with current (broken) implementation: 1 frame with size > max_ciphertext_size

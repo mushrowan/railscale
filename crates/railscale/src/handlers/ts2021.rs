@@ -364,7 +364,7 @@ async fn handle_ts2021_http_connection(
         .into());
     }
 
-    // log the noise payload for debugging
+    // extract the noise payload
     let noise_payload = &init_message[5..];
 
     // log the noise payload for debugging
@@ -888,7 +888,7 @@ where
                 Poll::Pending
             }
             Poll::Ready(Some(Err(e))) => {
-                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                Poll::Ready(Err(io::Error::other(e.to_string())))
             }
             Poll::Ready(None) => Poll::Ready(Ok(())),
             Poll::Pending => Poll::Pending,
@@ -917,11 +917,11 @@ where
                     match Pin::new(&mut self.writer).start_send(Message::Binary(ciphertext.into()))
                     {
                         Ok(()) => Poll::Ready(Ok(to_write)),
-                        Err(e) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
+                        Err(e) => Poll::Ready(Err(io::Error::other(e.to_string()))),
                     }
                 }
                 Poll::Ready(Err(e)) => {
-                    Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                    Poll::Ready(Err(io::Error::other(e.to_string())))
                 }
                 Poll::Pending => Poll::Pending,
             },
@@ -936,7 +936,7 @@ where
         match Pin::new(&mut self.writer).poll_flush(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                Poll::Ready(Err(io::Error::other(e.to_string())))
             }
             Poll::Pending => Poll::Pending,
         }
@@ -946,7 +946,7 @@ where
         match Pin::new(&mut self.writer).poll_close(cx) {
             Poll::Ready(Ok(())) => Poll::Ready(Ok(())),
             Poll::Ready(Err(e)) => {
-                Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string())))
+                Poll::Ready(Err(io::Error::other(e.to_string())))
             }
             Poll::Pending => Poll::Pending,
         }
