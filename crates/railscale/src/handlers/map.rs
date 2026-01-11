@@ -57,12 +57,20 @@ pub async fn map(
     let req: MapRequest =
         serde_json::from_slice(&body).map_err(|e| super::ApiError::bad_request(e.to_string()))?;
     // validate the node exists
-    let node = state
+    let mut node = state
         .db
         .get_node_by_node_key(&req.node_key)
         .await
         .map_internal()?
         .or_unauthorized("node not found")?;
+
+    // update node with disco_key from request if provided
+    if let Some(ref disco_key) = req.disco_key {
+        if node.disco_key.as_bytes() != disco_key.as_bytes() {
+            node.disco_key = disco_key.clone();
+            state.db.update_node(&node).await.map_internal()?;
+        }
+    }
 
     let compression = Compression::from(req.compress.as_ref());
 

@@ -695,3 +695,120 @@ async fn test_map_request_with_zstd_compression() {
     let response_node = map_response.node.unwrap();
     assert_eq!(response_node.node_key, node_key);
 }
+
+#[tokio::test]
+async fn test_map_request_updates_disco_key() {
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create a user
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    // create a node with empty disco_key (simulating registration)
+    let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
+    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+
+    let now = chrono::Utc::now();
+    let node = Node {
+        id: NodeId(0),
+        machine_key: machine_key.clone(),
+        node_key: node_key.clone(),
+        disco_key: DiscoKey::default(), // empty disco key!
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "test-node".to_string(),
+        given_name: "test-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+
+    db.create_node(&node).await.unwrap();
+
+    // build maprequest with disco_key
+    let client_disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+
+    // build maprequest with disco_key
+    let map_request = MapRequest {
+        version: railscale_proto::CapabilityVersion(100),
+        node_key: node_key.clone(),
+        disco_key: Some(client_disco_key.clone()),
+        endpoints: vec![],
+        hostinfo: None,
+        omit_peers: false,
+        stream: false,
+        debug_flags: vec![],
+        compress: None,
+    };
+
+    // create grants engine with wildcard policy (allow all)
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
+    // create app with default config
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(
+        db.clone(),
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    // send request
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // verify response
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let map_response: MapResponse = serde_json::from_slice(&body).unwrap();
+
+    // should include the node's own information with the disco_key from the request
+    assert!(map_response.node.is_some());
+    let response_node = map_response.node.unwrap();
+    assert_eq!(
+        response_node.disco_key, client_disco_key,
+        "MapResponse should contain the disco_key sent by client"
+    );
+
+    // also verify it was persisted to the database
+    let updated_node = db.get_node_by_node_key(&node_key).await.unwrap().unwrap();
+    assert_eq!(
+        updated_node.disco_key, client_disco_key,
+        "Node in database should have the disco_key updated"
+    );
+}
