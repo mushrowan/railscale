@@ -287,20 +287,48 @@ pub struct FilterRule {
     #[serde(rename = "SrcIPs")]
     pub src_ips: Vec<String>,
 
-    /// destination ports.
-    pub dst_ports: Vec<PortRange>,
+    /// first port in range
+    pub dst_ports: Vec<NetPortRange>,
 }
 
-/// a port range for filter rules.
+/// a port range (matches tailscale's tailcfg.portrange).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct PortRange {
-    /// ip (can be cidr).
+    /// first port in range.
+    pub first: u16,
+    /// last port in range (inclusive).
+    pub last: u16,
+}
+
+impl PortRange {
+    /// create a port range for all ports
+    pub fn single(port: u16) -> Self {
+        Self {
+            first: port,
+            last: port,
+        }
+    }
+
+    /// create a port range for all ports.
+    pub fn any() -> Self {
+        Self {
+            first: 0,
+            last: 65535,
+        }
+    }
+}
+
+/// a network port range for filter rules (matches tailscale's tailcfg.netportrange).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct NetPortRange {
+    /// ip (can be cidr, range, or "*").
     #[serde(rename = "IP")]
     pub ip: String,
 
     /// port range.
-    pub ports: (u16, u16),
+    pub ports: PortRange,
 }
 
 /// user profile for display in clients.

@@ -13,7 +13,7 @@ mod noise;
 pub use error::Error;
 pub use map_request::{
     DerpMap, DerpNode, DerpRegion, DnsConfig, DnsResolver, FilterRule, MapRequest, MapResponse,
-    MapResponseNode, PortRange, UserProfile,
+    MapResponseNode, NetPortRange, PortRange, UserProfile,
 };
 pub use noise::{NoiseHandshake, NoiseTransport, generate_keypair};
 pub use snow::Keypair;

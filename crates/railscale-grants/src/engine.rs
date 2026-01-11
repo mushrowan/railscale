@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use railscale_proto::{FilterRule, PortRange};
+use railscale_proto::{FilterRule, NetPortRange, PortRange};
 use railscale_types::{Node, UserId};
 
 use crate::capability::NetworkCapability;
@@ -144,7 +144,7 @@ impl GrantsEngine {
         &self,
         caps: &[NetworkCapability],
         dst_ips: &[std::net::IpAddr],
-    ) -> Vec<PortRange> {
+    ) -> Vec<NetPortRange> {
         let mut port_ranges = Vec::new();
 
         for dst_ip in dst_ips {
@@ -152,28 +152,31 @@ impl GrantsEngine {
                 match cap {
                     NetworkCapability::Wildcard => {
                         // all ports on all protocols (simplify to common protocols)
-                        port_ranges.push(PortRange {
+                        port_ranges.push(NetPortRange {
                             ip: dst_ip.to_string(),
-                            ports: (0, 65535),
+                            ports: PortRange::any(),
                         });
                     }
                     NetworkCapability::Port(port) => {
-                        port_ranges.push(PortRange {
+                        port_ranges.push(NetPortRange {
                             ip: dst_ip.to_string(),
-                            ports: (*port, *port),
+                            ports: PortRange::single(*port),
                         });
                     }
                     NetworkCapability::PortRange { start, end } => {
-                        port_ranges.push(PortRange {
+                        port_ranges.push(NetPortRange {
                             ip: dst_ip.to_string(),
-                            ports: (*start, *end),
+                            ports: PortRange {
+                                first: *start,
+                                last: *end,
+                            },
                         });
                     }
                     NetworkCapability::ProtocolPort { protocol: _, port } => {
                         // for now, ignore protocol distinction in filter rules
-                        port_ranges.push(PortRange {
+                        port_ranges.push(NetPortRange {
                             ip: dst_ip.to_string(),
-                            ports: (*port, *port),
+                            ports: PortRange::single(*port),
                         });
                     }
                     NetworkCapability::ProtocolPortRange {
@@ -181,16 +184,19 @@ impl GrantsEngine {
                         start,
                         end,
                     } => {
-                        port_ranges.push(PortRange {
+                        port_ranges.push(NetPortRange {
                             ip: dst_ip.to_string(),
-                            ports: (*start, *end),
+                            ports: PortRange {
+                                first: *start,
+                                last: *end,
+                            },
                         });
                     }
                     NetworkCapability::ProtocolWildcard { protocol: _ } => {
                         // all ports for this protocol
-                        port_ranges.push(PortRange {
+                        port_ranges.push(NetPortRange {
                             ip: dst_ip.to_string(),
-                            ports: (0, 65535),
+                            ports: PortRange::any(),
                         });
                     }
                 }
