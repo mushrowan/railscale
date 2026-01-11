@@ -113,6 +113,7 @@ impl MapTestFixture {
             omit_peers: false,
             stream,
             debug_flags: vec![],
+            compress: None,
         }
     }
 }

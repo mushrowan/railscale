@@ -48,6 +48,10 @@ pub struct MapRequest {
     /// debug flags.
     #[serde(default)]
     pub debug_flags: Vec<String>,
+
+    /// compression format for response ("zstd" or empty for no compression).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compress: Option<String>,
 }
 
 impl MapRequest {
@@ -121,10 +125,10 @@ pub struct MapResponseNode {
     #[serde(rename = "StableID")]
     pub stable_id: String,
 
-    /// node key (serialized as prefixed hex, e.g., "nodekey:...")
+    /// node's display name.
     pub name: String,
 
-    /// machine key (serialized as prefixed hex, e.g., "mkey:...")
+    /// node key (serialized as prefixed hex, e.g., "nodekey:...").
     #[serde(rename = "Key")]
     pub node_key: NodeKey,
 

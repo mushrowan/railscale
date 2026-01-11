@@ -54,6 +54,9 @@ snow = "0.10"
 tower = "0.5"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 
+# Compression
+zstd = "0.13"
+
 [dev-dependencies]
 tower = "0.5"
 hyper = "1.8"
@@ -71,3 +74,4 @@ hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 http = "1"
 # Crypto crates for Noise handshake testing
 snow = "0.10"
+zstd = "0.13"

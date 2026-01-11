@@ -1,10 +1,10 @@
 //! handler for /machine/map endpoint.
 
 use std::convert::Infallible;
+use std::io::Write;
 use std::time::Duration;
 
 use axum::{
-    Json,
     body::Body,
     extract::State,
     http::{StatusCode, header},
@@ -19,6 +19,22 @@ use tokio::sync::broadcast;
 
 use super::{OptionExt, ResultExt};
 use crate::AppState;
+
+/// compression type requested by client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Compression {
+    None,
+    Zstd,
+}
+
+impl From<Option<&String>> for Compression {
+    fn from(s: Option<&String>) -> Self {
+        match s.map(String::as_str) {
+            Some("zstd") => Compression::Zstd,
+            _ => Compression::None,
+        }
+    }
+}
 
 /// handle map requests from tailscale clients.
 ///
@@ -48,15 +64,62 @@ pub async fn map(
         .map_internal()?
         .or_unauthorized("node not found")?;
 
+    let compression = Compression::from(req.compress.as_ref());
+
     if req.stream {
         // streaming mode: keep connection open and push updates
-        Ok(streaming_response(state, node.node_key).into_response())
+        Ok(streaming_response(state, node.node_key, compression).into_response())
     } else {
-        // non-streaming mode: return single json response
+        // non-streaming mode: return single response
         let mut response = build_map_response(&state, &req.node_key).await?;
         response.keep_alive = false;
-        Ok(Json(response).into_response())
+        Ok(encode_response(&response, &compression).into_response())
     }
+}
+
+/// encode a mapresponse with optional compression.
+fn encode_response(response: &MapResponse, compression: &Compression) -> Response {
+    let json_bytes = match serde_json::to_vec(response) {
+        Ok(b) => b,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::empty())
+                .expect("valid status");
+        }
+    };
+
+    match compression {
+        Compression::Zstd => {
+            match compress_zstd(&json_bytes) {
+                Ok(compressed) => Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, "application/octet-stream")
+                    .body(Body::from(compressed))
+                    .expect("valid status and headers"),
+                Err(_) => {
+                    // fall back to uncompressed on compression error
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(json_bytes))
+                        .expect("valid status and headers")
+                }
+            }
+        }
+        Compression::None => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(json_bytes))
+            .expect("valid status and headers"),
+    }
+}
+
+/// compress data using zstd.
+fn compress_zstd(data: &[u8]) -> std::io::Result<Vec<u8>> {
+    let mut encoder = zstd::stream::Encoder::new(Vec::new(), 1)?; // Level 1 for fastest compression
+    encoder.write_all(data)?;
+    encoder.finish()
 }
 
 /// what type of message to send next in the streaming response.
@@ -70,7 +133,7 @@ enum StreamMessage {
 }
 
 /// build a streaming response that pushes updates when state changes.
-fn streaming_response(state: AppState, node_key: NodeKey) -> Response {
+fn streaming_response(state: AppState, node_key: NodeKey, compression: Compression) -> Response {
     // subscribe to state changes before building initial response
     let receiver = state.notifier.subscribe();
 
@@ -84,8 +147,15 @@ fn streaming_response(state: AppState, node_key: NodeKey) -> Response {
 
     // create a stream that yields length-prefixed responses
     let stream = stream::unfold(
-        (state, node_key, receiver, true, keepalive_interval),
-        |(state, node_key, mut receiver, is_first, keepalive_interval)| async move {
+        (
+            state,
+            node_key,
+            receiver,
+            true,
+            keepalive_interval,
+            compression,
+        ),
+        |(state, node_key, mut receiver, is_first, keepalive_interval, compression)| async move {
             // determine what message to send
             let message_type = if is_first {
                 StreamMessage::FullUpdate
@@ -99,18 +169,32 @@ fn streaming_response(state: AppState, node_key: NodeKey) -> Response {
                         Ok(r) => r,
                         Err(_) => return None,
                     };
-                    let bytes = encode_length_prefixed(&response)?;
+                    let bytes = encode_length_prefixed(&response, &compression)?;
                     Some((
                         bytes,
-                        (state, node_key, receiver, false, keepalive_interval),
+                        (
+                            state,
+                            node_key,
+                            receiver,
+                            false,
+                            keepalive_interval,
+                            compression,
+                        ),
                     ))
                 }
                 StreamMessage::KeepAlive => {
                     let response = MapResponse::keepalive();
-                    let bytes = encode_length_prefixed(&response)?;
+                    let bytes = encode_length_prefixed(&response, &compression)?;
                     Some((
                         bytes,
-                        (state, node_key, receiver, false, keepalive_interval),
+                        (
+                            state,
+                            node_key,
+                            receiver,
+                            false,
+                            keepalive_interval,
+                            compression,
+                        ),
                     ))
                 }
                 StreamMessage::End => None,
@@ -224,13 +308,20 @@ async fn build_map_response(
 }
 
 /// encode a mapresponse with a 4-byte little-endian length prefix.
-fn encode_length_prefixed(response: &MapResponse) -> Option<Bytes> {
+/// if compression is zstd, the json payload is zstd-compressed before framing.
+fn encode_length_prefixed(response: &MapResponse, compression: &Compression) -> Option<Bytes> {
     let json_bytes = serde_json::to_vec(response).ok()?;
-    let len = u32::try_from(json_bytes.len()).unwrap_or(u32::MAX);
 
-    let mut body = Vec::with_capacity(4 + json_bytes.len());
+    let payload = match compression {
+        Compression::Zstd => compress_zstd(&json_bytes).ok()?,
+        Compression::None => json_bytes,
+    };
+
+    let len = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+
+    let mut body = Vec::with_capacity(4 + payload.len());
     body.extend_from_slice(&len.to_le_bytes());
-    body.extend_from_slice(&json_bytes);
+    body.extend_from_slice(&payload);
 
     Some(Bytes::from(body))
 }

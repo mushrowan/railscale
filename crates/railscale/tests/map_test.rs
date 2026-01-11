@@ -9,6 +9,7 @@ use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector}
 use railscale_proto::{MapRequest, MapResponse};
 use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
 use tower::ServiceExt;
+use zstd::stream::decode_all;
 
 #[tokio::test]
 async fn test_map_request_returns_node() {
@@ -61,6 +62,7 @@ async fn test_map_request_returns_node() {
         omit_peers: false,
         stream: false,
         debug_flags: vec![],
+        compress: None,
     };
 
     // create grants engine with wildcard policy (allow all)
@@ -196,6 +198,7 @@ async fn test_map_request_returns_peers() {
         omit_peers: false,
         stream: false,
         debug_flags: vec![],
+        compress: None,
     };
 
     // create grants engine with wildcard policy (allow all)
@@ -307,6 +310,7 @@ async fn test_map_request_returns_dns_config() {
         omit_peers: false,
         stream: false,
         debug_flags: vec![],
+        compress: None,
     };
 
     let response = Request::builder()
@@ -389,6 +393,7 @@ async fn test_map_request_returns_derp_map() {
         omit_peers: false,
         stream: false,
         debug_flags: vec![],
+        compress: None,
     };
 
     let response = Request::builder()
@@ -547,6 +552,7 @@ async fn test_map_request_respects_user_grants() {
                 omit_peers: false,
                 stream: false,
                 debug_flags: vec![],
+                compress: None,
             };
 
             let response = app
@@ -576,4 +582,116 @@ async fn test_map_request_respects_user_grants() {
     // bob should not see anyone (directional grant)
     let bob_map = request_map(bob_node.node_key).await;
     assert_eq!(bob_map.peers.len(), 0);
+}
+
+#[tokio::test]
+async fn test_map_request_with_zstd_compression() {
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create a user
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    // create a node
+    let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
+    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+
+    let now = chrono::Utc::now();
+    let node = Node {
+        id: NodeId(0),
+        machine_key: machine_key.clone(),
+        node_key: node_key.clone(),
+        disco_key: disco_key.clone(),
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "test-node".to_string(),
+        given_name: "test-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+
+    db.create_node(&node).await.unwrap();
+
+    // build maprequest with zstd compression
+    let map_request = MapRequest {
+        version: railscale_proto::CapabilityVersion(100),
+        node_key: node_key.clone(),
+        disco_key: Some(disco_key.clone()),
+        endpoints: vec![],
+        hostinfo: None,
+        omit_peers: false,
+        stream: false,
+        debug_flags: vec![],
+        compress: Some("zstd".to_string()),
+    };
+
+    // create grants engine with wildcard policy (allow all)
+    let mut policy = Policy::empty();
+    policy.grants.push(Grant {
+        src: vec![Selector::Wildcard],
+        dst: vec![Selector::Wildcard],
+        ip: vec![NetworkCapability::Wildcard],
+        app: vec![],
+        src_posture: vec![],
+        via: vec![],
+    });
+    let grants = GrantsEngine::new(policy);
+
+    // create app with default config
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(
+        db,
+        grants,
+        config,
+        None,
+        railscale::StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    // send request
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // verify response is zstd compressed
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    // body should be zstd compressed - decompress it
+    let cursor = std::io::Cursor::new(&body[..]);
+    let decompressed = decode_all(cursor).expect("Should be valid zstd data");
+
+    // parse the decompressed json
+    let map_response: MapResponse =
+        serde_json::from_slice(&decompressed).expect("Should be valid JSON after decompression");
+
+    // verify response contents
+    assert!(map_response.node.is_some());
+    let response_node = map_response.node.unwrap();
+    assert_eq!(response_node.node_key, node_key);
 }
