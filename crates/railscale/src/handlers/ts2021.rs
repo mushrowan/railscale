@@ -16,8 +16,17 @@
 //! ```text
 //! post /ts2021
 //! upgrade: tailscale-control-protocol
-//! x-tailscale-handshake: <base64>
+//! ## Frame Size Limits
 //! ```
+//!tailscale's Noise transport has strict frame size limits:
+//! - Max plaintext per frame: 4077 bytes
+//!- Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
+//! - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
+//! - Max plaintext per frame: 4077 bytes
+//! large writes are automatically chunked into multiple frames
+//! - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
+//!
+//! large writes are automatically chunked into multiple frames.
 
 use axum::{
     Router,
@@ -46,6 +55,9 @@ use crate::AppState;
 /// ts2021 message types.
 const MSG_TYPE_INITIATION: u8 = 0x01;
 const MSG_TYPE_RESPONSE: u8 = 0x02;
+
+/// maximum plaintext bytes per noise frame (from tailscale's control/controlbase/conn.go).
+const MAX_PLAINTEXT_SIZE: usize = 4077;
 
 /// query parameters for the /ts2021 endpoint.
 #[derive(Debug, Default, Deserialize)]
@@ -543,8 +555,12 @@ impl AsyncWrite for HttpNoiseStream {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        // encrypt the data
-        let ciphertext = match self.transport.encrypt(buf) {
+        // chunk large writes to respect tailscale's frame size limits
+        let to_write = std::cmp::min(buf.len(), MAX_PLAINTEXT_SIZE);
+        let chunk = &buf[..to_write];
+
+        // encrypt the chunk
+        let ciphertext = match self.transport.encrypt(chunk) {
             Ok(ct) => ct,
             Err(e) => {
                 return Poll::Ready(Err(io::Error::new(
@@ -562,7 +578,7 @@ impl AsyncWrite for HttpNoiseStream {
 
         // write to the underlying stream
         match Pin::new(&mut self.io).poll_write(cx, &msg) {
-            Poll::Ready(Ok(_)) => Poll::Ready(Ok(buf.len())),
+            Poll::Ready(Ok(_)) => Poll::Ready(Ok(to_write)),
             Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
             Poll::Pending => Poll::Pending,
         }
@@ -666,13 +682,17 @@ where
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        // encrypt the data
-        match self.transport.encrypt(buf) {
+        // chunk large writes to respect tailscale's frame size limits
+        let to_write = std::cmp::min(buf.len(), MAX_PLAINTEXT_SIZE);
+        let chunk = &buf[..to_write];
+
+        // encrypt the chunk
+        match self.transport.encrypt(chunk) {
             Ok(ciphertext) => match Pin::new(&mut self.writer).poll_ready(cx) {
                 Poll::Ready(Ok(())) => {
                     match Pin::new(&mut self.writer).start_send(Message::Binary(ciphertext.into()))
                     {
-                        Ok(()) => Poll::Ready(Ok(buf.len())),
+                        Ok(()) => Poll::Ready(Ok(to_write)),
                         Err(e) => Poll::Ready(Err(io::Error::new(ErrorKind::Other, e.to_string()))),
                     }
                 }

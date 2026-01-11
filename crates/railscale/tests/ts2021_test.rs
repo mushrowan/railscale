@@ -645,19 +645,19 @@ async fn test_ts2021_machine_key_from_noise_context() {
     server_handle.abort();
 }
 
-/// of WebSocket. This test verifies that path works
+/// test that the /ts2021 endpoint supports http upgrade (not just websocket).
+///
+/// the real tailscale client uses `upgrade: tailscale-control-protocol` instead
+/// of WebSocket. This test verifies that path works.
 ///
 /// protocol:
 /// ```text
-///pOST /ts2021 http/1.1
+/// post /ts2021 HTTP/1.1
 /// upgrade: tailscale-control-protocol
 /// connection: upgrade
 /// x-tailscale-handshake: <base64 noise init>
-/// upgrade: tailscale-control-protocol
+///
 /// response: 101 switching protocols
-/// upgrade: tailscale-control-protocol
-///connection: upgrade
-/// ```
 /// upgrade: tailscale-control-protocol
 /// connection: upgrade
 /// ```
@@ -718,7 +718,7 @@ async fn test_ts2021_http_upgrade_protocol() {
             .ok();
     });
 
-    // build client initiator
+    // create the tailscale prologue
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
     // build client initiator
@@ -833,6 +833,200 @@ async fn test_ts2021_http_upgrade_protocol() {
     assert!(
         client_handshake.is_handshake_finished(),
         "handshake should be complete"
+    );
+
+    server_handle.abort();
+}
+
+/// - Max plaintext per frame: 4077 bytes
+///- Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
+/// - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
+/// - Max plaintext per frame: 4077 bytes
+/// this test verifies frame chunking works correctly via http/2 over Noise
+/// - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
+///
+/// this test verifies frame chunking works correctly via http/2 over noise.
+#[tokio::test]
+async fn test_noise_transport_chunks_large_writes() {
+    use futures_util::StreamExt;
+    use hyper::Request;
+    use snow::Builder;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+
+    const PROTOCOL_VERSION: u16 = 1;
+    const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
+    const MAX_CIPHERTEXT_SIZE: usize = 4093; // plaintext (4077) + 16 byte tag
+
+    // create server keypair
+    let server_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate server keypair");
+
+    // create client keypair
+    let client_keypair =
+        railscale_proto::generate_keypair().expect("failed to generate client keypair");
+
+    // create app
+    let db = RailscaleDb::new_in_memory()
+        .await
+        .expect("failed to create in-memory database");
+    let grants = GrantsEngine::new(Policy::empty());
+    let config = Config::default();
+    let notifier = StateNotifier::new();
+
+    let keypair = railscale::Keypair {
+        private: server_keypair.private.clone(),
+        public: server_keypair.public.clone(),
+    };
+
+    let app = railscale::create_app(db, grants, config, None, notifier, Some(keypair)).await;
+
+    // bind to a random port
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("failed to bind");
+    let addr = listener.local_addr().expect("failed to get local addr");
+
+    // spawn the server
+    let server_handle = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("failed to accept");
+        let io = hyper_util::rt::TokioIo::new(stream);
+        hyper_util::server::conn::auto::Builder::new(hyper_util::rt::TokioExecutor::new())
+            .serve_connection_with_upgrades(
+                io,
+                hyper::service::service_fn(move |req| {
+                    let app = app.clone();
+                    async move {
+                        use tower::ServiceExt;
+                        app.oneshot(req).await
+                    }
+                }),
+            )
+            .await
+            .ok();
+    });
+
+    // build client initiator
+    let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
+
+    // build client initiator
+    let params: snow::params::NoiseParams = NOISE_PATTERN.parse().expect("valid pattern");
+    let mut client_handshake = Builder::new(params)
+        .local_private_key(&client_keypair.private)
+        .expect("valid key")
+        .remote_public_key(&server_keypair.public)
+        .expect("valid key")
+        .prologue(prologue.as_bytes())
+        .expect("valid prologue")
+        .build_initiator()
+        .expect("build initiator");
+
+    // generate the first message
+    let mut noise_payload = vec![0u8; 65535];
+    let len = client_handshake
+        .write_message(&[], &mut noise_payload)
+        .expect("write message");
+    noise_payload.truncate(len);
+
+    // build framed initiation message
+    let payload_len = noise_payload.len() as u16;
+    let mut init_msg = Vec::with_capacity(5 + noise_payload.len());
+    init_msg.extend_from_slice(&PROTOCOL_VERSION.to_be_bytes());
+    init_msg.push(0x01);
+    init_msg.extend_from_slice(&payload_len.to_be_bytes());
+    init_msg.extend_from_slice(&noise_payload);
+
+    let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_msg);
+
+    // connect via websocket
+    let url = format!("ws://{}/ts2021?X-Tailscale-Handshake={}", addr, init_b64);
+    let (ws_stream, _response) = connect_async(&url)
+        .await
+        .expect("failed to connect WebSocket");
+
+    let (ws_write, mut ws_read) = ws_stream.split();
+
+    // read the noise response
+    let msg = ws_read
+        .next()
+        .await
+        .expect("expected response message")
+        .expect("failed to read message");
+
+    let response_bytes = match msg {
+        tokio_tungstenite::tungstenite::Message::Binary(data) => data,
+        other => panic!("expected binary message, got {:?}", other),
+    };
+
+    let response_payload = &response_bytes[3..];
+    let mut buf = vec![0u8; 65535];
+    client_handshake
+        .read_message(response_payload, &mut buf)
+        .expect("failed to read server response");
+
+    let client_transport = client_handshake
+        .into_transport_mode()
+        .expect("failed to enter transport mode");
+
+    // track max frame size received from server
+    let max_frame_size = Arc::new(AtomicUsize::new(0));
+    let max_frame_clone = max_frame_size.clone();
+
+    // wrap the websocket reader to track frame sizes
+    let tracking_reader = ws_read.map(move |result| {
+        if let Ok(tokio_tungstenite::tungstenite::Message::Binary(ref data)) = result {
+            let current_max = max_frame_clone.load(Ordering::Relaxed);
+            if data.len() > current_max {
+                max_frame_clone.store(data.len(), Ordering::Relaxed);
+            }
+        }
+        result
+    });
+
+    let noise_stream = railscale::NoiseStream::new(tracking_reader, ws_write, client_transport);
+    let io = hyper_util::rt::TokioIo::new(noise_stream);
+
+    let (mut sender, conn) =
+        hyper::client::conn::http2::handshake(hyper_util::rt::TokioExecutor::new(), io)
+            .await
+            .expect("HTTP/2 handshake failed");
+
+    tokio::spawn(async move {
+        if let Err(e) = conn.await {
+            eprintln!("HTTP/2 connection error: {}", e);
+        }
+    });
+
+    // send request - server will respond, and we check frame sizes
+    let request = Request::builder()
+        .method("POST")
+        .uri("/machine/register")
+        .header("Content-Type", "application/json")
+        .body(http_body_util::Empty::<bytes::Bytes>::new())
+        .expect("failed to build request");
+
+    let response = sender.send_request(request).await;
+    assert!(response.is_ok(), "request failed: {:?}", response.err());
+
+    let response = response.unwrap();
+    let _body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("failed to read body");
+
+    // check that no frames exceeded the max size
+    let observed_max = max_frame_size.load(Ordering::Relaxed);
+
+    assert!(
+        observed_max <= MAX_CIPHERTEXT_SIZE,
+        "Server sent oversized Noise frame: {} bytes (max allowed: {} bytes)\n\
+         Large writes must be chunked into frames <= {} bytes ciphertext",
+        observed_max,
+        MAX_CIPHERTEXT_SIZE,
+        MAX_CIPHERTEXT_SIZE
     );
 
     server_handle.abort();
