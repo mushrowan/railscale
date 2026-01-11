@@ -1,9 +1,10 @@
 //! handler for /machine/register endpoint.
-//!implements tailscale's registration protocol. The request/response format
-//! matches what the official tailscale client expects
+//!
+//! implements tailscale's registration protocol. the request/response format
 //! matches what the official Tailscale client expects.
 
 use axum::{Json, extract::State, response::IntoResponse};
+use bytes::Bytes;
 use railscale_db::Database;
 use railscale_types::{MachineKey, Node, NodeId, NodeKey};
 use serde::{Deserialize, Serialize};
@@ -11,9 +12,9 @@ use serde::{Deserialize, Serialize};
 use super::{ApiError, OptionExt, OptionalMachineKeyContext, ResultExt};
 use crate::AppState;
 
-/// keys use prefixed hex format (e.g., "nodekey:abc123...")
+/// tailscale registerrequest.
 ///
-/// client capability version
+/// field names use pascalcase to match go's json encoding.
 /// keys use prefixed hex format (e.g., "nodekey:abc123...").
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -80,7 +81,7 @@ pub struct RegisterResponse {
     /// whether the machine is authorized.
     pub machine_authorized: bool,
 
-    /// user info in RegisterResponse (matches tailcfg.User)
+    /// if non-empty, user must visit this url to complete auth.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub auth_url: String,
 
@@ -117,14 +118,20 @@ pub struct TailcfgLogin {
 ///
 /// this endpoint is called by tailscale clients to register a new node
 /// with the control server.
-//machine key must come from Noise context for ts2021
-/// when accessed via the ts2021 protocol, the machine key is extracted from
-//for testing without ts2021, generate a placeholder key
+///
+/// note: We use `Bytes` instead of `Json<RegisterRequest>` because the real
+/// tailscale client does not send a Content-Type header over ts2021/http/2
+///
+//parse json manually since tailscale client doesn't send Content-Type header
+/// tailscale client does not send a content-type header over ts2021/http/2.
 pub async fn register(
     State(state): State<AppState>,
     OptionalMachineKeyContext(machine_key_ctx): OptionalMachineKeyContext,
-    Json(req): Json<RegisterRequest>,
+    body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
+    // parse json manually since tailscale client doesn't send content-type header
+    let req: RegisterRequest =
+        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(e.to_string()))?;
     // machine key must come from noise context for ts2021
     let machine_key = match machine_key_ctx {
         Some(ctx) => ctx.0,
