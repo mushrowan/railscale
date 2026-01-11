@@ -65,11 +65,11 @@ pub async fn map(
         .or_unauthorized("node not found")?;
 
     // update node with disco_key from request if provided
-    if let Some(ref disco_key) = req.disco_key {
-        if node.disco_key.as_bytes() != disco_key.as_bytes() {
-            node.disco_key = disco_key.clone();
-            state.db.update_node(&node).await.map_internal()?;
-        }
+    if let Some(ref disco_key) = req.disco_key
+        && node.disco_key.as_bytes() != disco_key.as_bytes()
+    {
+        node.disco_key = disco_key.clone();
+        state.db.update_node(&node).await.map_internal()?;
     }
 
     let compression = Compression::from(req.compress.as_ref());
