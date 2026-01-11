@@ -42,11 +42,11 @@ impl NoiseHandshake {
         Ok(Self { state })
     }
 
-    /// operations, binding the handshake to the protocol context
+    /// create a new handshake as the responder (server) with a prologue.
     ///
-    /// # Arguments
-    /// * `private_key` - Server's static private key (32 bytes)
-    ///* `prologue` - Protocol-specific prologue data
+    /// the prologue is mixed into the handshake hash before any pattern
+    /// operations, binding the handshake to the protocol context.
+    ///
     /// # Arguments
     /// * `private_key` - Server's static private key (32 bytes)
     /// * `prologue` - Protocol-specific prologue data
@@ -282,5 +282,206 @@ mod tests {
         // should fail if handshake not complete
         let result = server.into_transport();
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_multiple_messages_client_to_server() {
+        // this test verifies that multiple messages from client to server
+        // decrypt correctly (simulating what happens with HTTP/2 over Noise)
+        let (server_priv, server_pub) = generate_keypair();
+        let (client_priv, _) = generate_keypair();
+
+        // complete handshake
+        let mut server = NoiseHandshake::new_responder(&server_priv).unwrap();
+        let params = NOISE_PATTERN.parse().unwrap();
+        let builder = Builder::new(params);
+        let mut client = builder
+            .local_private_key(&client_priv)
+            .unwrap()
+            .remote_public_key(&server_pub)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+
+        let mut buf = vec![0u8; 65535];
+        let len = client.write_message(&[], &mut buf).unwrap();
+        server.read_message(&buf[..len]).unwrap();
+
+        let msg2 = server.write_message(&[]).unwrap();
+        let mut buf = vec![0u8; 65535];
+        client.read_message(&msg2, &mut buf).unwrap();
+
+        // convert to transport mode
+        let mut server_transport = server.into_transport().unwrap();
+        let mut client_transport = client.into_transport_mode().unwrap();
+
+        // server sends one message first (simulating http/2 settings)
+        let server_msg = b"server settings";
+        let server_ct = server_transport.encrypt(server_msg).unwrap();
+
+        // now client sends multiple messages (simulating http/2 preface + headers)
+        let client_msg1 = b"client message 1 - this is the HTTP/2 preface";
+        let mut ct1_buf = vec![0u8; client_msg1.len() + 16];
+        let ct1_len = client_transport
+            .write_message(client_msg1, &mut ct1_buf)
+            .unwrap();
+        let client_ct1 = &ct1_buf[..ct1_len];
+
+        let client_msg2 = b"client message 2 - this is the HEADERS frame";
+        let mut ct2_buf = vec![0u8; client_msg2.len() + 16];
+        let ct2_len = client_transport
+            .write_message(client_msg2, &mut ct2_buf)
+            .unwrap();
+        let client_ct2 = &ct2_buf[..ct2_len];
+
+        let client_msg3 = b"client message 3 - more data";
+        let mut ct3_buf = vec![0u8; client_msg3.len() + 16];
+        let ct3_len = client_transport
+            .write_message(client_msg3, &mut ct3_buf)
+            .unwrap();
+        let client_ct3 = &ct3_buf[..ct3_len];
+
+        // server decrypts all client messages in order
+        let decrypted1 = server_transport.decrypt(client_ct1).unwrap();
+        assert_eq!(decrypted1, client_msg1, "First message failed");
+
+        let decrypted2 = server_transport.decrypt(client_ct2).unwrap();
+        assert_eq!(decrypted2, client_msg2, "Second message failed");
+
+        let decrypted3 = server_transport.decrypt(client_ct3).unwrap();
+        assert_eq!(decrypted3, client_msg3, "Third message failed");
+
+        // client can also decrypt server's message
+        let mut server_pt_buf = vec![0u8; server_ct.len()];
+        let server_pt_len = client_transport
+            .read_message(&server_ct, &mut server_pt_buf)
+            .unwrap();
+        assert_eq!(&server_pt_buf[..server_pt_len], server_msg);
+    }
+
+    #[test]
+    fn test_with_prologue() {
+        // test with tailscale-style prologue to ensure it doesn't affect transport
+        let (server_priv, server_pub) = generate_keypair();
+        let (client_priv, _) = generate_keypair();
+
+        let prologue = b"Tailscale Control Protocol v131";
+
+        // complete handshake with prologue
+        let mut server =
+            NoiseHandshake::new_responder_with_prologue(&server_priv, prologue).unwrap();
+        let params = NOISE_PATTERN.parse().unwrap();
+        let builder = Builder::new(params);
+        let mut client = builder
+            .local_private_key(&client_priv)
+            .unwrap()
+            .remote_public_key(&server_pub)
+            .unwrap()
+            .prologue(prologue)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+
+        let mut buf = vec![0u8; 65535];
+        let len = client.write_message(&[], &mut buf).unwrap();
+        server.read_message(&buf[..len]).unwrap();
+
+        let msg2 = server.write_message(&[]).unwrap();
+        let mut buf = vec![0u8; 65535];
+        client.read_message(&msg2, &mut buf).unwrap();
+
+        // convert to transport mode
+        let mut server_transport = server.into_transport().unwrap();
+        let mut client_transport = client.into_transport_mode().unwrap();
+
+        // server encrypts first
+        let server_settings = b"server settings";
+        let _server_ct = server_transport.encrypt(server_settings).unwrap();
+
+        // client sends multiple messages
+        let client_msg1 = b"client preface and settings";
+        let mut ct1_buf = vec![0u8; client_msg1.len() + 16];
+        let ct1_len = client_transport
+            .write_message(client_msg1, &mut ct1_buf)
+            .unwrap();
+        let client_ct1 = ct1_buf[..ct1_len].to_vec();
+
+        let client_msg2 = b"client headers for request";
+        let mut ct2_buf = vec![0u8; client_msg2.len() + 16];
+        let ct2_len = client_transport
+            .write_message(client_msg2, &mut ct2_buf)
+            .unwrap();
+        let client_ct2 = ct2_buf[..ct2_len].to_vec();
+
+        // server decrypts both
+        let decrypted1 = server_transport.decrypt(&client_ct1).unwrap();
+        assert_eq!(decrypted1, client_msg1);
+
+        let decrypted2 = server_transport.decrypt(&client_ct2).unwrap();
+        assert_eq!(decrypted2, client_msg2);
+    }
+
+    #[test]
+    fn test_interleaved_encrypt_decrypt() {
+        // test that server can encrypt and decrypt interleaved
+        // (since we encrypt SETTINGS while receiving client data)
+        let (server_priv, server_pub) = generate_keypair();
+        let (client_priv, _) = generate_keypair();
+
+        // complete handshake
+        let mut server = NoiseHandshake::new_responder(&server_priv).unwrap();
+        let params = NOISE_PATTERN.parse().unwrap();
+        let builder = Builder::new(params);
+        let mut client = builder
+            .local_private_key(&client_priv)
+            .unwrap()
+            .remote_public_key(&server_pub)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+
+        let mut buf = vec![0u8; 65535];
+        let len = client.write_message(&[], &mut buf).unwrap();
+        server.read_message(&buf[..len]).unwrap();
+
+        let msg2 = server.write_message(&[]).unwrap();
+        let mut buf = vec![0u8; 65535];
+        client.read_message(&msg2, &mut buf).unwrap();
+
+        // convert to transport mode
+        let mut server_transport = server.into_transport().unwrap();
+        let mut client_transport = client.into_transport_mode().unwrap();
+
+        // client prepares multiple messages before server sends anything
+        let client_msg1 = b"client preface";
+        let mut ct1_buf = vec![0u8; client_msg1.len() + 16];
+        let ct1_len = client_transport
+            .write_message(client_msg1, &mut ct1_buf)
+            .unwrap();
+        let client_ct1 = ct1_buf[..ct1_len].to_vec();
+
+        let client_msg2 = b"client headers";
+        let mut ct2_buf = vec![0u8; client_msg2.len() + 16];
+        let ct2_len = client_transport
+            .write_message(client_msg2, &mut ct2_buf)
+            .unwrap();
+        let client_ct2 = ct2_buf[..ct2_len].to_vec();
+
+        // server encrypts its settings first
+        let server_settings = b"server settings frame";
+        let _server_ct = server_transport.encrypt(server_settings).unwrap();
+
+        // server decrypts client messages (should work even after encrypting)
+        let decrypted1 = server_transport.decrypt(&client_ct1).unwrap();
+        assert_eq!(
+            decrypted1, client_msg1,
+            "First message failed after server encrypt"
+        );
+
+        let decrypted2 = server_transport.decrypt(&client_ct2).unwrap();
+        assert_eq!(
+            decrypted2, client_msg2,
+            "Second message failed after server encrypt"
+        );
     }
 }

@@ -5,7 +5,7 @@
 pkgs.testers.runNixOSTest {
   name = "railscale-tailscale-integration";
 
-  nodes = let commonClientFlags = ["--verbose=3"]; in {
+  nodes = let commonClientFlags = ["--verbose=5"]; in {
     server = {
       config,
       pkgs,
