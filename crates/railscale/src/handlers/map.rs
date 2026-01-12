@@ -347,5 +347,7 @@ fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
         key_expiry: node.expiry.as_ref().map(|e| e.to_rfc3339()),
         expired: node.is_expired(),
         user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).0,
+        // nodes in the database that respond to map requests are authorized
+        machine_authorized: true,
     }
 }

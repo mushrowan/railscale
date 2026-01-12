@@ -151,10 +151,10 @@ pub struct MapResponseNode {
     #[serde(rename = "AllowedIPs")]
     pub allowed_ips: Vec<String>,
 
-    /// preferred derp region (legacy string format "127.3.3.40:N")
+    /// network endpoints.
     pub endpoints: Vec<String>,
 
-    /// home derp region id (modern integer format)
+    /// preferred derp region (legacy string format "127.3.3.40:n").
     /// deprecated: use home_derp instead.
     #[serde(rename = "DERP", default, skip_serializing_if = "String::is_empty")]
     pub derp: String,
@@ -187,8 +187,13 @@ pub struct MapResponseNode {
     #[serde(default)]
     pub expired: bool,
 
-    /// user id that owns this node.
+    /// whether this node's machine is authorized
     pub user: u64,
+
+    /// whether this node's machine is authorized.
+    /// defaults to false if not present.
+    #[serde(default)]
+    pub machine_authorized: bool,
 }
 
 /// a dns resolver entry (matches tailscale's dnstype.resolver).

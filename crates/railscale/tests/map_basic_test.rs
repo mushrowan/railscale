@@ -1,6 +1,6 @@
-//! basic tests for /machine/map endpoint
+//! basic tests for /machine/map endpoint.
 //!
-//! tests for basic response fields: node info, peers, dns config, derp map
+//! tests for basic response fields: node info, peers, dns config, derp map.
 
 mod map_common;
 
@@ -46,7 +46,7 @@ async fn test_map_request_returns_node() {
     assert_eq!(response_node.id, fixture.node.id.0);
     assert_eq!(response_node.node_key, fixture.node_key);
 
-    // should have addresses in cidr notation
+    // should have addresses in CIDR notation
     assert!(!response_node.addresses.is_empty());
     assert!(
         response_node
@@ -224,4 +224,38 @@ async fn test_map_request_returns_derp_map() {
     // verify derp map
     let derp = response.derp_map.expect("Missing DERP map");
     assert!(!derp.regions.is_empty());
+}
+
+#[tokio::test]
+async fn test_map_response_node_includes_machine_authorized() {
+    let fixture = MapTestFixture::new().await;
+    let map_request = fixture.map_request();
+
+    let response = fixture
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let (map_response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
+
+    // node should have machineauthorized set to true (it was registered)
+    let node = map_response.node.expect("Missing node in response");
+    assert!(
+        node.machine_authorized,
+        "MachineAuthorized should be true for registered nodes"
+    );
 }
