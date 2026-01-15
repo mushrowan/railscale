@@ -16,7 +16,6 @@ path = "src/main.rs"
 [dependencies]
 railscale-types = { workspace = true }
 railscale-db = { workspace = true }
-railscale-state = { workspace = true }
 railscale-proto = { workspace = true }
 railscale-grants = { workspace = true }
 tokio = { workspace = true }

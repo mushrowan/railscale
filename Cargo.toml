@@ -4,7 +4,6 @@ members = [
     "crates/railscale",
     "crates/railscale-types",
     "crates/railscale-db",
-    "crates/railscale-state",
     "crates/railscale-proto",
     "crates/railscale-grants",
 ]
@@ -61,7 +60,6 @@ moka = { version = "0.12", features = ["sync"] }
 # Internal crates
 railscale-types = { path = "crates/railscale-types" }
 railscale-db = { path = "crates/railscale-db" }
-railscale-state = { path = "crates/railscale-state" }
 railscale-proto = { path = "crates/railscale-proto" }
 railscale-grants = { path = "crates/railscale-grants" }
 
