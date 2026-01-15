@@ -6,7 +6,7 @@
 use axum::{Json, extract::State, response::IntoResponse};
 use bytes::Bytes;
 use railscale_db::Database;
-use railscale_types::{MachineKey, Node, NodeId, NodeKey};
+use railscale_types::{HostInfo, MachineKey, Node, NodeId, NodeKey};
 use serde::{Deserialize, Serialize};
 
 use super::{ApiError, OptionExt, OptionalMachineKeyContext, ResultExt};
@@ -36,7 +36,7 @@ pub struct RegisterRequest {
 
     /// host information.
     #[serde(default)]
-    pub hostinfo: Option<Hostinfo>,
+    pub hostinfo: Option<HostInfo>,
 
     /// request ephemeral node (auto-deleted when inactive).
     #[serde(default)]
@@ -50,18 +50,6 @@ pub struct RegisterResponseAuth {
     /// pre-auth key for registration.
     #[serde(default)]
     pub auth_key: String,
-}
-
-/// basic host information from the client.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "PascalCase")]
-pub struct Hostinfo {
-    #[serde(default)]
-    pub hostname: String,
-    #[serde(default, rename = "OS")]
-    pub os: String,
-    #[serde(default)]
-    pub go_arch: String,
 }
 
 /// tailscale registerresponse.
@@ -167,7 +155,7 @@ pub async fn register(
     let hostname = req
         .hostinfo
         .as_ref()
-        .map(|h| h.hostname.clone())
+        .and_then(|h| h.hostname.clone())
         .unwrap_or_default();
 
     // allocate ip addresses for the new node
