@@ -289,7 +289,7 @@ impl Clone for GrantsEngine {
 mod tests {
     use super::*;
     use crate::grant::Grant;
-    use railscale_types::{MachineKey, NodeId, NodeKey, UserId};
+    use railscale_types::{UserId, test_utils::TestNodeBuilder};
     use std::collections::HashMap;
 
     struct MockResolver {
@@ -317,32 +317,7 @@ mod tests {
     }
 
     fn test_node(id: u64, tags: Vec<String>) -> Node {
-        Node {
-            id: NodeId(id),
-            machine_key: MachineKey::default(),
-            node_key: NodeKey::default(),
-            disco_key: Default::default(),
-            endpoints: vec![],
-            hostinfo: None,
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            hostname: format!("node-{}", id),
-            given_name: format!("node-{}", id),
-            user_id: if tags.is_empty() {
-                Some(UserId(id)) // Use ID as UserID for simplicity in tests unless overwritten
-            } else {
-                None
-            },
-            tags,
-            register_method: railscale_types::RegisterMethod::AuthKey,
-            auth_key_id: None,
-            approved_routes: vec![],
-            expiry: None,
-            last_seen: Some(chrono::Utc::now()),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-            is_online: None,
-        }
+        TestNodeBuilder::new(id).with_tags(tags).build()
     }
 
     #[test]

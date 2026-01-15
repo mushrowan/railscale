@@ -201,7 +201,7 @@ fn is_exit_route(route: &IpNet) -> bool {
 }
 
 /// host information reported by the tailscale client.
-///tailscale client version (e.g., "1.80.0")
+///
 /// field names match tailscale's go struct (pascalcase in json).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -214,7 +214,7 @@ pub struct HostInfo {
     #[serde(rename = "FrontendLogID", default)]
     pub frontend_log_id: Option<String>,
 
-    /// oS version (e.g., "6.18.4" for Linux kernel)
+    /// backend log id.
     #[serde(rename = "BackendLogID", default)]
     pub backend_log_id: Option<String>,
 
@@ -250,35 +250,35 @@ pub struct HostInfo {
     #[serde(default)]
     pub app: Option<String>,
 
-    /// hostname of the device
+    /// whether a desktop environment is present.
     #[serde(default)]
     pub desktop: Option<bool>,
 
-    /// whether the host blocks incoming connections
+    /// package type (e.g., "choco", "appstore").
     #[serde(default)]
     pub package: Option<String>,
 
-    /// whether this node is shared to the current user
+    /// device model (e.g., "pixel 3a", "iphone12,3").
     #[serde(default)]
     pub device_model: Option<String>,
 
-    /// user opted out of logs/support
+    /// hostname of the device.
     #[serde(default)]
     pub hostname: Option<String>,
 
-    /// machine type (uname -m)
+    /// whether the host blocks incoming connections.
     #[serde(default)]
     pub shields_up: bool,
 
-    /// gOARCH of the binary
+    /// whether this node is shared to the current user.
     #[serde(default)]
     pub sharee_node: bool,
 
-    /// gOARM, GOAMD64, etc
+    /// user opted out of logs/support.
     #[serde(default)]
     pub no_logs_no_support: bool,
 
-    /// go version used to build the binary
+    /// machine type (uname -m).
     #[serde(default)]
     pub machine: Option<String>,
 
@@ -397,6 +397,7 @@ impl std::ops::Deref for NodeView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TestNodeBuilder;
 
     #[test]
     fn test_hostinfo_deserialize_tailscale_format() {
@@ -429,28 +430,10 @@ mod tests {
     }
 
     fn test_node() -> Node {
-        Node {
-            id: NodeId(1),
-            machine_key: MachineKey::default(),
-            node_key: NodeKey::default(),
-            disco_key: DiscoKey::default(),
-            endpoints: vec![],
-            hostinfo: None,
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(UserId(1)),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            expiry: None,
-            last_seen: None,
-            approved_routes: vec![],
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            is_online: None,
-        }
+        TestNodeBuilder::new(1)
+            .with_hostname("test-node")
+            .with_ipv6("fd7a:115c:a1e0::1".parse().unwrap())
+            .build()
     }
 
     #[test]

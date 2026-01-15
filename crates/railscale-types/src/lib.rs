@@ -12,6 +12,7 @@ mod keys;
 mod node;
 mod oidc;
 mod preauth_key;
+pub mod test_utils;
 mod user;
 
 pub use config::{Config, DatabaseConfig, OidcConfig, PkceConfig, PkceMethod};
