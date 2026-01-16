@@ -15,7 +15,7 @@ mod preauth_key;
 pub mod test_utils;
 mod user;
 
-pub use config::{Config, DatabaseConfig, OidcConfig, PkceConfig, PkceMethod};
+pub use config::{Config, DatabaseConfig, EmbeddedDerpRuntime, OidcConfig, PkceConfig, PkceMethod};
 pub use error::Error;
 pub use keys::{DiscoKey, MachineKey, NodeKey};
 pub use node::{HostInfo, NetInfo, Node, NodeId, NodeView, RegisterMethod};

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::BufReader;
-use std::net::{IpAddr, SocketAddr};
+use std::io::BufReader as StdBufReader;
+use std::net::SocketAddr;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ use crypto_box::{
 };
 use hex::ToHex;
 use httparse;
-use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, SanType};
+use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::{self, ServerConfig};
 use rustls_pemfile::{certs, pkcs8_private_keys};
@@ -27,8 +27,9 @@ use tokio::io::{
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinHandle;
-use tokio_rustls::{TlsAcceptor, TlsStream};
-use tracing::{debug, error, info, warn};
+use tokio_rustls::TlsAcceptor;
+use tokio_rustls::server::TlsStream;
+use tracing::{debug, error, info};
 
 use railscale_proto::Keypair;
 
@@ -44,14 +45,14 @@ const DERP_MAGIC: &[u8; 8] = b"DERP\xF0\x9F\x94\x91";
 const DERP_PROTOCOL_VERSION: u32 = 2;
 const MAX_HTTP_REQUEST_SIZE: usize = 8 * 1024;
 
-/// tLS assets used by the embedded derp listener
+/// tls assets used by the embedded derp listener.
 pub struct DerpTlsAssets {
     pub tls_config: Arc<ServerConfig>,
     pub fingerprint: String,
 }
 
 /// create a tls configuration for the embedded derp server, generating a
-/// self-signed certificate if necessary
+/// self-signed certificate if necessary.
 pub fn load_or_generate_derp_tls(
     cert_path: &Path,
     key_path: &Path,
@@ -91,20 +92,26 @@ fn load_existing_cert(
     Vec<u8>,
 )> {
     let mut cert_reader =
-        BufReader::new(fs::File::open(cert_path).wrap_err("failed to open DERP cert")?);
-    let certs = certs(&mut cert_reader).wrap_err("failed to parse DERP certificate")?;
+        StdBufReader::new(fs::File::open(cert_path).wrap_err("failed to open DERP cert")?);
+    let certs: Vec<CertificateDer<'static>> = certs(&mut cert_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .wrap_err("failed to parse DERP certificate")?;
     if certs.is_empty() {
         return Err(eyre!("DERP certificate file is empty"));
     }
 
     let mut key_reader =
-        BufReader::new(fs::File::open(key_path).wrap_err("failed to open DERP key")?);
-    let mut keys = pkcs8_private_keys(&mut key_reader).wrap_err("failed to parse DERP key")?;
-    let key = keys
-        .pop()
+        StdBufReader::new(fs::File::open(key_path).wrap_err("failed to open DERP key")?);
+    let keys: Vec<_> = pkcs8_private_keys(&mut key_reader)
+        .collect::<Result<Vec<_>, _>>()
+        .wrap_err("failed to parse DERP key")?;
+    let key: PrivateKeyDer<'static> = keys
+        .into_iter()
+        .next()
+        .map(|k| k.into())
         .ok_or_else(|| eyre!("DERP key file did not contain a PKCS#8 private key"))?;
 
-    let der_bytes = certs[0].clone().into_owned().to_vec();
+    let der_bytes = certs[0].to_vec();
     Ok((certs, key, der_bytes))
 }
 
@@ -117,34 +124,28 @@ fn generate_new_cert(
     PrivateKeyDer<'static>,
     Vec<u8>,
 )> {
-    let mut params = CertificateParams::new(vec![]);
-    params.distinguished_name = DistinguishedName::new();
-    params
-        .distinguished_name
-        .push(DnType::CommonName, "railscale-derp");
+    // filter out empty hosts
+    let san_names: Vec<String> = hosts
+        .iter()
+        .filter(|h| !h.trim().is_empty())
+        .cloned()
+        .collect();
 
-    for host in hosts {
-        if host.trim().is_empty() {
-            continue;
-        }
-        if let Ok(ip) = host.parse::<IpAddr>() {
-            params.subject_alt_names.push(SanType::IpAddress(ip));
-        } else {
-            params
-                .subject_alt_names
-                .push(SanType::DnsName(host.clone()));
-        }
-    }
+    // generate self-signed certificate
+    let certified_key =
+        generate_simple_self_signed(san_names).wrap_err("failed to generate DERP certificate")?;
 
-    let cert = Certificate::from_params(params).wrap_err("failed to build DERP certificate")?;
-    let cert_pem = cert.serialize_pem()?;
-    let key_pem = cert.serialize_private_key_pem();
-    fs::write(cert_path, cert_pem).wrap_err("failed to write DERP certificate")?;
-    fs::write(key_path, key_pem).wrap_err("failed to write DERP key")?;
+    // serialize to pem and write to files
+    let cert_pem = certified_key.cert.pem();
+    let key_pem = certified_key.key_pair.serialize_pem();
+    fs::write(cert_path, &cert_pem).wrap_err("failed to write DERP certificate")?;
+    fs::write(key_path, &key_pem).wrap_err("failed to write DERP key")?;
 
-    let der_bytes = cert.serialize_der()?;
+    // get der bytes for fingerprint calculation
+    let der_bytes = certified_key.cert.der().to_vec();
     let cert_der = CertificateDer::from(der_bytes.clone());
-    let key_der = PrivateKeyDer::from(cert.serialize_private_key_der());
+    let key_der = PrivateKeyDer::try_from(certified_key.key_pair.serialized_der().to_vec())
+        .map_err(|_| eyre!("failed to convert key to DER"))?;
 
     Ok((vec![cert_der], key_der, der_bytes))
 }
@@ -155,7 +156,7 @@ fn compute_fingerprint(der: &[u8]) -> String {
     hasher.finalize().encode_hex()
 }
 
-/// options for running the embedded derp listener
+/// options for running the embedded derp listener.
 pub struct DerpListenerConfig {
     pub listen_addr: SocketAddr,
     pub tls_config: Arc<ServerConfig>,
@@ -260,10 +261,12 @@ fn parse_upgrade_request(buf: &[u8]) -> Result<UpgradeRequest, DerpServerError> 
         value: &[],
     }; 32];
     let mut req = httparse::Request::new(&mut headers);
-    req.parse(buf)
-        .map_err(|e| DerpServerError::Handshake(format!("failed to parse request: {e}")))?
-        .ok()
-        .ok_or_else(|| DerpServerError::Handshake("incomplete HTTP request".into()))?;
+    let status = req
+        .parse(buf)
+        .map_err(|e| DerpServerError::Handshake(format!("failed to parse request: {e}")))?;
+    if status.is_partial() {
+        return Err(DerpServerError::Handshake("incomplete HTTP request".into()));
+    }
 
     if req.method != Some("GET") {
         return Err(DerpServerError::Handshake("unsupported HTTP method".into()));
@@ -383,7 +386,7 @@ impl EmbeddedDerpServer {
         read_result
     }
 
-    // ... rest of methods remain largely unchanged ..
+    // ... rest of methods remain largely unchanged ...
 
     async fn read_loop<R>(
         &self,

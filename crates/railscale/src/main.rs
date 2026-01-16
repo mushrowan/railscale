@@ -95,13 +95,17 @@ struct Cli {
     #[arg(long, env = "RAILSCALE_DERP_ADVERTISE_PORT")]
     derp_advertise_port: Option<u16>,
 
-    /// derp certificate path
+    /// derp tls certificate path
     #[arg(long, env = "RAILSCALE_DERP_CERT_PATH")]
     derp_cert_path: Option<PathBuf>,
 
-    /// derp private key path
-    #[arg(long, env = "RAILSCALE_DERP_KEY_PATH")]
-    derp_key_path: Option<PathBuf>,
+    /// derp tls private key path (pem)
+    #[arg(long, env = "RAILSCALE_DERP_TLS_KEY_PATH")]
+    derp_tls_key_path: Option<PathBuf>,
+
+    /// derp protocol private key path (curve25519)
+    #[arg(long, env = "RAILSCALE_DERP_PRIVATE_KEY_PATH")]
+    derp_private_key_path: Option<PathBuf>,
 }
 
 impl Cli {
@@ -154,8 +158,11 @@ impl Cli {
         if let Some(cert_path) = self.derp_cert_path {
             config.derp.embedded_derp.cert_path = cert_path;
         }
-        if let Some(key_path) = self.derp_key_path {
-            config.derp.embedded_derp.key_path = key_path;
+        if let Some(tls_key_path) = self.derp_tls_key_path {
+            config.derp.embedded_derp.tls_key_path = tls_key_path;
+        }
+        if let Some(private_key_path) = self.derp_private_key_path {
+            config.derp.embedded_derp.private_key_path = private_key_path;
         }
 
         Ok(config)
@@ -242,6 +249,81 @@ async fn main() -> Result<()> {
         })?;
     info!("Noise public key loaded ({} bytes)", keypair.public.len());
 
+    // set up embedded derp server if enabled
+    let mut config = config;
+    if config.derp.embedded_derp.enabled {
+        info!("Setting up embedded DERP server...");
+
+        // load or generate derp keypair (separate from noise key for key isolation)
+        let derp_keypair =
+            railscale::load_or_generate_noise_keypair(&config.derp.embedded_derp.private_key_path)
+                .await
+                .with_context(|| {
+                    format!(
+                        "failed to load/generate DERP keypair: {:?}",
+                        config.derp.embedded_derp.private_key_path
+                    )
+                })?;
+        info!("DERP keypair loaded");
+
+        // determine advertised host (from config or extract from server_url)
+        let advertise_host = config
+            .derp
+            .embedded_derp
+            .advertise_host
+            .clone()
+            .unwrap_or_else(|| extract_host(&config.server_url));
+
+        // determine advertised port (from config or parse from listen_addr)
+        let advertise_port = config.derp.embedded_derp.advertise_port.unwrap_or_else(|| {
+            extract_port(&config.derp.embedded_derp.listen_addr).unwrap_or(3340)
+        });
+
+        // load or generate tls certificate
+        let tls_assets = derp_server::load_or_generate_derp_tls(
+            &config.derp.embedded_derp.cert_path,
+            &config.derp.embedded_derp.tls_key_path,
+            &[advertise_host.clone()],
+        )
+        .context("failed to set up DERP TLS")?;
+        info!(
+            fingerprint = %tls_assets.fingerprint,
+            "DERP TLS certificate loaded"
+        );
+
+        // populate runtime info so generate_derp_map() includes this region
+        config.derp.embedded_derp.runtime = Some(EmbeddedDerpRuntime {
+            advertise_host: advertise_host.clone(),
+            advertise_port,
+            cert_fingerprint: tls_assets.fingerprint.clone(),
+        });
+
+        // parse listen address and spawn DERP listener
+        let derp_listen_addr: SocketAddr = config
+            .derp
+            .embedded_derp
+            .listen_addr
+            .parse()
+            .context("invalid DERP listen address")?;
+
+        let derp_server =
+            derp_server::EmbeddedDerpServer::new(EmbeddedDerpOptions::new(derp_keypair));
+        derp_server::spawn_derp_listener(DerpListenerConfig {
+            listen_addr: derp_listen_addr,
+            tls_config: tls_assets.tls_config,
+            server: derp_server,
+        })
+        .await
+        .context("failed to spawn DERP listener")?;
+
+        info!(
+            addr = %derp_listen_addr,
+            host = %advertise_host,
+            port = %advertise_port,
+            "Embedded DERP server started"
+        );
+    }
+
     // build router
     let notifier = railscale::StateNotifier::new();
     let app =
@@ -260,4 +342,20 @@ async fn main() -> Result<()> {
     axum::serve(listener, app).await.context("server error")?;
 
     Ok(())
+}
+
+/// extract hostname from a url, stripping scheme and port.
+fn extract_host(url: &str) -> String {
+    url.split("://")
+        .nth(1)
+        .unwrap_or(url)
+        .split(':')
+        .next()
+        .unwrap_or("localhost")
+        .to_string()
+}
+
+/// extract port from an address string like "0.0.0.0:3340".
+fn extract_port(addr: &str) -> Option<u16> {
+    addr.rsplit(':').next()?.parse().ok()
 }

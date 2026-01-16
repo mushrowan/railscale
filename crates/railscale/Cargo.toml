@@ -57,8 +57,8 @@ httparse = "1.9"
 rcgen = "0.13"
 rustls = { version = "0.23", default-features = false, features = ["std"] }
 rustls-pemfile = "2"
-sha2 = "0.11"
-tokio-rustls = { version = "0.26", features = ["rustls-0_23"] }
+sha2 = "0.10"
+tokio-rustls = "0.26"
 
 # Compression
 zstd = "0.13"

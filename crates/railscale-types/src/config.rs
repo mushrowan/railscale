@@ -124,7 +124,7 @@ pub struct EmbeddedDerpConfig {
     /// region id for the embedded derp server.
     pub region_id: i32,
 
-    /// address to bind the derp httpS listener to
+    /// region name.
     pub region_name: String,
 
     /// address to bind the derp https listener to.
@@ -143,9 +143,13 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_derp_cert_path")]
     pub cert_path: PathBuf,
 
-    /// path to the derp private key (pem).
-    #[serde(default = "default_derp_key_path")]
-    pub key_path: PathBuf,
+    /// path to the derp tls private key (pem).
+    #[serde(default = "default_derp_tls_key_path")]
+    pub tls_key_path: PathBuf,
+
+    /// path to the derp protocol private key (curve25519, 64 bytes).
+    #[serde(default = "default_derp_private_key_path")]
+    pub private_key_path: PathBuf,
 
     /// stun listen address.
     pub stun_listen_addr: Option<String>,
@@ -165,7 +169,8 @@ impl Default for EmbeddedDerpConfig {
             advertise_host: None,
             advertise_port: None,
             cert_path: default_derp_cert_path(),
-            key_path: default_derp_key_path(),
+            tls_key_path: default_derp_tls_key_path(),
+            private_key_path: default_derp_private_key_path(),
             stun_listen_addr: Some("0.0.0.0:3478".to_string()),
             runtime: None,
         }
@@ -180,8 +185,12 @@ fn default_derp_cert_path() -> PathBuf {
     PathBuf::from("/var/lib/railscale/derp_cert.pem")
 }
 
-fn default_derp_key_path() -> PathBuf {
-    PathBuf::from("/var/lib/railscale/derp_key.pem")
+fn default_derp_tls_key_path() -> PathBuf {
+    PathBuf::from("/var/lib/railscale/derp_tls_key.pem")
+}
+
+fn default_derp_private_key_path() -> PathBuf {
+    PathBuf::from("/var/lib/railscale/derp_private.key")
 }
 
 /// runtime information for the embedded derp server populated at startup.

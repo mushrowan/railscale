@@ -35,6 +35,10 @@ pkgs.testers.runNixOSTest {
           RAILSCALE_SERVER_URL = "http://server:8080";
           RAILSCALE_POLICY_FILE = "/etc/railscale/policy.json";
           RAILSCALE_LOG_LEVEL = "trace";
+          # Enable embedded DERP relay for peer connectivity in isolated VMs
+          RAILSCALE_DERP_EMBEDDED_ENABLED = "true";
+          RAILSCALE_DERP_ADVERTISE_HOST = "192.168.1.3";
+          RAILSCALE_DERP_ADVERTISE_PORT = "3340";
         };
 
         serviceConfig = {
@@ -44,7 +48,7 @@ pkgs.testers.runNixOSTest {
         };
       };
 
-      networking.firewall.allowedTCPPorts = [8080];
+      networking.firewall.allowedTCPPorts = [8080 3340];
     };
 
     client1 = {
@@ -80,6 +84,7 @@ pkgs.testers.runNixOSTest {
     # Wait for railscale server to start
     server.wait_for_unit("railscale.service")
     server.wait_for_open_port(8080)
+    server.wait_for_open_port(3340)  # DERP relay port
 
     # Create a user and two preauth keys
     server.succeed("sqlite3 /var/lib/railscale/db.sqlite \"INSERT INTO users (id, name, created_at, updated_at) VALUES (1, 'testuser', datetime('now'), datetime('now'));\"")
@@ -129,11 +134,16 @@ pkgs.testers.runNixOSTest {
     print(f"Client1 Tailscale IP: {client1_ip}")
     print(f"Client2 Tailscale IP: {client2_ip}")
 
-    # Test connectivity: client1 pings client2's tailscale IP (3 pings, 5 second timeout)
-    client1.succeed(f"timeout 5 ping -c 3 {client2_ip}")
+    # Show netcheck/DERP status
+    client1.execute("tailscale netcheck 2>&1 || true")
+    client1.execute("tailscale status --json | head -100 || true")
 
-    # Test connectivity: client2 pings client1's tailscale IP (3 pings, 5 second timeout)
-    client2.succeed(f"timeout 5 ping -c 3 {client1_ip}")
+    # Test connectivity: client1 pings client2's tailscale IP (3 pings, 10 second timeout)
+    # Increased timeout to allow DERP relay connection to establish
+    client1.succeed(f"timeout 10 ping -c 3 {client2_ip}")
+
+    # Test connectivity: client2 pings client1's tailscale IP (3 pings, 10 second timeout)
+    client2.succeed(f"timeout 10 ping -c 3 {client1_ip}")
 
     # Check server logs to verify registrations
     server.succeed("journalctl -u railscale.service --no-pager | grep -i 'register'")
