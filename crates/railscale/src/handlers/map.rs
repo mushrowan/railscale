@@ -64,11 +64,22 @@ pub async fn map(
         .map_internal()?
         .or_unauthorized("node not found")?;
 
-    // update node with disco_key from request if provided
+    // update node with disco_key and hostinfo from request if provided
+    let mut needs_update = false;
+
     if let Some(ref disco_key) = req.disco_key
         && node.disco_key.as_bytes() != disco_key.as_bytes()
     {
         node.disco_key = disco_key.clone();
+        needs_update = true;
+    }
+
+    if let Some(ref hostinfo) = req.hostinfo {
+        node.hostinfo = Some(hostinfo.clone());
+        needs_update = true;
+    }
+
+    if needs_update {
         state.db.update_node(&node).await.map_internal()?;
     }
 

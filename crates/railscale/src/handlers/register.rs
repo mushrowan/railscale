@@ -175,7 +175,7 @@ pub async fn register(
         ipv4,
         ipv6,
         endpoints: vec![],
-        hostinfo: None,
+        hostinfo: req.hostinfo,
         hostname: hostname.clone(),
         given_name: hostname,
         user_id: if preauth_key.creates_tagged_nodes() {
