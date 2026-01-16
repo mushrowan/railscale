@@ -1,6 +1,7 @@
 //! railscale library - HTTP handlers and application setup.
 
 pub mod derp;
+pub mod derp_server;
 mod dns;
 pub mod handlers;
 mod noise_stream;
@@ -105,7 +106,7 @@ pub async fn create_app(
         railscale_proto::generate_keypair().expect("failed to generate noise keypair")
     });
 
-    // load already-allocated IPs from the database
+    // initialize ip allocator with configured prefixes
     let mut ip_allocator = IpAllocator::new(config.prefix_v4, config.prefix_v6);
 
     // load already-allocated ips from the database

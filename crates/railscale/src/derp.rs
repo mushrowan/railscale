@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 
-/// http request failed
+/// errors that can occur when loading derp maps.
 #[derive(Debug, Error)]
 pub enum DerpError {
     /// http request failed.
@@ -68,42 +68,53 @@ pub fn merge_derp_maps(maps: &[DerpMap]) -> DerpMap {
         }
     }
 
-    DerpMap { regions }
+    DerpMap {
+        regions,
+        omit_default_regions: false,
+    }
 }
 
 /// generate the derp map for clients.
 pub fn generate_derp_map(config: &Config) -> DerpMap {
-    let mut regions = HashMap::new();
+    let mut map = DerpMap {
+        regions: HashMap::new(),
+        omit_default_regions: false,
+    };
 
     // if embedded derp is enabled, add it to the map
     if config.derp.embedded_derp.enabled {
-        let region_id = config.derp.embedded_derp.region_id;
-        let host_name = extract_hostname(&config.server_url).to_string();
+        if let Some(runtime) = &config.derp.embedded_derp.runtime {
+            let region_id = config.derp.embedded_derp.region_id;
+            let host_name = runtime.advertise_host.clone();
 
-        let region = DerpRegion {
-            region_id,
-            region_code: "embedded".to_string(),
-            region_name: config.derp.embedded_derp.region_name.clone(),
-            nodes: vec![DerpNode {
-                name: format!("{}a", region_id),
+            let region = DerpRegion {
                 region_id,
-                host_name,
-                ipv4: None,
-                ipv6: None,
-                stun_port: 3478,
-                stun_only: false,
-                derp_port: 443,
-                can_port_80: false,
-            }],
-        };
-        regions.insert(region_id, region);
+                region_code: "embedded".to_string(),
+                region_name: config.derp.embedded_derp.region_name.clone(),
+                nodes: vec![DerpNode {
+                    name: format!("{}a", region_id),
+                    region_id,
+                    host_name,
+                    ipv4: None,
+                    ipv6: None,
+                    stun_port: -1,
+                    stun_only: false,
+                    derp_port: runtime.advertise_port as i32,
+                    can_port_80: false,
+                    cert_name: Some(format!("sha256-raw:{}", runtime.cert_fingerprint)),
+                    insecure_for_tests: false,
+                }],
+            };
+            map.omit_default_regions = true;
+            map.regions.insert(region_id, region);
+        } else {
+            tracing::warn!("embedded DERP enabled but runtime details were not initialized");
+        }
     }
 
     // if we have no regions, add a default one (e.g., tailscale's new york region)
-    // so that nodes can at least communicate via relay if they can't p2p.
-    // in a real scenario, we'd probably fetch this from the url in config.
-    if regions.is_empty() {
-        regions.insert(
+    if map.regions.is_empty() {
+        map.regions.insert(
             1,
             DerpRegion {
                 region_id: 1,
@@ -119,12 +130,14 @@ pub fn generate_derp_map(config: &Config) -> DerpMap {
                     stun_only: false,
                     derp_port: 443,
                     can_port_80: true,
+                    cert_name: None,
+                    insecure_for_tests: false,
                 }],
             },
         );
     }
 
-    DerpMap { regions }
+    map
 }
 
 #[cfg(test)]
@@ -132,7 +145,7 @@ mod tests {
     use super::*;
 
     /// test parsing tailscale's official derp map json format.
-    //this is a minimal example of tailscale's derp map format
+    /// the format uses pascalcase keys (e.g., "regions", "regionid", "stunport").
     #[test]
     fn test_parse_tailscale_derp_map_format() {
         // this is a minimal example of tailscale's derp map format
@@ -267,6 +280,7 @@ Regions:
             )]
             .into_iter()
             .collect(),
+            omit_default_regions: false,
         };
 
         let map2 = DerpMap {
@@ -292,6 +306,7 @@ Regions:
             ]
             .into_iter()
             .collect(),
+            omit_default_regions: false,
         };
 
         let merged = merge_derp_maps(&[map1, map2]);

@@ -124,11 +124,35 @@ pub struct EmbeddedDerpConfig {
     /// region id for the embedded derp server.
     pub region_id: i32,
 
-    /// region name.
+    /// address to bind the derp httpS listener to
     pub region_name: String,
+
+    /// address to bind the derp https listener to.
+    #[serde(default = "default_derp_listen_addr")]
+    pub listen_addr: String,
+
+    /// hostname or ip advertised to clients. defaults to the server url host.
+    #[serde(default)]
+    pub advertise_host: Option<String>,
+
+    /// port advertised to clients. defaults to the parsed listen port.
+    #[serde(default)]
+    pub advertise_port: Option<u16>,
+
+    /// path to the derp certificate (pem).
+    #[serde(default = "default_derp_cert_path")]
+    pub cert_path: PathBuf,
+
+    /// path to the derp private key (pem).
+    #[serde(default = "default_derp_key_path")]
+    pub key_path: PathBuf,
 
     /// stun listen address.
     pub stun_listen_addr: Option<String>,
+
+    /// runtime details populated when the derp server starts.
+    #[serde(skip)]
+    pub runtime: Option<EmbeddedDerpRuntime>,
 }
 
 impl Default for EmbeddedDerpConfig {
@@ -137,9 +161,35 @@ impl Default for EmbeddedDerpConfig {
             enabled: false,
             region_id: 999,
             region_name: "railscale".to_string(),
+            listen_addr: default_derp_listen_addr(),
+            advertise_host: None,
+            advertise_port: None,
+            cert_path: default_derp_cert_path(),
+            key_path: default_derp_key_path(),
             stun_listen_addr: Some("0.0.0.0:3478".to_string()),
+            runtime: None,
         }
     }
+}
+
+fn default_derp_listen_addr() -> String {
+    "0.0.0.0:3340".to_string()
+}
+
+fn default_derp_cert_path() -> PathBuf {
+    PathBuf::from("/var/lib/railscale/derp_cert.pem")
+}
+
+fn default_derp_key_path() -> PathBuf {
+    PathBuf::from("/var/lib/railscale/derp_key.pem")
+}
+
+/// runtime information for the embedded derp server populated at startup.
+#[derive(Debug, Clone)]
+pub struct EmbeddedDerpRuntime {
+    pub advertise_host: String,
+    pub advertise_port: u16,
+    pub cert_fingerprint: String,
 }
 
 /// dns configuration.
@@ -274,7 +324,7 @@ pub struct TuningConfig {
     /// registration cache expiration in seconds.
     pub register_cache_expiration_secs: u64,
 
-    /// interval between keep-alive messages for streaming map connections (in seconds)
+    /// registration cache cleanup interval in seconds.
     pub register_cache_cleanup_secs: u64,
 
     /// interval between keep-alive messages for streaming map connections (in seconds).

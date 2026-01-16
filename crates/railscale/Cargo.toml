@@ -52,6 +52,13 @@ tokio-tungstenite = "0.26"
 snow = "0.10"
 tower = "0.5"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
+crypto_box = "0.9"
+httparse = "1.9"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["std"] }
+rustls-pemfile = "2"
+sha2 = "0.11"
+tokio-rustls = { version = "0.26", features = ["rustls-0_23"] }
 
 # Compression
 zstd = "0.13"
@@ -71,6 +78,7 @@ base64 = { workspace = true }
 tokio-tungstenite = "0.26"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 http = "1"
+anyhow = { workspace = true }
 # Crypto crates for Noise handshake testing
 snow = "0.10"
 zstd = "0.13"

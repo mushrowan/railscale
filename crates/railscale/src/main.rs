@@ -10,9 +10,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use color_eyre::eyre::{Context, Result, bail};
+use railscale::derp_server::{self, DerpListenerConfig, EmbeddedDerpOptions};
 use railscale_db::RailscaleDb;
 use railscale_grants::{GrantsEngine, Policy};
-use railscale_types::Config;
+use railscale_types::{Config, EmbeddedDerpRuntime};
 use tokio::net::TcpListener;
 use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
@@ -69,6 +70,38 @@ struct Cli {
     /// log level
     #[arg(long, default_value = "info", env = "RAILSCALE_LOG_LEVEL")]
     log_level: String,
+
+    /// enable embedded derp relay server
+    #[arg(long, default_value_t = false, env = "RAILSCALE_DERP_EMBEDDED_ENABLED")]
+    derp_embedded_enabled: bool,
+
+    /// derp region id to advertise
+    #[arg(long, env = "RAILSCALE_DERP_REGION_ID")]
+    derp_region_id: Option<i32>,
+
+    /// derp region name to advertise
+    #[arg(long, env = "RAILSCALE_DERP_REGION_NAME")]
+    derp_region_name: Option<String>,
+
+    /// derp listener address (host:port)
+    #[arg(long, env = "RAILSCALE_DERP_LISTEN_ADDR")]
+    derp_listen_addr: Option<String>,
+
+    /// hostname or ip advertised to clients for derp
+    #[arg(long, env = "RAILSCALE_DERP_ADVERTISE_HOST")]
+    derp_advertise_host: Option<String>,
+
+    /// port advertised to clients for derp
+    #[arg(long, env = "RAILSCALE_DERP_ADVERTISE_PORT")]
+    derp_advertise_port: Option<u16>,
+
+    /// derp certificate path
+    #[arg(long, env = "RAILSCALE_DERP_CERT_PATH")]
+    derp_cert_path: Option<PathBuf>,
+
+    /// derp private key path
+    #[arg(long, env = "RAILSCALE_DERP_KEY_PATH")]
+    derp_key_path: Option<PathBuf>,
 }
 
 impl Cli {
@@ -91,7 +124,7 @@ impl Cli {
             railscale_types::DatabaseConfig::default()
         };
 
-        let config = Config {
+        let mut config = Config {
             listen_addr: self.listen_addr,
             server_url: self.server_url,
             noise_private_key_path: self.noise_key_path,
@@ -101,6 +134,29 @@ impl Cli {
             database,
             ..Default::default()
         };
+
+        config.derp.embedded_derp.enabled = self.derp_embedded_enabled;
+        if let Some(id) = self.derp_region_id {
+            config.derp.embedded_derp.region_id = id;
+        }
+        if let Some(name) = self.derp_region_name {
+            config.derp.embedded_derp.region_name = name;
+        }
+        if let Some(listen) = self.derp_listen_addr {
+            config.derp.embedded_derp.listen_addr = listen;
+        }
+        if let Some(host) = self.derp_advertise_host {
+            config.derp.embedded_derp.advertise_host = Some(host);
+        }
+        if let Some(port) = self.derp_advertise_port {
+            config.derp.embedded_derp.advertise_port = Some(port);
+        }
+        if let Some(cert_path) = self.derp_cert_path {
+            config.derp.embedded_derp.cert_path = cert_path;
+        }
+        if let Some(key_path) = self.derp_key_path {
+            config.derp.embedded_derp.key_path = key_path;
+        }
 
         Ok(config)
     }

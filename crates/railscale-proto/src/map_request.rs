@@ -187,7 +187,7 @@ pub struct MapResponseNode {
     #[serde(default)]
     pub expired: bool,
 
-    /// whether this node's machine is authorized
+    /// user id that owns this node.
     pub user: u64,
 
     /// whether this node's machine is authorized.
@@ -229,12 +229,16 @@ pub struct DnsConfig {
     pub routes: std::collections::HashMap<String, Vec<DnsResolver>>,
 }
 
-/// derp map for relay servers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// whether to omit tailscale's default regions
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct DerpMap {
     /// derp regions.
     pub regions: std::collections::HashMap<i32, DerpRegion>,
+
+    /// whether to omit tailscale's default regions.
+    #[serde(rename = "OmitDefaultRegions", default)]
+    pub omit_default_regions: bool,
 }
 
 /// a derp region.
@@ -292,6 +296,14 @@ pub struct DerpNode {
     /// whether the node can serve on port 80 (for captive portal checks).
     #[serde(rename = "CanPort80", default)]
     pub can_port_80: bool,
+
+    /// optional certificate fingerprint or dns name to pin.
+    #[serde(rename = "CertName", default, skip_serializing_if = "Option::is_none")]
+    pub cert_name: Option<String>,
+
+    /// allow skipping tls verification (tests only).
+    #[serde(rename = "InsecureForTests", default)]
+    pub insecure_for_tests: bool,
 }
 
 /// a packet filter rule (simplified).
