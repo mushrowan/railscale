@@ -142,6 +142,8 @@ pub struct MapResponseNode {
     pub machine_key: MachineKey,
 
     /// disco key (serialized as prefixed hex, e.g., "discokey:...").
+    /// skipped if empty to avoid sending "discokey:" which clients can't parse.
+    #[serde(default, skip_serializing_if = "DiscoKey::is_empty")]
     pub disco_key: DiscoKey,
 
     /// assigned addresses.

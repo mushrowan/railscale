@@ -1,4 +1,4 @@
-//! keys serialize to tailscale's prefixed hex format (e.g., `"nodekey:abc123..."`)
+//! cryptographic key types for tailscale protocol.
 //!
 //! these types wrap the raw key bytes and provide serialization support.
 //! keys serialize to tailscale's prefixed hex format (e.g., `"nodekey:abc123..."`).
@@ -72,7 +72,7 @@ impl MachineKey {
     }
 }
 
-/// serializes as `"nodekey:<64 hex chars>"`
+/// node key - identifies a node's current session.
 ///
 /// this key can be rotated and is used for the noise protocol handshake.
 /// serializes as `"nodekey:<64 hex chars>"`.
@@ -132,6 +132,11 @@ impl DiscoKey {
         } else {
             "discokey:???".to_string()
         }
+    }
+
+    /// check if the key is empty (not set).
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -202,5 +207,25 @@ mod tests {
         let json = "\"wrong:0202020202020202020202020202020202020202020202020202020202020202\"";
         let result: Result<NodeKey, _> = serde_json::from_str(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_empty_disco_key_serialize() {
+        // empty DiscoKey serializes to "discokey:" (empty hex)
+        // this format is not parseable by tailscale clients (expect 64 hex chars)
+        // so we use skip_serializing_if in mapresponsenode to omit empty keys
+        let key = DiscoKey::default();
+        let json = serde_json::to_string(&key).unwrap();
+        assert_eq!(json, "\"discokey:\"");
+        assert!(key.is_empty());
+    }
+
+    #[test]
+    fn test_disco_key_is_empty() {
+        let empty = DiscoKey::default();
+        assert!(empty.is_empty());
+
+        let non_empty = DiscoKey::from_bytes(vec![1, 2, 3]);
+        assert!(!non_empty.is_empty());
     }
 }
