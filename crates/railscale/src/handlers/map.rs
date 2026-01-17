@@ -353,7 +353,9 @@ fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
         endpoints: node.endpoints.iter().map(|e| e.to_string()).collect(),
         derp: String::new(), // Deprecated - use home_derp instead
         home_derp,
-        hostinfo: node.hostinfo.clone(),
+        // always include hostinfo (default to empty if none) to prevent nil pointer
+        // crashes in Tailscale client when accessing Hostinfo.Hostname() on peers
+        hostinfo: Some(node.hostinfo.clone().unwrap_or_default()),
         online: node.is_online,
         tags: node.tags.clone(),
         primary_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),

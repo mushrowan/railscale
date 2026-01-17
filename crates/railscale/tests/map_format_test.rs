@@ -1,4 +1,4 @@
-//! tests for: zstd compression, disco key updates, hostinfo updates, cidr formatting
+//! tests for response format in /machine/map endpoint.
 //!
 //! tests for: zstd compression, disco key updates, hostinfo updates, cidr formatting.
 
@@ -416,6 +416,127 @@ async fn test_peer_hostinfo_included_in_map_response() {
         peer_hi.os,
         Some("linux".to_string()),
         "Peer hostinfo OS should match"
+    );
+}
+
+#[tokio::test]
+async fn test_peer_without_hostinfo_gets_default_hostinfo() {
+    // test that when a peer has no hostinfo stored, we still send an empty hostinfo struct
+    // to avoid nil pointer crashes in the Tailscale client when it accesses Hostinfo.Hostname()
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    let now = chrono::Utc::now();
+
+    // create peer node (node b) without hostinfo - simulates a freshly registered node
+    // that hasn't sent its first MapRequest yet
+    let peer_node = Node {
+        id: NodeId(0),
+        machine_key: MachineKey::from_bytes(vec![10u8; 32]),
+        node_key: NodeKey::from_bytes(vec![20u8; 32]),
+        disco_key: DiscoKey::from_bytes(vec![30u8; 32]),
+        ipv4: Some("100.64.0.2".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::2".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None, // NO hostinfo!
+        hostname: "peer-node".to_string(),
+        given_name: "peer-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+    db.create_node(&peer_node).await.unwrap();
+
+    // create requesting node (node a)
+    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let node = Node {
+        id: NodeId(0),
+        machine_key: MachineKey::from_bytes(vec![1u8; 32]),
+        node_key: node_key.clone(),
+        disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "test-node".to_string(),
+        given_name: "test-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+    db.create_node(&node).await.unwrap();
+
+    let map_request = MapRequest {
+        version: railscale_proto::CapabilityVersion(100),
+        node_key: node_key.clone(),
+        disco_key: Some(DiscoKey::from_bytes(vec![3u8; 32])),
+        endpoints: vec![],
+        hostinfo: None,
+        omit_peers: false,
+        stream: false,
+        debug_flags: vec![],
+        compress: None,
+    };
+
+    let grants = GrantsEngine::new(map_common::wildcard_policy());
+    let config = railscale_types::Config::default();
+    let app = railscale::create_app(
+        db.clone(),
+        grants,
+        config,
+        None,
+        StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let (map_response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
+
+    // should have one peer (peer_node)
+    assert_eq!(map_response.peers.len(), 1, "Should have one peer");
+
+    let peer = &map_response.peers[0];
+
+    // critical: even when peer has no hostinfo stored, we must send a hostinfo struct
+    // to prevent nil pointer dereference in Tailscale client when it calls Hostinfo.Hostname()
+    assert!(
+        peer.hostinfo.is_some(),
+        "Peer MUST have hostinfo in MapResponse even if empty - Tailscale client crashes on nil Hostinfo"
     );
 }
 
