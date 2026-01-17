@@ -8,7 +8,7 @@ use serde::{
     de::{self, Deserialize, Deserializer, Unexpected, Visitor},
     ser::{Serialize, Serializer},
 };
-use snow::{params::*, Builder, HandshakeState};
+use snow::{Builder, HandshakeState, params::*};
 use std::{
     fmt,
     fmt::Write as _,
@@ -509,7 +509,7 @@ fn test_vectors_cacophony() {
     test_vectors_from_json(include_str!("vectors/cacophony.txt"));
 }
 
-/// these are the test vectors for all the official "spec 34" features
+/// these are the test vectors for all the official "spec 34" features.
 #[test]
 fn test_vectors_snow() {
     let file_res = OpenOptions::new().write(true).create_new(true).open("tests/vectors/snow.txt");
@@ -522,7 +522,7 @@ fn test_vectors_snow() {
     test_vectors_from_json(&contents);
 }
 
-/// these are the test vectors for non-standard features
+/// these are the test vectors for non-standard features.
 #[test]
 fn test_vectors_snow_extended() {
     let file_res =

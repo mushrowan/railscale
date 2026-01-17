@@ -10,9 +10,9 @@ use core::{convert::TryFrom, fmt};
 
 /// a state machine encompassing the transport phase of a noise session, using the two
 /// `CipherState`s (for sending and receiving) that were spawned from the `SymmetricState`'s
-/// `Split()` method, called after a handshake has been finished
+/// `Split()` method, called after a handshake has been finished.
 ///
-/// also see: [the relevant Noise spec section](https://noiseprotocol.org/noise.html#the-handshakestate-object)
+/// also see: [the relevant noise spec section](https://noiseprotocol.org/noise.html#the-handshakestate-object).
 pub struct TransportState {
     cipherstates: CipherStates,
     pattern: HandshakePattern,
@@ -34,26 +34,26 @@ impl TransportState {
         Ok(TransportState { cipherstates, pattern, dh_len, rs, initiator })
     }
 
-    /// get the remote party's static public key, if available
+    /// get the remote party's static public key, if available.
     ///
     /// NOTE: will return `none` if either the chosen noise pattern
     /// doesn't necessitate a remote static key, *or* if the remote
     /// static key is not yet known (as can be the case in the `XX`
-    /// pattern, for example)
+    /// pattern, for example).
     #[must_use]
     pub fn get_remote_static(&self) -> Option<&[u8]> {
         self.rs.get().map(|rs| &rs[..self.dh_len])
     }
 
     /// construct a message from `payload` (and pending handshake tokens if in handshake state),
-    /// and write it to the `message` buffer
+    /// and write it to the `message` buffer.
     ///
-    /// returns the number of bytes written to `message`
+    /// returns the number of bytes written to `message`.
     ///
     /// # Errors
     ///
     /// will result in `error::input` if the size of the output exceeds the max message
-    /// length in the Noise protocol (65535 bytes)
+    /// length in the Noise Protocol (65535 bytes).
     pub fn write_message(&mut self, payload: &[u8], message: &mut [u8]) -> Result<usize, Error> {
         if !self.initiator && self.pattern.is_oneway() {
             return Err(StateProblem::OneWay.into());
@@ -66,17 +66,17 @@ impl TransportState {
         cipher.encrypt(payload, message)
     }
 
-    /// read a noise message from `message` and write the payload to the `payload` buffer
+    /// read a noise message from `message` and write the payload to the `payload` buffer.
     ///
-    /// returns the number of bytes written to `payload`
+    /// returns the number of bytes written to `payload`.
     ///
     /// # Errors
-    /// will result in `Error::Input` if the message is more than 65535 bytes
+    /// will result in `error::input` if the message is more than 65535 bytes.
     ///
     /// will result in `error::decrypt` if the contents couldn't be decrypted and/or the
-    /// authentication tag didn't verify
+    /// authentication tag didn't verify.
     ///
-    /// will result in `StateProblem::Exhausted` if the max nonce overflows
+    /// will result in `stateproblem::exhausted` if the max nonce overflows.
     pub fn read_message(&mut self, message: &[u8], payload: &mut [u8]) -> Result<usize, Error> {
         if message.len() > MAXMSGLEN {
             Err(Error::Input)
@@ -92,7 +92,7 @@ impl TransportState {
     /// generate a new key for the egress symmetric cipher according to section 4.2
     /// of the Noise Specification. Synchronizing timing of rekey between initiator and
     /// responder is the responsibility of the application, as described in Section 11.3
-    /// of the Noise Specification
+    /// of the Noise Specification.
     pub fn rekey_outgoing(&mut self) {
         if self.initiator {
             self.cipherstates.rekey_initiator();
@@ -104,7 +104,7 @@ impl TransportState {
     /// generate a new key for the ingress symmetric cipher according to section 4.2
     /// of the Noise Specification. Synchronizing timing of rekey between initiator and
     /// responder is the responsibility of the application, as described in Section 11.3
-    /// of the Noise Specification
+    /// of the Noise Specification.
     pub fn rekey_incoming(&mut self) {
         if self.initiator {
             self.cipherstates.rekey_responder();
@@ -113,7 +113,7 @@ impl TransportState {
         }
     }
 
-    /// set a new key for the one or both of the initiator-egress and responder-egress symmetric ciphers
+    /// set a new key for the one or both of the initiator-egress and responder-egress symmetric ciphers.
     pub fn rekey_manually(
         &mut self,
         initiator: Option<&[u8; CIPHERKEYLEN]>,
@@ -127,17 +127,17 @@ impl TransportState {
         }
     }
 
-    /// set a new key for the initiator-egress symmetric cipher
+    /// set a new key for the initiator-egress symmetric cipher.
     pub fn rekey_initiator_manually(&mut self, key: &[u8; CIPHERKEYLEN]) {
         self.cipherstates.rekey_initiator_manually(key);
     }
 
-    /// set a new key for the responder-egress symmetric cipher
+    /// set a new key for the responder-egress symmetric cipher.
     pub fn rekey_responder_manually(&mut self, key: &[u8; CIPHERKEYLEN]) {
         self.cipherstates.rekey_responder_manually(key);
     }
 
-    /// set the forthcoming *inbound* nonce value. Useful for using noise on lossy transports
+    /// set the forthcoming *inbound* nonce value. useful for using noise on lossy transports.
     pub fn set_receiving_nonce(&mut self, nonce: u64) {
         if self.initiator {
             self.cipherstates.1.set_nonce(nonce);
@@ -146,35 +146,27 @@ impl TransportState {
         }
     }
 
-    /// get the forthcoming inbound nonce value
+    /// get the forthcoming inbound nonce value.
     ///
     /// # Errors
     ///
-    /// will result in `Error::State` if not in transport mode
+    /// will result in `error::state` if not in transport mode.
     #[must_use]
     pub fn receiving_nonce(&self) -> u64 {
-        if self.initiator {
-            self.cipherstates.1.nonce()
-        } else {
-            self.cipherstates.0.nonce()
-        }
+        if self.initiator { self.cipherstates.1.nonce() } else { self.cipherstates.0.nonce() }
     }
 
-    /// get the forthcoming outbound nonce value
+    /// get the forthcoming outbound nonce value.
     ///
     /// # Errors
     ///
-    /// will result in `Error::State` if not in transport mode
+    /// will result in `error::state` if not in transport mode.
     #[must_use]
     pub fn sending_nonce(&self) -> u64 {
-        if self.initiator {
-            self.cipherstates.0.nonce()
-        } else {
-            self.cipherstates.1.nonce()
-        }
+        if self.initiator { self.cipherstates.0.nonce() } else { self.cipherstates.1.nonce() }
     }
 
-    /// check if this session was started with the "initiator" role
+    /// check if this session was started with the "initiator" role.
     #[must_use]
     pub fn is_initiator(&self) -> bool {
         self.initiator

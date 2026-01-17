@@ -41,7 +41,7 @@ impl CipherState {
         validate_nonce(self.n)?;
         let len = self.cipher.encrypt(self.n, authtext, plaintext, out);
 
-        // we have validated this will not wrap around
+        // we have validated this will not wrap around.
         self.n += 1;
 
         Ok(len)
@@ -64,7 +64,7 @@ impl CipherState {
         validate_nonce(self.n)?;
         let len = self.cipher.decrypt(self.n, authtext, ciphertext, out)?;
 
-        // we have validated this will not wrap around
+        // we have validated this will not wrap around.
         self.n += 1;
 
         Ok(len)
@@ -183,16 +183,12 @@ impl StatelessCipherState {
 }
 
 /// validates that a nonce value has not exceeded the maximum
-/// defined by the Noise spec
+/// defined by the Noise spec.
 fn validate_nonce(current: u64) -> Result<(), Error> {
-    // 2^64-1 is reserved and may not be used in the state machine (5.1)
+    // 2^64-1 is reserved and may not be used in the state machine (5.1).
     //
-    // it is used by the default cipher rekey function (4.2)
-    if current == u64::MAX {
-        Err(Error::State(StateProblem::Exhausted))
-    } else {
-        Ok(())
-    }
+    // it is used by the default cipher rekey function (4.2).
+    if current == u64::MAX { Err(Error::State(StateProblem::Exhausted)) } else { Ok(()) }
 }
 
 impl From<CipherState> for StatelessCipherState {

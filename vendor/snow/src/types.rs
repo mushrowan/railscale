@@ -1,16 +1,16 @@
-//! the traits for cryptographic implementations that can be used by Noise
+//! the traits for cryptographic implementations that can be used by noise.
 
 use crate::{
-    constants::{CIPHERKEYLEN, MAXBLOCKLEN, MAXHASHLEN, TAGLEN},
     Error,
+    constants::{CIPHERKEYLEN, MAXBLOCKLEN, MAXHASHLEN, TAGLEN},
 };
 
 /// csprng operations
 pub trait Random: Send + Sync {
-    /// fill `dest` entirely with random data
+    /// fill `dest` entirely with random data.
     ///
     /// # Errors
-    /// returns `Error::Rng` in the event that the provided RNG failed
+    /// returns `error::rng` in the event that the provided rng failed.
     fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), Error>;
 }
 
@@ -31,7 +31,7 @@ pub trait Dh: Send + Sync {
     /// generate a new private key
     ///
     /// # Errors
-    /// returns `Error::Rng` in the event that the provided RNG failed
+    /// returns `error::rng` in the event that the provided rng failed.
     fn generate(&mut self, rng: &mut dyn Random) -> Result<(), Error>;
 
     /// get the public key
@@ -40,13 +40,13 @@ pub trait Dh: Send + Sync {
     /// get the private key
     fn privkey(&self) -> &[u8];
 
-    /// calculate a Diffie-Hellman exchange
+    /// calculate a diffie-hellman exchange.
     ///
     /// # Errors
-    /// returns `Error::Dh` in the event that the Diffie-Hellman failed
+    /// returns `error::dh` in the event that the diffie-hellman failed.
     fn dh(&self, pubkey: &[u8], out: &mut [u8]) -> Result<(), Error>;
 
-    /// the lenght in bytes of of the DH key exchange. Defaults to the public key
+    /// the lenght in bytes of of the dh key exchange. defaults to the public key.
     fn dh_len(&self) -> usize {
         self.pub_len()
     }
@@ -60,13 +60,13 @@ pub trait Cipher: Send + Sync {
     /// set the key
     fn set(&mut self, key: &[u8; CIPHERKEYLEN]);
 
-    /// encrypt (with associated data) a given plaintext
+    /// encrypt (with associated data) a given plaintext.
     fn encrypt(&self, nonce: u64, authtext: &[u8], plaintext: &[u8], out: &mut [u8]) -> usize;
 
-    /// decrypt (with associated data) a given ciphertext
+    /// decrypt (with associated data) a given ciphertext.
     ///
     /// # Errors
-    /// returns `Error::Decrypt` in the event that the decryption failed
+    /// returns `error::decrypt` in the event that the decryption failed.
     fn decrypt(
         &self,
         nonce: u64,
@@ -76,7 +76,7 @@ pub trait Cipher: Send + Sync {
     ) -> Result<usize, Error>;
 
     /// rekey according to section 4.2 of the noise specification, with a default
-    /// implementation guaranteed to be secure for all ciphers
+    /// implementation guaranteed to be secure for all ciphers.
     fn rekey(&mut self) {
         let mut ciphertext = [0; CIPHERKEYLEN + TAGLEN];
         let ciphertext_len = self.encrypt(u64::MAX, &[], &[0; CIPHERKEYLEN], &mut ciphertext);
@@ -110,7 +110,7 @@ pub trait Hash: Send + Sync {
     /// get the resulting hash
     fn result(&mut self, out: &mut [u8]);
 
-    /// calculate HMAC, as specified in the Noise spec
+    /// calculate hmac, as specified in the noise spec.
     ///
     /// NOTE: this method clobbers the existing internal state
     fn hmac(&mut self, key: &[u8], data: &[u8], out: &mut [u8]) {
@@ -134,7 +134,7 @@ pub trait Hash: Send + Sync {
         self.result(out);
     }
 
-    /// derive keys as specified in the Noise spec
+    /// derive keys as specified in the noise spec.
     ///
     /// NOTE: this method clobbers the existing internal state
     fn hkdf(
@@ -169,31 +169,31 @@ pub trait Hash: Send + Sync {
     }
 }
 
-/// kem operations
+/// kem operations.
 #[cfg(feature = "hfs")]
 pub trait Kem: Send + Sync {
-    /// the string that the noise spec defines for the primitive
+    /// the string that the noise spec defines for the primitive.
     fn name(&self) -> &'static str;
 
-    /// the length in bytes of a public key for this primitive
+    /// the length in bytes of a public key for this primitive.
     fn pub_len(&self) -> usize;
 
-    /// the length in bytes the Kem cipherthext for this primitive
+    /// the length in bytes the kem cipherthext for this primitive.
     fn ciphertext_len(&self) -> usize;
 
-    /// shared secret length in bytes that this Kem encapsulates
+    /// shared secret length in bytes that this kem encapsulates.
     fn shared_secret_len(&self) -> usize;
 
-    /// generate a new private key
+    /// generate a new private key.
     fn generate(&mut self, rng: &mut dyn Random);
 
     /// get the public key
     fn pubkey(&self) -> &[u8];
 
-    /// generate a shared secret and encapsulate it using this Kem
+    /// generate a shared secret and encapsulate it using this kem.
     ///
     /// # Errors
-    /// returns `Error::Kem` if the public key is invalid
+    /// returns `error::kem` if the public key is invalid.
     #[must_use = "returned value includes needed length values for output slices"]
     fn encapsulate(
         &self,
@@ -202,10 +202,10 @@ pub trait Kem: Send + Sync {
         ciphertext_out: &mut [u8],
     ) -> Result<(usize, usize), Error>;
 
-    /// decapsulate a ciphertext producing a shared secret
+    /// decapsulate a ciphertext producing a shared secret.
     ///
     /// # Errors
-    /// returns `Error::Kem` if the ciphertext is invalid
+    /// returns `error::kem` if the ciphertext is invalid.
     #[must_use = "returned value includes needed length value for output slice"]
     fn decapsulate(&self, ciphertext: &[u8], shared_secret_out: &mut [u8]) -> Result<usize, Error>;
 }

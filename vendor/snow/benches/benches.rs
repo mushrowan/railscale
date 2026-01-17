@@ -3,7 +3,7 @@
 extern crate criterion;
 
 use criterion::{Criterion, Throughput};
-use snow::{params::NoiseParams, Builder};
+use snow::{Builder, params::NoiseParams};
 
 const MSG_SIZE: usize = 4096;
 

@@ -1,5 +1,7 @@
-#[macro_use] extern crate honggfuzz;
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate honggfuzz;
+#[macro_use]
+extern crate lazy_static;
 extern crate snow;
 
 use snow::params::NoiseParams;

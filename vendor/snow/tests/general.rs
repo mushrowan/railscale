@@ -6,11 +6,11 @@
 
 use hex::FromHex;
 use snow::{
-    resolvers::{CryptoResolver, DefaultResolver},
     Builder, Error,
+    resolvers::{CryptoResolver, DefaultResolver},
 };
 
-use rand_core::{impls, RngCore};
+use rand_core::{RngCore, impls};
 use snow::{params::*, types::*};
 use x25519_dalek as x25519;
 
@@ -252,7 +252,9 @@ fn test_Xpsk0_expected_value() -> TestResult {
     let len = h_i.write_message(&[], &mut buf)?;
     assert_eq!(len, 96);
 
-    let expected = Vec::<u8>::from_hex("79a631eede1bf9c98f12032cdeadd0e7a079398fc786b88cc846ec89af85a51ad51eef529db0dd9127d4aa59a9183e118337d75a4e55e7e00f85c3d20ede536dd0112eec8c3b2a514018a90ab685b027dd24aa0c70b0c0f00524cc23785028b9")?;
+    let expected = Vec::<u8>::from_hex(
+        "79a631eede1bf9c98f12032cdeadd0e7a079398fc786b88cc846ec89af85a51ad51eef529db0dd9127d4aa59a9183e118337d75a4e55e7e00f85c3d20ede536dd0112eec8c3b2a514018a90ab685b027dd24aa0c70b0c0f00524cc23785028b9",
+    )?;
 
     println!("\nreality:  {}", hex::encode(&buf[..len]));
     println!("expected: {}", hex::encode(&expected));
@@ -264,8 +266,8 @@ fn test_Xpsk0_expected_value() -> TestResult {
 #[cfg(feature = "hfs")]
 #[cfg(feature = "use-pqcrypto-kyber1024")]
 fn test_NNhfs_sanity_session() -> TestResult {
-    // due to how PQClean is implemented, we cannot do deterministic testing of the protocol
-    // instead, we will see if the protocol runs smoothly
+    // due to how pqclean is implemented, we cannot do deterministic testing of the protocol.
+    // instead, we will see if the protocol runs smoothly.
     let params: NoiseParams = "Noise_NNhfs_25519+Kyber1024_ChaChaPoly_SHA256".parse()?;
     let mut h_i = Builder::new(params.clone()).build_initiator()?;
     let mut h_r = Builder::new(params).build_responder()?;
@@ -323,7 +325,9 @@ fn test_XXpsk0_expected_value() -> TestResult {
     let len = h_r.read_message(&buf[..len], &mut buf2)?;
     assert_eq!(len, 0);
 
-    let expected = Vec::<u8>::from_hex("072b7bbd237ac602c4aa938db36998f31ca4750752d1758d59850c627d0bdbc51205592c3baa101b4a31f062695b7c1dbee99d5123fbd2ad03052078c570e028")?;
+    let expected = Vec::<u8>::from_hex(
+        "072b7bbd237ac602c4aa938db36998f31ca4750752d1758d59850c627d0bdbc51205592c3baa101b4a31f062695b7c1dbee99d5123fbd2ad03052078c570e028",
+    )?;
     println!("\nreality:  {}", hex::encode(&buf[..64]));
     println!("expected: {}", hex::encode(&expected));
     assert_eq!(&buf[..64], &expected[..]);
@@ -448,7 +452,7 @@ fn test_rekey_manually() -> TestResult {
     let mut buffer_msg = [0_u8; 200];
     let mut buffer_out = [0_u8; 200];
 
-    // do a handshake, and transition to stateful transport mode
+    // do a handshake, and transition to stateful transport mode.
     let len = h_i.write_message(b"abc", &mut buffer_msg)?;
     h_r.read_message(&buffer_msg[..len], &mut buffer_out)?;
     let len = h_r.write_message(b"defg", &mut buffer_msg)?;
@@ -462,30 +466,30 @@ fn test_rekey_manually() -> TestResult {
     assert_eq!(&buffer_out[..len], b"hack the planet");
 
     // rekey initiator-side initiator key to K1 without rekeying the responder,
-    // expecting a decryption failure
+    // expecting a decryption failure.
     //
-    // the message *should* have failed to read, so we also force nonce re-sync
+    // the message *should* have failed to read, so we also force nonce re-sync.
     h_i.rekey_manually(Some(&[1_u8; 32]), None);
     let len = h_i.write_message(b"hack the planet", &mut buffer_msg)?;
     assert!(h_r.read_message(&buffer_msg[..len], &mut buffer_out).is_err());
     h_r.set_receiving_nonce(h_i.sending_nonce());
 
-    // rekey responder-side responder key to K1, expecting a successful decryption
+    // rekey responder-side responder key to K1, expecting a successful decryption.
     h_r.rekey_manually(Some(&[1_u8; 32]), None);
     let len = h_i.write_message(b"hack the planet", &mut buffer_msg)?;
     let len = h_r.read_message(&buffer_msg[..len], &mut buffer_out)?;
     assert_eq!(&buffer_out[..len], b"hack the planet");
 
     // rekey responder-side responder key to K1 without rekeying the initiator,
-    // expecting a decryption failure
+    // expecting a decryption failure.
     //
-    // the message *should* have failed to read, so we also force nonce re-sync
+    // the message *should* have failed to read, so we also force nonce re-sync.
     h_r.rekey_manually(None, Some(&[1_u8; 32]));
     let len = h_r.write_message(b"hack the planet", &mut buffer_msg)?;
     assert!(h_i.read_message(&buffer_msg[..len], &mut buffer_out).is_err());
     h_i.set_receiving_nonce(h_r.sending_nonce());
 
-    // rekey intiator-side responder key to K1, expecting a successful decryption
+    // rekey intiator-side responder key to K1, expecting a successful decryption.
     h_i.rekey_manually(None, Some(&[1_u8; 32]));
     let len = h_r.write_message(b"hack the planet", &mut buffer_msg)?;
     let len = h_i.read_message(&buffer_msg[..len], &mut buffer_out)?;
@@ -848,7 +852,7 @@ fn test_handshake_read_oob_error() -> TestResult {
     let len = h_r.write_message(b"defg", &mut buffer_msg)?;
     h_i.read_message(&buffer_msg[..len], &mut buffer_out)?;
 
-    // this shouldn't panic, but it *should* return an error
+    // this shouldn't panic, but it *should* return an error.
     let _ = h_i.read_message(&buffer_msg[..len], &mut buffer_out);
     Ok(())
 }
@@ -876,14 +880,14 @@ fn test_stateful_nonce_maxiumum_behavior() -> TestResult {
     h_r.set_receiving_nonce(sender_nonce);
     h_r.read_message(&buffer_msg[..len], &mut buffer_out)?;
 
-    // simulate exhausting the nonce space for the stateful transport
+    // simulate exhausting the nonce space for the stateful transport.
     sender_nonce += 1;
     let len = h_i.write_message(sender_nonce, b"abc", &mut buffer_msg)?;
 
     h_r.set_receiving_nonce(sender_nonce + 1); // u64::MAX
 
     // this should fail because we've simulated exhausting the nonce space, as the spec says 2^64-1 is reserved
-    // and may not be used in the `CipherState` object
+    // and may not be used in the `CipherState` object.
     assert!(matches!(
         h_r.read_message(&buffer_msg[..len], &mut buffer_out),
         Err(snow::Error::State(snow::error::StateProblem::Exhausted))

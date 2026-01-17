@@ -1,5 +1,7 @@
-#[macro_use] extern crate honggfuzz;
-#[macro_use] extern crate lazy_static;
+#[macro_use]
+extern crate honggfuzz;
+#[macro_use]
+extern crate lazy_static;
 extern crate snow;
 
 use snow::params::NoiseParams;
@@ -18,7 +20,7 @@ fn main() {
     responder.read_message(&out_buf[..len], &mut []);
     let len = responder.write_message(&[], &mut out_buf).unwrap();
     initiator.read_message(&out_buf[..len], &mut []);
-    
+
     let mut responder = responder.into_transport_mode().unwrap();
     let mut initiator = initiator.into_transport_mode().unwrap();
 

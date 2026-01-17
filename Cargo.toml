@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/railscale",
-    "crates/railscale-types",
-    "crates/railscale-db",
-    "crates/railscale-proto",
-    "crates/railscale-grants",
+  "crates/railscale",
+  "crates/railscale-types",
+  "crates/railscale-db",
+  "crates/railscale-proto",
+  "crates/railscale-grants",
 ]
 
 [workspace.metadata.crane]

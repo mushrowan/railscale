@@ -5,88 +5,104 @@
 pkgs.testers.runNixOSTest {
   name = "railscale-tailscale-integration";
 
-  nodes = let commonClientFlags = ["--verbose=5"]; in {
-    server = {
-      config,
-      pkgs,
-      ...
-    }: {
-      environment.systemPackages = [railscale pkgs.sqlite];
+  nodes =
+    let
+      commonClientFlags = [ "--verbose=5" ];
+    in
+    {
+      server =
+        {
+          config,
+          pkgs,
+          ...
+        }:
+        {
+          environment.systemPackages = [
+            railscale
+            pkgs.sqlite
+          ];
 
-      # Allow-all policy for testing
-      environment.etc."railscale/policy.json".text = builtins.toJSON {
-        grants = [
-          {
-            src = ["*"];
-            dst = ["*"];
-            ip = ["*"];
-          }
-        ];
-      };
+          # Allow-all policy for testing
+          environment.etc."railscale/policy.json".text = builtins.toJSON {
+            grants = [
+              {
+                src = [ "*" ];
+                dst = [ "*" ];
+                ip = [ "*" ];
+              }
+            ];
+          };
 
-      systemd.services.railscale = {
-        description = "Railscale Control Server";
-        wantedBy = ["multi-user.target"];
-        after = ["network.target"];
+          systemd.services.railscale = {
+            description = "Railscale Control Server";
+            wantedBy = [ "multi-user.target" ];
+            after = [ "network.target" ];
 
-        environment = {
-          RAILSCALE_DATABASE_URL = "sqlite:///var/lib/railscale/db.sqlite";
-          RAILSCALE_LISTEN_ADDR = "0.0.0.0:8080";
-          RAILSCALE_SERVER_URL = "http://server:8080";
-          RAILSCALE_POLICY_FILE = "/etc/railscale/policy.json";
-          RAILSCALE_LOG_LEVEL = "trace";
-          # Enable embedded DERP relay for peer connectivity in isolated VMs
-          RAILSCALE_DERP_EMBEDDED_ENABLED = "true";
-          RAILSCALE_DERP_ADVERTISE_HOST = "192.168.1.3";
-          RAILSCALE_DERP_ADVERTISE_PORT = "3340";
+            environment = {
+              RAILSCALE_DATABASE_URL = "sqlite:///var/lib/railscale/db.sqlite";
+              RAILSCALE_LISTEN_ADDR = "0.0.0.0:8080";
+              RAILSCALE_SERVER_URL = "http://server:8080";
+              RAILSCALE_POLICY_FILE = "/etc/railscale/policy.json";
+              RAILSCALE_LOG_LEVEL = "trace";
+              # Enable embedded DERP relay for peer connectivity in isolated VMs
+              RAILSCALE_DERP_EMBEDDED_ENABLED = "true";
+              RAILSCALE_DERP_ADVERTISE_HOST = "192.168.1.3";
+              RAILSCALE_DERP_ADVERTISE_PORT = "3340";
+            };
+
+            serviceConfig = {
+              ExecStart = "${pkgs.lib.getExe railscale}";
+              StateDirectory = "railscale";
+              Restart = "on-failure";
+            };
+          };
+
+          networking.firewall.allowedTCPPorts = [
+            8080
+            3340
+          ];
         };
 
-        serviceConfig = {
-          ExecStart = "${pkgs.lib.getExe railscale}";
-          StateDirectory = "railscale";
-          Restart = "on-failure";
+      client1 =
+        {
+          config,
+          pkgs,
+          ...
+        }:
+        {
+          services.tailscale = {
+            enable = true;
+            extraDaemonFlags = commonClientFlags;
+          };
+
+          # Disable log uploads to avoid DNS lookups for log.tailscale.com
+          systemd.services.tailscaled.environment = {
+            TS_NO_LOGS_NO_SUPPORT = "1";
+          };
+
+          environment.systemPackages = [ pkgs.tailscale ];
         };
-      };
 
-      networking.firewall.allowedTCPPorts = [8080 3340];
+      client2 =
+        {
+          config,
+          pkgs,
+          ...
+        }:
+        {
+          services.tailscale = {
+            enable = true;
+            extraDaemonFlags = commonClientFlags;
+          };
+
+          # Disable log uploads to avoid DNS lookups for log.tailscale.com
+          systemd.services.tailscaled.environment = {
+            TS_NO_LOGS_NO_SUPPORT = "1";
+          };
+
+          environment.systemPackages = [ pkgs.tailscale ];
+        };
     };
-
-    client1 = {
-      config,
-      pkgs,
-      ...
-    }: {
-      services.tailscale = {
-        enable = true;
-        extraDaemonFlags = commonClientFlags;
-      };
-
-      # Disable log uploads to avoid DNS lookups for log.tailscale.com
-      systemd.services.tailscaled.environment = {
-        TS_NO_LOGS_NO_SUPPORT = "1";
-      };
-
-      environment.systemPackages = [pkgs.tailscale];
-    };
-
-    client2 = {
-      config,
-      pkgs,
-      ...
-    }: {
-      services.tailscale = {
-        enable = true;
-        extraDaemonFlags = commonClientFlags;
-      };
-
-      # Disable log uploads to avoid DNS lookups for log.tailscale.com
-      systemd.services.tailscaled.environment = {
-        TS_NO_LOGS_NO_SUPPORT = "1";
-      };
-
-      environment.systemPackages = [pkgs.tailscale];
-    };
-  };
 
   testScript = ''
     start_all()

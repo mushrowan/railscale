@@ -29,7 +29,10 @@ serde_json = { workspace = true }
 serde_yaml = "0.9"
 chrono = { workspace = true }
 ipnet = { workspace = true }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls",
+  "json",
+] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -55,7 +58,10 @@ hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 crypto_box = "0.9"
 httparse = "1.9"
 rcgen = "0.13"
-rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+rustls = { version = "0.23", default-features = false, features = [
+  "std",
+  "ring",
+] }
 rustls-pemfile = "2"
 sha2 = "0.10"
 tokio-rustls = "0.26"

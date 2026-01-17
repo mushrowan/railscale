@@ -23,12 +23,12 @@ rust-version = "1.85"
 default = ["default-resolver", "default-resolver-crypto", "std"]
 default-resolver = []
 default-resolver-crypto = [
-    "use-aes-gcm",
-    "use-chacha20poly1305",
-    "use-blake2",
-    "use-sha2",
-    "use-curve25519",
-    "use-getrandom",
+  "use-aes-gcm",
+  "use-chacha20poly1305",
+  "use-blake2",
+  "use-sha2",
+  "use-curve25519",
+  "use-getrandom",
 ]
 nightly = ["blake2/simd_opt", "subtle/nightly"]
 ring-resolver = ["ring", "std"]
@@ -53,10 +53,10 @@ use-sha2 = ["sha2", "default-resolver"]
 use-aes-gcm = ["aes-gcm", "default-resolver"]
 use-getrandom = ["getrandom", "default-resolver"]
 use-pqcrypto-kyber1024 = [
-    "pqcrypto-kyber",
-    "pqcrypto-traits",
-    "hfs",
-    "default-resolver",
+  "pqcrypto-kyber",
+  "pqcrypto-traits",
+  "hfs",
+  "default-resolver",
 ]
 use-p256 = ["p256", "default-resolver"]
 
@@ -73,7 +73,7 @@ subtle = { version = "2.4", default-features = false }
 # default crypto provider
 getrandom = { version = "0.3", optional = true }
 aes-gcm = { version = "0.10", optional = true, default-features = false, features = [
-    "aes",
+  "aes",
 ] }
 chacha20poly1305 = { version = "0.10", optional = true, default-features = false }
 blake2 = { version = "0.10", optional = true, default-features = false }

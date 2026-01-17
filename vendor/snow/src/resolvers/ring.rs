@@ -1,9 +1,9 @@
 use super::CryptoResolver;
 use crate::{
+    Error,
     constants::{CIPHERKEYLEN, TAGLEN},
     params::{CipherChoice, DHChoice, HashChoice},
     types::{Cipher, Dh, Hash, Random},
-    Error,
 };
 use ring::{
     aead::{self, LessSafeKey, UnboundKey},
@@ -12,7 +12,7 @@ use ring::{
 };
 
 /// a resolver that chooses [ring](https://github.com/briansmith/ring)-backed
-/// primitives when available
+/// primitives when available.
 #[allow(clippy::module_name_repetitions)]
 #[derive(Default)]
 pub struct RingResolver;
@@ -46,7 +46,7 @@ impl CryptoResolver for RingResolver {
 }
 
 // nb: intentionally private so rng details aren't leaked into
-// the public api
+// the public API.
 struct RingRng {
     rng: SystemRandom,
 }
@@ -64,8 +64,8 @@ impl Random for RingRng {
 }
 
 struct CipherAESGCM {
-    // nOTE: LessSafeKey is chosen here because nonce atomicity is handled outside of this structure
-    // see ring documentation for more details on the naming choices
+    // NOTE: lesssafekey is chosen here because nonce atomicity is handled outside of this structure.
+    // see ring documentation for more details on the naming choices.
     key: LessSafeKey,
 }
 
@@ -144,8 +144,8 @@ impl Cipher for CipherAESGCM {
 }
 
 struct CipherChaChaPoly {
-    // nOTE: LessSafeKey is chosen here because nonce atomicity is to be ensured outside of this structure
-    // see ring documentation for more details on the naming choices
+    // NOTE: lesssafekey is chosen here because nonce atomicity is to be ensured outside of this structure.
+    // see ring documentation for more details on the naming choices.
     key: aead::LessSafeKey,
 }
 

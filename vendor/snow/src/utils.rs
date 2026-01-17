@@ -2,7 +2,7 @@ use core::ops::{Deref, DerefMut};
 
 /// toggle is similar to option, except that even in the off/"none" case, there is still
 /// an owned allocated inner object. This is useful for holding onto pre-allocated objects
-/// that can be toggled as enabled
+/// that can be toggled as enabled.
 pub struct Toggle<T> {
     inner: T,
     on: bool,
@@ -26,11 +26,7 @@ impl<T> Toggle<T> {
     }
 
     pub fn get(&self) -> Option<&T> {
-        if self.on {
-            Some(&self.inner)
-        } else {
-            None
-        }
+        if self.on { Some(&self.inner) } else { None }
     }
 }
 
