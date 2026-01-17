@@ -11,6 +11,9 @@ use openidconnect::{
 };
 use railscale_types::{OidcClaims, OidcConfig, PkceMethod, RegistrationId};
 
+use railscale_types::{HostInfo, MachineKey, Node, NodeKey, User};
+use tokio::sync::oneshot;
+
 /// information stored in the registration cache during OIDC flow.
 #[derive(Clone, Debug)]
 pub struct RegistrationInfo {
@@ -20,6 +23,31 @@ pub struct RegistrationInfo {
     pub pkce_verifier: Option<String>,
     /// nonce for ID token verification.
     pub nonce: String,
+}
+
+/// and wait for the oidc callback to complete the registration
+///
+/// the node's public key
+/// and wait for the OIDC callback to complete the registration.
+pub struct PendingRegistration {
+    /// the node's public key.
+    pub node_key: NodeKey,
+    /// the machine's public key (from noise handshake).
+    pub machine_key: MachineKey,
+    /// wrapped in Option to allow taking ownership when sending
+    pub hostinfo: Option<HostInfo>,
+    /// channel to notify when registration completes.
+    /// wrapped in option to allow taking ownership when sending.
+    pub completion_tx: Option<oneshot::Sender<CompletedRegistration>>,
+}
+
+/// the newly created node
+#[derive(Debug, Clone)]
+pub struct CompletedRegistration {
+    /// the newly created node.
+    pub node: Node,
+    /// the user who authenticated.
+    pub user: User,
 }
 
 /// oidc authentication provider.
@@ -278,6 +306,53 @@ pub fn validate_oidc_claims(config: &OidcConfig, claims: &OidcClaims) -> Result<
 mod tests {
     use super::*;
     use railscale_types::{PkceConfig, PkceMethod};
+
+    #[test]
+    fn test_pending_registration_stores_node_info() {
+        use railscale_types::{MachineKey, NodeKey};
+        use tokio::sync::oneshot;
+
+        let node_key = NodeKey::from_bytes(vec![1; 32]);
+        let machine_key = MachineKey::from_bytes(vec![2; 32]);
+        let (tx, _rx) = oneshot::channel();
+
+        let pending = PendingRegistration {
+            node_key: node_key.clone(),
+            machine_key: machine_key.clone(),
+            hostinfo: None,
+            completion_tx: Some(tx),
+        };
+
+        assert_eq!(pending.node_key, node_key);
+        assert_eq!(pending.machine_key, machine_key);
+    }
+
+    #[test]
+    fn test_completed_registration_stores_node_and_user() {
+        use railscale_types::test_utils::TestNodeBuilder;
+        use railscale_types::{User, UserId};
+
+        let node = TestNodeBuilder::new(1).build();
+        let user = User {
+            id: UserId(1),
+            name: "alice".to_string(),
+            display_name: Some("Alice".to_string()),
+            email: Some("alice@example.com".to_string()),
+            provider_identifier: None,
+            provider: None,
+            profile_pic_url: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let completed = CompletedRegistration {
+            node: node.clone(),
+            user: user.clone(),
+        };
+
+        assert_eq!(completed.node.id, node.id);
+        assert_eq!(completed.user.id, user.id);
+    }
 
     fn test_config() -> OidcConfig {
         OidcConfig {
