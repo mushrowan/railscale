@@ -12,7 +12,7 @@ use openidconnect::{
 use railscale_types::{OidcClaims, OidcConfig, PkceMethod, RegistrationId};
 
 use railscale_types::{HostInfo, MachineKey, Node, NodeKey, User};
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex, Notify};
 
 /// information stored in the registration cache during OIDC flow.
 #[derive(Clone, Debug)]
@@ -25,23 +25,50 @@ pub struct RegistrationInfo {
     pub nonce: String,
 }
 
-/// and wait for the oidc callback to complete the registration
-///
-/// the node's public key
+/// information about a pending registration waiting for oidc completion.
+///this struct is wrapped in Arc and stored in the pending registrations cache
+/// when a client initiates interactive login, we store this information
 /// and wait for the OIDC callback to complete the registration.
+/// this struct is wrapped in arc and stored in the pending registrations cache.
 pub struct PendingRegistration {
     /// the node's public key.
     pub node_key: NodeKey,
     /// the machine's public key (from noise handshake).
     pub machine_key: MachineKey,
-    /// wrapped in Option to allow taking ownership when sending
+    /// host information from the client.
     pub hostinfo: Option<HostInfo>,
-    /// channel to notify when registration completes.
-    /// wrapped in option to allow taking ownership when sending.
-    pub completion_tx: Option<oneshot::Sender<CompletedRegistration>>,
+    /// completed registration result (set by oidc callback).
+    pub completed: Mutex<Option<CompletedRegistration>>,
+    /// notifies waiters when registration completes.
+    pub notify: Notify,
 }
 
-/// the newly created node
+impl PendingRegistration {
+    /// create a new pending registration.
+    pub fn new(node_key: NodeKey, machine_key: MachineKey, hostinfo: Option<HostInfo>) -> Self {
+        Self {
+            node_key,
+            machine_key,
+            hostinfo,
+            completed: Mutex::new(None),
+            notify: Notify::new(),
+        }
+    }
+
+    /// mark the registration as complete and notify waiters.
+    pub async fn complete(&self, result: CompletedRegistration) {
+        let mut completed = self.completed.lock().await;
+        *completed = Some(result);
+        self.notify.notify_waiters();
+    }
+
+    /// check if the registration has completed.
+    pub async fn get_completed(&self) -> Option<CompletedRegistration> {
+        self.completed.lock().await.clone()
+    }
+}
+
+/// result of a completed interactive registration.
 #[derive(Debug, Clone)]
 pub struct CompletedRegistration {
     /// the newly created node.
@@ -310,21 +337,53 @@ mod tests {
     #[test]
     fn test_pending_registration_stores_node_info() {
         use railscale_types::{MachineKey, NodeKey};
-        use tokio::sync::oneshot;
 
         let node_key = NodeKey::from_bytes(vec![1; 32]);
         let machine_key = MachineKey::from_bytes(vec![2; 32]);
-        let (tx, _rx) = oneshot::channel();
 
-        let pending = PendingRegistration {
-            node_key: node_key.clone(),
-            machine_key: machine_key.clone(),
-            hostinfo: None,
-            completion_tx: Some(tx),
-        };
+        let pending = PendingRegistration::new(node_key.clone(), machine_key.clone(), None);
 
         assert_eq!(pending.node_key, node_key);
         assert_eq!(pending.machine_key, machine_key);
+    }
+
+    #[tokio::test]
+    async fn test_pending_registration_complete_and_get() {
+        use railscale_types::test_utils::TestNodeBuilder;
+        use railscale_types::{MachineKey, NodeKey, User, UserId};
+
+        let node_key = NodeKey::from_bytes(vec![1; 32]);
+        let machine_key = MachineKey::from_bytes(vec![2; 32]);
+        let pending = PendingRegistration::new(node_key, machine_key, None);
+
+        // initially not completed
+        assert!(pending.get_completed().await.is_none());
+
+        // complete the registration
+        let node = TestNodeBuilder::new(1).build();
+        let user = User {
+            id: UserId(1),
+            name: "alice".to_string(),
+            display_name: Some("Alice".to_string()),
+            email: Some("alice@example.com".to_string()),
+            provider_identifier: None,
+            provider: None,
+            profile_pic_url: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        pending
+            .complete(CompletedRegistration {
+                node: node.clone(),
+                user: user.clone(),
+            })
+            .await;
+
+        // now completed
+        let result = pending.get_completed().await.expect("should be completed");
+        assert_eq!(result.node.id, node.id);
+        assert_eq!(result.user.id, user.id);
     }
 
     #[test]

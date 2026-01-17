@@ -40,12 +40,17 @@ use axum::{
     Router,
     routing::{get, post},
 };
+use std::time::Duration;
+
+use moka::sync::Cache;
 use railscale_db::{Database, IpAllocator, RailscaleDb};
 use railscale_grants::{GrantsEngine, Policy};
-use railscale_types::Config;
+use railscale_types::{Config, RegistrationId};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, RwLock};
+
+use crate::oidc::PendingRegistration;
 
 /// handle for hot-reloading policy at runtime.
 ///
@@ -61,7 +66,7 @@ impl PolicyHandle {
     ///
     /// this atomically updates the policy used by all handlers.
     /// existing in-flight requests will complete with the old policy;
-    /// reload the policy synchronously (for use outside async context)
+    /// new requests will use the new policy.
     pub async fn reload(&self, policy: Policy) {
         let mut engine = self.engine.write().await;
         engine.update_policy(policy);
@@ -70,7 +75,7 @@ impl PolicyHandle {
     /// reload the policy synchronously (for use outside async context).
     ///
     /// # Panics
-    /// grants engine for access control evaluation (shared for hot-reload)
+    /// panics if called from within a tokio runtime. use [`reload`] instead.
     pub fn reload_blocking(&self, policy: Policy) {
         let mut engine = self.engine.blocking_write();
         engine.update_policy(policy);
@@ -94,8 +99,11 @@ pub struct AppState {
     pub ip_allocator: Arc<Mutex<IpAllocator>>,
     /// server's noise public key for ts2021 protocol.
     pub noise_public_key: Vec<u8>,
-    /// server's noise private key for ts2021 protocol handshakes.
+    /// maps RegistrationId -> Arc<PendingRegistration>
     pub noise_private_key: Vec<u8>,
+    /// cache of pending registrations waiting for oidc completion.
+    /// maps registrationid -> arc<pendingregistration>.
+    pub pending_registrations: Cache<RegistrationId, Arc<PendingRegistration>>,
 }
 
 /// load a noise keypair from file, or generate and save a new one.
@@ -159,9 +167,9 @@ pub async fn create_app(
     app
 }
 
-/// reload the policy at runtime (e.g., in response to SIGHUP)
+/// create the axum application with a handle for policy hot-reload.
 ///
-/// if `keypair` is None, a new keypair will be generated (not persisted)
+/// returns both the router and a [`policyhandle`] that can be used to
 /// reload the policy at runtime (e.g., in response to SIGHUP).
 ///
 /// if `keypair` is none, a new keypair will be generated (not persisted).
@@ -197,6 +205,11 @@ pub async fn create_app_with_policy_handle(
         engine: Arc::clone(&grants),
     };
 
+    // create pending registrations cache with 15 minute ttl
+    let pending_registrations = Cache::builder()
+        .time_to_live(Duration::from_secs(900))
+        .build();
+
     let state = AppState {
         db,
         grants,
@@ -206,6 +219,7 @@ pub async fn create_app_with_policy_handle(
         ip_allocator: Arc::new(Mutex::new(ip_allocator)),
         noise_public_key: keypair.public,
         noise_private_key: keypair.private,
+        pending_registrations,
     };
 
     let router = Router::new()
