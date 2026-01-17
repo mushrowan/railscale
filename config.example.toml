@@ -7,8 +7,48 @@
 #   3. ./config.toml (current directory)
 #   4. Path specified with --config flag
 #
-# CLI flags override config file values.
-# Environment variables (RAILSCALE_*) override config file values.
+# Priority order (highest to lowest):
+#   CLI flags > Environment variables > Config file > Defaults
+#
+# -----------------------------------------------------------------------------
+# Environment Variables
+# -----------------------------------------------------------------------------
+#
+# All settings can be configured via environment variables with RAILSCALE_* prefix.
+# For Headscale migration, HEADSCALE_* prefixed vars are also supported as fallback.
+#
+# Available environment variables:
+#
+#   RAILSCALE_CONFIG              Path to config file
+#   RAILSCALE_DATABASE_URL        Database connection URL (sqlite:// or postgres://)
+#   RAILSCALE_LISTEN_ADDR         Address to bind the server to
+#   RAILSCALE_SERVER_URL          Public URL for client connections
+#   RAILSCALE_POLICY_FILE         Path to policy JSON file
+#   RAILSCALE_NOISE_KEY           Path to Noise protocol private key
+#   RAILSCALE_BASE_DOMAIN         Base domain for MagicDNS
+#   RAILSCALE_PREFIX_V4           IPv4 CIDR prefix for allocation
+#   RAILSCALE_PREFIX_V6           IPv6 CIDR prefix for allocation
+#   RAILSCALE_LOG_LEVEL           Log level (trace, debug, info, warn, error)
+#
+# DERP embedded server:
+#   RAILSCALE_DERP_EMBEDDED_ENABLED   Enable embedded DERP (true/false)
+#   RAILSCALE_DERP_REGION_ID          DERP region ID
+#   RAILSCALE_DERP_REGION_NAME        DERP region name
+#   RAILSCALE_DERP_LISTEN_ADDR        DERP listen address
+#   RAILSCALE_DERP_ADVERTISE_HOST     Hostname advertised to clients
+#   RAILSCALE_DERP_ADVERTISE_PORT     Port advertised to clients
+#   RAILSCALE_DERP_CERT_PATH          Path to TLS certificate
+#   RAILSCALE_DERP_TLS_KEY_PATH       Path to TLS private key
+#   RAILSCALE_DERP_PRIVATE_KEY_PATH   Path to DERP protocol key
+#
+# Example:
+#   export RAILSCALE_SERVER_URL="https://ts.example.com"
+#   export RAILSCALE_DATABASE_URL="sqlite:///var/lib/railscale/db.sqlite"
+#   railscale serve
+#
+# Headscale migration example (HEADSCALE_* vars work as fallback):
+#   export HEADSCALE_SERVER_URL="https://ts.example.com"  # Works!
+#   railscale serve
 
 # -----------------------------------------------------------------------------
 # Server Configuration
@@ -154,10 +194,10 @@ search_domains = []
 # Can be IP addresses or DNS-over-HTTPS URLs.
 # These are used for all queries except split DNS domains.
 global = [
-    "1.1.1.1",          # Cloudflare primary
-    "1.0.0.1",          # Cloudflare secondary
-    "8.8.8.8",          # Google primary
-    "8.8.4.4",          # Google secondary
+  "1.1.1.1", # Cloudflare primary
+  "1.0.0.1", # Cloudflare secondary
+  "8.8.8.8", # Google primary
+  "8.8.4.4", # Google secondary
 ]
 
 # For DNS-over-HTTPS (NextDNS example):
@@ -251,8 +291,8 @@ node_store_batch_timeout_ms = 500
 
 # Registration cache settings.
 # The cache stores pending registrations to handle retries.
-register_cache_expiration_secs = 900    # 15 minutes
-register_cache_cleanup_secs = 1200      # 20 minutes
+register_cache_expiration_secs = 900 # 15 minutes
+register_cache_cleanup_secs = 1200   # 20 minutes
 
 # Interval between keep-alive messages for long-polling map sessions.
 # Helps detect stale connections. Set to 0 to disable.

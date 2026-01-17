@@ -213,11 +213,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_followup_waits_for_completion() {
-        use crate::oidc::{CompletedRegistration, PendingRegistration};
-        use railscale_types::test_utils::TestNodeBuilder;
-        use railscale_types::{RegistrationId, User, UserId};
-        use std::sync::Arc;
-
         // set up test database
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
@@ -287,7 +282,7 @@ mod tests {
         .await;
 
         // the followup should return quickly with a timeout response
-        // got a response - could be timeout or not found
+        // (or error if registration not found due to different app instance)
         match followup_response {
             Ok(Ok(response)) => {
                 // got a response - could be timeout or not found
@@ -509,8 +504,8 @@ async fn handle_interactive_registration(
     }))
 }
 
-/// authentication has completed. It waits for the oidc callback to signal
-///completion via the PendingRegistration
+/// handle followup registration request.
+///
 /// this is called when the client polls with a followup url to check if
 /// authentication has completed. It waits for the OIDC callback to signal
 /// completion via the PendingRegistration.

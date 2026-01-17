@@ -140,6 +140,7 @@ fn test_oidc_config(issuer: &str) -> OidcConfig {
         issuer: issuer.to_string(),
         client_id: "test-client".to_string(),
         client_secret: "test-secret".to_string(),
+        client_secret_path: None,
         scope: vec!["openid".to_string(), "email".to_string()],
         email_verified_required: false,
         pkce: PkceConfig {
@@ -424,10 +425,10 @@ async fn test_oidc_callback_full_flow_creates_user() {
     assert_eq!(user.name, "alice");
 }
 
-/// 3. user authenticates via oidc (simulated)
-/// 4. Server receives oidc callback, creates node
-/// 5. Client sends followup request
-/// 6. Server returns machine_authorized: true
+/// full integration test for interactive login flow:
+/// 1. Client sends register request without auth_key
+/// 2. Server returns auth_url
+/// 3. User authenticates via OIDC (simulated)
 /// 4. Server receives OIDC callback, creates node
 /// 5. Client sends followup request
 /// 6. Server returns machine_authorized: true
@@ -511,7 +512,7 @@ async fn test_full_interactive_login_flow() {
     );
 
     let auth_url = register_resp.auth_url;
-    let reg_id = auth_url.strip_prefix("/register/").unwrap();
+    let _reg_id = auth_url.strip_prefix("/register/").unwrap();
 
     // step 2: follow the auth_url - this redirects to oidc
     let redirect_response = app

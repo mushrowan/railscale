@@ -8,8 +8,10 @@ pkgs.testers.runNixOSTest {
   nodes =
     let
       commonClientFlags = [ "--verbose=5" ];
-      dbUrl = "sqlite:///var/lib/railscale/db.sqlite";
       serverUrl = "http://192.168.1.3:8080";
+
+      # Import the NixOS module
+      railscaleModule = import ./nix/module.nix;
     in
     {
       server =
@@ -19,8 +21,10 @@ pkgs.testers.runNixOSTest {
           ...
         }:
         {
+          imports = [ railscaleModule ];
+
+          # Extra packages for testing
           environment.systemPackages = [
-            railscale
             pkgs.sqlite
             pkgs.jq
           ];
@@ -64,36 +68,34 @@ pkgs.testers.runNixOSTest {
             ];
           };
 
-          # Set database URL for CLI commands
-          environment.variables.RAILSCALE_DATABASE_URL = dbUrl;
+          # Use the railscale module
+          services.railscale = {
+            enable = true;
+            package = railscale;
+            address = "0.0.0.0";
+            port = 8080;
 
-          systemd.services.railscale = {
-            description = "Railscale Control Server";
-            wantedBy = [ "multi-user.target" ];
-            after = [ "network.target" ];
+            settings = {
+              server_url = "http://server:8080";
 
-            environment = {
-              RAILSCALE_DATABASE_URL = dbUrl;
-              RAILSCALE_LISTEN_ADDR = "0.0.0.0:8080";
-              RAILSCALE_SERVER_URL = "http://server:8080";
-              RAILSCALE_POLICY_FILE = "/etc/railscale/policy.json";
-              RAILSCALE_LOG_LEVEL = "debug";
-              RAILSCALE_DERP_EMBEDDED_ENABLED = "true";
-              RAILSCALE_DERP_ADVERTISE_HOST = "192.168.1.3";
-              RAILSCALE_DERP_ADVERTISE_PORT = "3340";
+              derp.embedded_derp = {
+                enabled = true;
+                advertise_host = "192.168.1.3";
+                advertise_port = 3340;
+              };
             };
 
-            serviceConfig = {
-              ExecStart = "${pkgs.lib.getExe railscale} serve";
-              StateDirectory = "railscale";
-              Restart = "on-failure";
-            };
+            policyFile = "/etc/railscale/policy.json";
           };
 
-          networking.firewall.allowedTCPPorts = [
-            8080
-            3340
-          ];
+          # Set database URL for CLI commands (module handles this for the service)
+          environment.variables.RAILSCALE_DATABASE_URL = "sqlite:///var/lib/railscale/db.sqlite";
+
+          # Override log level for debugging
+          systemd.services.railscale.environment.RAILSCALE_LOG_LEVEL = "debug";
+
+          # Extra firewall port for control plane (DERP ports auto-opened by module)
+          networking.firewall.allowedTCPPorts = [ 8080 ];
         };
 
       client1 =

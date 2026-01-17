@@ -21,6 +21,87 @@ const CONFIG_SEARCH_PATHS: &[&str] = &[
     "./config.toml",
 ];
 
+/// environment variable suffixes that support headscale_* fallback.
+const ENV_VAR_SUFFIXES: &[&str] = &[
+    "CONFIG",
+    "DATABASE_URL",
+    "LISTEN_ADDR",
+    "SERVER_URL",
+    "POLICY_FILE",
+    "NOISE_KEY",
+    "BASE_DOMAIN",
+    "PREFIX_V4",
+    "PREFIX_V6",
+    "LOG_LEVEL",
+    "DERP_EMBEDDED_ENABLED",
+    "DERP_REGION_ID",
+    "DERP_REGION_NAME",
+    "DERP_LISTEN_ADDR",
+    "DERP_ADVERTISE_HOST",
+    "DERP_ADVERTISE_PORT",
+    "DERP_CERT_PATH",
+    "DERP_TLS_KEY_PATH",
+    "DERP_PRIVATE_KEY_PATH",
+    // for tests
+    "TEST_VAR",
+];
+
+/// migrate a single env var from headscale_* to railscale_* if needed.
+///
+/// returns the value to use (railscale_* takes precedence).
+fn migrate_env_var(
+    _suffix: &str,
+    headscale_val: Option<&str>,
+    railscale_val: Option<&str>,
+) -> Option<String> {
+    match (railscale_val, headscale_val) {
+        (Some(rs), _) => Some(rs.to_string()),
+        (None, Some(hs)) => Some(hs.to_string()),
+        (None, None) => None,
+    }
+}
+
+/// set RAILSCALE_X to the HEADSCALE_X value. This allows users migrating from
+///headscale to use their existing environment configuration
+/// for each known env var suffix, if headscale_x is set but railscale_x is not,
+/// call this before clap parses arguments
+/// headscale to use their existing environment configuration.
+///
+/// call this before clap parses arguments.
+pub fn apply_headscale_env_migration() {
+    use std::env;
+
+    for suffix in ENV_VAR_SUFFIXES {
+        let rs_key = format!("RAILSCALE_{}", suffix);
+        let hs_key = format!("HEADSCALE_{}", suffix);
+
+        let rs_val = env::var(&rs_key).ok();
+        let hs_val = env::var(&hs_key).ok();
+
+        // only set railscale_* if it's not already set and headscale_* is
+        if rs_val.is_none() {
+            if let Some(hs) = hs_val {
+                tracing::debug!(
+                    "Migrating {} -> {} = {}",
+                    hs_key,
+                    rs_key,
+                    if suffix.contains("SECRET") || suffix.contains("KEY") {
+                        "[redacted]"
+                    } else {
+                        &hs
+                    }
+                );
+                // SAFETY: we're setting env vars before any threads are spawned,
+                // during CLI initialization. This is the standard pattern for
+                // env var configuration at startup.
+                unsafe {
+                    env::set_var(&rs_key, &hs);
+                }
+            }
+        }
+    }
+}
+
 /// run the railscale control server
 #[derive(Args, Debug)]
 pub struct ServeCommand {
@@ -356,10 +437,41 @@ impl ServeCommand {
             );
         }
 
+        // initialize oidc if configured
+        let oidc = if let Some(ref oidc_config) = config.oidc {
+            info!("Initializing OIDC provider...");
+
+            // load client_secret from path if specified
+            let mut oidc_config = oidc_config.clone();
+            if let Some(ref secret_path) = oidc_config.client_secret_path {
+                info!("Loading OIDC client secret from {:?}", secret_path);
+                oidc_config.client_secret = std::fs::read_to_string(secret_path)
+                    .with_context(|| {
+                        format!("failed to read OIDC client secret from {:?}", secret_path)
+                    })?
+                    .trim()
+                    .to_string();
+            }
+
+            if oidc_config.client_secret.is_empty() {
+                bail!("OIDC client_secret is required (set client_secret or client_secret_path)");
+            }
+
+            let provider = crate::oidc::AuthProviderOidc::new(oidc_config, &config.server_url)
+                .await
+                .map_err(|e| {
+                    color_eyre::eyre::eyre!("failed to initialize OIDC provider: {}", e)
+                })?;
+            info!("OIDC provider initialized");
+            Some(provider)
+        } else {
+            None
+        };
+
         // build router
         let notifier = crate::StateNotifier::new();
         let app =
-            crate::create_app(db, grants, config.clone(), None, notifier, Some(keypair)).await;
+            crate::create_app(db, grants, config.clone(), oidc, notifier, Some(keypair)).await;
 
         // parse listen address
         let addr: SocketAddr = config
@@ -634,5 +746,70 @@ map_keepalive_interval_secs = 60
         assert_eq!(config.server_url, "http://127.0.0.1:8080");
         assert_eq!(config.listen_addr, "0.0.0.0:8080");
         assert_eq!(config.base_domain, "railscale.net");
+    }
+
+    #[test]
+    fn test_migrate_headscale_env_vars() {
+        // hEADSCALE_SERVER_URL -> RAILSCALE_SERVER_URL
+        // when RAILSCALE_* is not set
+
+        // headscale_server_url -> railscale_server_url
+        assert_eq!(
+            migrate_env_var("SERVER_URL", Some("https://hs.example.com"), None),
+            Some("https://hs.example.com".to_string())
+        );
+
+        // railscale_* takes precedence over headscale_*
+        assert_eq!(
+            migrate_env_var(
+                "SERVER_URL",
+                Some("https://hs.example.com"),
+                Some("https://rs.example.com")
+            ),
+            Some("https://rs.example.com".to_string())
+        );
+
+        // neither set returns none
+        assert_eq!(migrate_env_var("SERVER_URL", None, None), None);
+    }
+
+    #[test]
+    fn test_apply_headscale_env_migration() {
+        use std::env;
+
+        // save original values
+        let orig_rs = env::var("RAILSCALE_TEST_VAR").ok();
+        let orig_hs = env::var("HEADSCALE_TEST_VAR").ok();
+
+        // SAFETY: test runs single-threaded, safe to manipulate env vars
+        unsafe {
+            // clean slate
+            env::remove_var("RAILSCALE_TEST_VAR");
+            env::remove_var("HEADSCALE_TEST_VAR");
+
+            // set only headscale_*
+            env::set_var("HEADSCALE_TEST_VAR", "headscale_value");
+        }
+
+        apply_headscale_env_migration();
+
+        // railscale_* should now be set
+        assert_eq!(
+            env::var("RAILSCALE_TEST_VAR").ok(),
+            Some("headscale_value".to_string())
+        );
+
+        // SAFETY: test cleanup, single-threaded
+        unsafe {
+            // restore original values
+            match orig_rs {
+                Some(v) => env::set_var("RAILSCALE_TEST_VAR", v),
+                None => env::remove_var("RAILSCALE_TEST_VAR"),
+            }
+            match orig_hs {
+                Some(v) => env::set_var("HEADSCALE_TEST_VAR", v),
+                None => env::remove_var("HEADSCALE_TEST_VAR"),
+            }
+        }
     }
 }

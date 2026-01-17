@@ -10,7 +10,8 @@
 mod apikeys;
 mod nodes;
 mod preauthkeys;
-mod serve;
+/// the `serve` subcommand module.
+pub mod serve;
 mod users;
 
 pub use apikeys::ApikeysCommand;

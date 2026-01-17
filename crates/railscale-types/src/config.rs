@@ -196,7 +196,7 @@ fn default_derp_private_key_path() -> PathBuf {
     PathBuf::from("/var/lib/railscale/derp_private.key")
 }
 
-/// the hostname to advertise to clients for this derp server
+/// runtime information for the embedded derp server populated at startup.
 #[derive(Debug, Clone)]
 pub struct EmbeddedDerpRuntime {
     /// the hostname to advertise to clients for this derp server.
@@ -290,11 +290,18 @@ pub struct OidcConfig {
     /// oidc issuer url.
     pub issuer: String,
 
-    /// client id.
+    /// client secret (set directly or loaded from `client_secret_path`)
     pub client_id: String,
 
-    /// client secret.
+    /// if set, the secret is loaded from this file at startup
+    #[serde(default)]
     pub client_secret: String,
+
+    /// path to file containing client secret.
+    /// if set, the secret is loaded from this file at startup.
+    /// this is useful for secrets management (e.g., sops, systemd credentials).
+    #[serde(default)]
+    pub client_secret_path: Option<std::path::PathBuf>,
 
     /// scopes to request.
     pub scope: Vec<String>,
@@ -417,6 +424,7 @@ mod tests {
             issuer: "https://sso.example.com".to_string(),
             client_id: "railscale".to_string(),
             client_secret: "secret".to_string(),
+            client_secret_path: None,
             scope: vec![
                 "openid".to_string(),
                 "profile".to_string(),
@@ -474,6 +482,29 @@ mod tests {
         assert_eq!(
             oidc.extra_params.get("domain_hint"),
             Some(&"example.com".to_string())
+        );
+        assert!(oidc.client_secret_path.is_none());
+    }
+
+    #[test]
+    fn test_oidc_config_with_secret_path() {
+        let json = r#"{
+            "issuer": "https://sso.example.com",
+            "client_id": "railscale",
+            "client_secret_path": "/run/secrets/oidc-secret",
+            "scope": ["openid", "profile"],
+            "email_verified_required": false
+        }"#;
+
+        let oidc: OidcConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(oidc.issuer, "https://sso.example.com");
+        assert!(
+            oidc.client_secret.is_empty(),
+            "client_secret should default to empty"
+        );
+        assert_eq!(
+            oidc.client_secret_path,
+            Some(std::path::PathBuf::from("/run/secrets/oidc-secret"))
         );
     }
 }

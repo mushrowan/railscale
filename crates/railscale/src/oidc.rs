@@ -26,7 +26,7 @@ pub struct RegistrationInfo {
 }
 
 /// information about a pending registration waiting for oidc completion.
-///this struct is wrapped in Arc and stored in the pending registrations cache
+///
 /// when a client initiates interactive login, we store this information
 /// and wait for the OIDC callback to complete the registration.
 /// this struct is wrapped in arc and stored in the pending registrations cache.
@@ -418,6 +418,7 @@ mod tests {
             issuer: "https://sso.example.com".to_string(),
             client_id: "railscale".to_string(),
             client_secret: "secret".to_string(),
+            client_secret_path: None,
             scope: vec!["openid".to_string()],
             email_verified_required: false,
             pkce: PkceConfig {

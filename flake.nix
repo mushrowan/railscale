@@ -193,5 +193,14 @@
             };
           };
         };
+
+      # Flake-wide outputs (not per-system)
+      flake = {
+        # NixOS module for services.railscale
+        nixosModules = {
+          railscale = ./nix/module.nix;
+          default = ./nix/module.nix;
+        };
+      };
     };
 }

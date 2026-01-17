@@ -7,7 +7,7 @@
 
 use clap::Parser;
 use color_eyre::eyre::Result;
-use railscale::cli::{Cli, Command};
+use railscale::cli::{Cli, Command, serve::apply_headscale_env_migration};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,6 +17,9 @@ async fn main() -> Result<()> {
         .expect("Failed to install rustls crypto provider");
 
     color_eyre::install()?;
+
+    // migrate headscale_* env vars to railscale_* for compatibility
+    apply_headscale_env_migration();
 
     let cli = Cli::parse();
 
