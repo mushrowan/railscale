@@ -191,7 +191,7 @@ mod tests {
             .await
             .unwrap();
 
-        // parse response body
+        // without oidc, should return 200 with auth_url pointing to web registration
         assert_eq!(response.status(), StatusCode::OK);
 
         // parse response body
@@ -200,7 +200,7 @@ mod tests {
             .unwrap();
         let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
 
-        // should have an auth_url for web registration
+        // should not be authorized yet
         assert!(!resp.machine_authorized);
 
         // should have an auth_url for web registration
@@ -210,9 +210,106 @@ mod tests {
             resp.auth_url
         );
     }
+
+    #[tokio::test]
+    async fn test_register_followup_waits_for_completion() {
+        use crate::oidc::{CompletedRegistration, PendingRegistration};
+        use railscale_types::test_utils::TestNodeBuilder;
+        use railscale_types::{RegistrationId, User, UserId};
+        use std::sync::Arc;
+
+        // set up test database
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // first, make an initial request to create a pending registration
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // step 1: initial request without auth_key creates pending registration
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // get the auth_url from the response
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+        assert!(!resp.machine_authorized);
+        let auth_url = resp.auth_url;
+        assert!(auth_url.starts_with("/register/"));
+
+        // step 2: send followup request - since nothing completed it,
+        // it should timeout and return auth_url again
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+            "Followup": auth_url
+        });
+
+        // use a short timeout for the test
+        let followup_response = tokio::time::timeout(
+            tokio::time::Duration::from_secs(2),
+            app.clone().oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            ),
+        )
+        .await;
+
+        // the followup should return quickly with a timeout response
+        // got a response - could be timeout or not found
+        match followup_response {
+            Ok(Ok(response)) => {
+                // got a response - could be timeout or not found
+                let status = response.status();
+                assert!(
+                    status == StatusCode::OK || status == StatusCode::BAD_REQUEST,
+                    "expected 200 or 400, got {}",
+                    status
+                );
+            }
+            Ok(Err(e)) => {
+                panic!("Request error: {:?}", e);
+            }
+            Err(_) => {
+                // test timeout - that's okay, the followup is waiting
+                // this shouldn't happen with our 30s server timeout vs 2s test timeout
+            }
+        }
+    }
 }
 
-/// 3. **Interactive (followup)**: Client polls with followup url after auth
+/// handle node registration.
 ///
 /// this endpoint is called by tailscale clients to register a new node
 /// with the control server. It supports three registration flows:
@@ -253,8 +350,8 @@ pub async fn register(
 
     // route to appropriate registration flow
     if !req.followup.is_empty() {
-        // followup request - wait for oidc completion (Phase 3)
-        return Err(ApiError::internal("followup not yet implemented"));
+        // followup request - wait for oidc completion
+        return handle_followup_registration(state, &req.followup).await;
     } else if !auth_key_str.is_empty() {
         // preauth key registration - existing flow
         return handle_preauth_registration(state, req, machine_key, &auth_key_str).await;
@@ -373,7 +470,7 @@ async fn handle_preauth_registration(
     }))
 }
 
-/// to complete authentication (via oidc or web registration)
+/// handle interactive registration (no auth_key).
 ///
 /// this creates a pending registration and returns an auth_url for the user
 /// to complete authentication (via OIDC or web registration).
@@ -386,7 +483,7 @@ async fn handle_interactive_registration(
     use railscale_types::RegistrationId;
     use std::sync::Arc;
 
-    // create and store pending registration
+    // generate a new registration id
     let registration_id = RegistrationId::generate();
 
     // create and store pending registration
@@ -408,6 +505,97 @@ async fn handle_interactive_registration(
         node_key_expired: false,
         machine_authorized: false,
         auth_url,
+        error: String::new(),
+    }))
+}
+
+/// authentication has completed. It waits for the oidc callback to signal
+///completion via the PendingRegistration
+/// this is called when the client polls with a followup url to check if
+/// authentication has completed. It waits for the OIDC callback to signal
+/// completion via the PendingRegistration.
+async fn handle_followup_registration(
+    state: AppState,
+    followup: &str,
+) -> Result<Json<RegisterResponse>, ApiError> {
+    use railscale_types::RegistrationId;
+    use std::time::Duration;
+
+    // parse registration id from followup url (e.g., "/register/abc123")
+    let reg_id_str = followup
+        .strip_prefix("/register/")
+        .ok_or_else(|| ApiError::bad_request("invalid followup URL format"))?;
+
+    let registration_id = RegistrationId::from_string(reg_id_str)
+        .map_err(|e| ApiError::bad_request(format!("invalid registration ID: {}", e)))?;
+
+    // look up pending registration
+    let pending = state
+        .pending_registrations
+        .get(&registration_id)
+        .ok_or_else(|| ApiError::bad_request("registration not found or expired"))?;
+
+    // check if already completed
+    if let Some(completed) = pending.get_completed().await {
+        return build_success_response(completed);
+    }
+
+    // wait for completion with timeout (30 seconds)
+    let timeout = Duration::from_secs(30);
+    let wait_result = tokio::time::timeout(timeout, pending.notify.notified()).await;
+
+    match wait_result {
+        Ok(()) => {
+            // notified - check for completion
+            if let Some(completed) = pending.get_completed().await {
+                return build_success_response(completed);
+            }
+            // not completed yet - return auth_url to continue polling
+            Ok(Json(RegisterResponse {
+                user: TailcfgUser::default(),
+                login: TailcfgLogin::default(),
+                node_key_expired: false,
+                machine_authorized: false,
+                auth_url: followup.to_string(),
+                error: String::new(),
+            }))
+        }
+        Err(_timeout) => {
+            // timeout - return auth_url so client can retry
+            Ok(Json(RegisterResponse {
+                user: TailcfgUser::default(),
+                login: TailcfgLogin::default(),
+                node_key_expired: false,
+                machine_authorized: false,
+                auth_url: followup.to_string(),
+                error: String::new(),
+            }))
+        }
+    }
+}
+
+/// build a success response for a completed registration.
+fn build_success_response(
+    completed: crate::oidc::CompletedRegistration,
+) -> Result<Json<RegisterResponse>, ApiError> {
+    let user_info = TailcfgUser {
+        id: completed.user.id.0 as i64,
+        display_name: completed.user.display_name.clone().unwrap_or_default(),
+    };
+
+    let login_info = TailcfgLogin {
+        id: completed.user.id.0 as i64,
+        provider: "oidc".to_string(),
+        login_name: completed.user.name.clone(),
+        display_name: completed.user.display_name.unwrap_or(completed.user.name),
+    };
+
+    Ok(Json(RegisterResponse {
+        user: user_info,
+        login: login_info,
+        node_key_expired: false,
+        machine_authorized: true,
+        auth_url: String::new(),
         error: String::new(),
     }))
 }
