@@ -115,6 +115,14 @@
             curl
             jq
 
+            # Run the NixOS VM integration test with full logs
+            (writeShellScriptBin "vmtest" ''
+              set -e
+              echo "=== Running NixOS VM integration test ==="
+              nix build .#checks.x86_64-linux.nixos-test --print-build-logs --rebuild "$@"
+              echo "=== VM test passed! ==="
+            '')
+
             # Run nix flake check with full logs
             (writeShellScriptBin "check-verbose" ''
               set -e
