@@ -260,7 +260,8 @@ async fn build_map_response(
         })
         .collect();
 
-    let resolver = crate::resolver::MapUserResolver::new(users);
+    let resolver =
+        crate::resolver::MapUserResolver::with_groups(users, state.grants.policy().groups.clone());
 
     // use grants engine to filter visible peers
     let visible_peers = state.grants.get_visible_peers(&node, &all_nodes, &resolver);

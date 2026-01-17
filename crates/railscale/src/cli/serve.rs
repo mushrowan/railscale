@@ -227,7 +227,7 @@ impl ServeCommand {
                 .context("failed to parse policy file")?
         } else {
             warn!("No policy file provided, using empty policy (deny-all)");
-            Policy { grants: vec![] }
+            Policy::empty()
         };
 
         let grants = GrantsEngine::new(policy);
@@ -383,7 +383,7 @@ fn extract_host(url_str: &str) -> String {
         .unwrap_or_else(|| "localhost".to_string())
 }
 
-//fallback: take last colon-separated part (ipv4 case)
+/// extract port from an address string like "0.0.0.0:3340".
 /// handles both ipv4 (host:port) and ipv6 ([::1]:port) formats.
 fn extract_port(addr: &str) -> Option<u16> {
     // try parsing as a socket address first (handles ipv6)
