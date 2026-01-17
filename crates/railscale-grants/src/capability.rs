@@ -4,25 +4,44 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::error::ParseError;
 
-/// network capability - what ports/protocols are allowed.
+/// they can be parsed from strings like `"*"`, `"443"`, `"80-443"`, `"tcp:22"`
+///wildcard - all tcp, udp, icmp traffic on any port
+/// single port (any protocol). Example: `"443"`
+/// port range (any protocol). Example: `"80-443"`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkCapability {
-    /// wildcard - all tcp, udp, icmp.
+    /// wildcard - all tcp, udp, icmp traffic on any port.
     Wildcard,
-    /// single port (any protocol).
+    /// single port (any protocol). Example: `"443"`.
     Port(u16),
-    /// port range (any protocol).
-    PortRange { start: u16, end: u16 },
-    /// protocol-specific port.
-    ProtocolPort { protocol: Protocol, port: u16 },
-    /// protocol-specific port range.
-    ProtocolPortRange {
-        protocol: Protocol,
+    /// protocol-specific port. Example: `"tcp:22"`
+    PortRange {
+        /// the network protocol
         start: u16,
+        /// the port number
         end: u16,
     },
-    /// protocol wildcard (all ports).
-    ProtocolWildcard { protocol: Protocol },
+    /// protocol-specific port range. Example: `"tcp:8000-9000"`
+    ProtocolPort {
+        /// start of port range (inclusive)
+        protocol: Protocol,
+        /// protocol wildcard (all ports). Example: `"icmp:*"`
+        port: u16,
+    },
+    /// protocol-specific port range. Example: `"tcp:8000-9000"`.
+    ProtocolPortRange {
+        /// the network protocol.
+        protocol: Protocol,
+        /// start of port range (inclusive).
+        start: u16,
+        /// end of port range (inclusive).
+        end: u16,
+    },
+    /// protocol wildcard (all ports). Example: `"icmp:*"`.
+    ProtocolWildcard {
+        /// the network protocol.
+        protocol: Protocol,
+    },
 }
 
 impl Serialize for NetworkCapability {
@@ -77,18 +96,29 @@ fn protocol_name(proto: Protocol) -> &'static str {
     }
 }
 
-/// network protocol.
+/// transmission Control protocol (IANA 6)
+///user Datagram protocol (IANA 17)
+/// internet Control Message protocol (IANA 1)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
+    /// stream Control Transmission protocol (IANA 132)
     Tcp,
+    /// ipv4 encapsulation (IANA 4)
     Udp,
+    /// internet control message protocol (iana 1).
     Icmp,
+    /// generic routing encapsulation (iana 47).
     Gre,
+    /// encapsulating security payload - ipsec (iana 50).
     Esp,
+    /// authentication header - ipsec (iana 51).
     Ah,
+    /// stream control transmission protocol (iana 132).
     Sctp,
+    /// internet group management protocol (iana 2).
     Igmp,
+    /// ipv4 encapsulation (iana 4).
     Ipv4,
 }
 

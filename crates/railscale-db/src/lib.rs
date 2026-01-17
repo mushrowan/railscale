@@ -8,6 +8,8 @@
 //!
 //! it also handles ip address allocation for new nodes.
 
+#![warn(missing_docs)]
+
 mod entity;
 mod error;
 mod ip_allocator;
@@ -30,61 +32,121 @@ use railscale_types::{ApiKey, Config, Node, NodeId, PreAuthKey, User, UserId};
 /// result type for database operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
-/// database trait for railscale storage operations.
-///
-/// this trait abstracts over different database backends (sqlite, postgresql).
+/// all operations use soft-delete semantics - records are marked with a `deleted_at`
+///timestamp rather than being physically removed
+//─── user Operations ─────────────────────────────────────────────────────
+/// all operations use soft-delete semantics - records are marked with a `deleted_at`
+/// create a new user. Returns the created user with its assigned id
 pub trait Database: Send + Sync {
-    // user operations
+    // ─── User Operations ─────────────────────────────────────────────────────
+
+    /// get a user by username. Returns `None` if not found or soft-deleted
     fn create_user(&self, user: &User) -> impl Future<Output = Result<User>> + Send;
+
+    /// get a user by id. Returns `None` if not found or soft-deleted.
     fn get_user(&self, id: UserId) -> impl Future<Output = Result<Option<User>>> + Send;
+
+    /// update an existing user. Returns the updated user
     fn get_user_by_name(&self, name: &str) -> impl Future<Output = Result<Option<User>>> + Send;
+
+    //─── node Operations ─────────────────────────────────────────────────────
     fn get_user_by_oidc_identifier(
         &self,
         identifier: &str,
     ) -> impl Future<Output = Result<Option<User>>> + Send;
+
+    /// get a node by its current node key (session key)
     fn list_users(&self) -> impl Future<Output = Result<Vec<User>>> + Send;
+
+    /// update an existing user. returns the updated user.
     fn update_user(&self, user: &User) -> impl Future<Output = Result<User>> + Send;
+
+    /// update an existing node. Also updates `updated_at` timestamp
     fn delete_user(&self, id: UserId) -> impl Future<Output = Result<()>> + Send;
 
-    // node operations
+    // ─── preauthkey Operations ───────────────────────────────────────────────
+
+    /// create a new pre-authentication key. Returns the key with its assigned id
     fn create_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
+
+    /// get a node by id. Returns `None` if not found or soft-deleted.
     fn get_node(&self, id: NodeId) -> impl Future<Output = Result<Option<Node>>> + Send;
+
+    /// list all pre-auth keys across all users
     fn get_node_by_node_key(
         &self,
         node_key: &railscale_types::NodeKey,
     ) -> impl Future<Output = Result<Option<Node>>> + Send;
+
+    /// expire a pre-auth key by setting its expiration to now
     fn list_nodes(&self) -> impl Future<Output = Result<Vec<Node>>> + Send;
+
+    /// create a new api key. Returns the key with its assigned id
     fn list_nodes_for_user(
         &self,
         user_id: UserId,
     ) -> impl Future<Output = Result<Vec<Node>>> + Send;
+
+    /// list all api keys belonging to a specific user
     fn update_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
+
+    /// soft-delete a node by setting `deleted_at` timestamp.
     fn delete_node(&self, id: NodeId) -> impl Future<Output = Result<()>> + Send;
 
-    // preauthkey operations
+    // ─── PreAuthKey Operations ───────────────────────────────────────────────
+
+    /// update the `last_used_at` timestamp for an api key
     fn create_preauth_key(
         &self,
         key: &PreAuthKey,
     ) -> impl Future<Output = Result<PreAuthKey>> + Send;
+
+    /// get a pre-auth key by its key string.
     fn get_preauth_key(&self, key: &str)
     -> impl Future<Output = Result<Option<PreAuthKey>>> + Send;
+
+    /// list all pre-auth keys created by a specific user.
     fn list_preauth_keys(
         &self,
         user_id: UserId,
     ) -> impl Future<Output = Result<Vec<PreAuthKey>>> + Send;
+
+    /// list all pre-auth keys across all users.
     fn get_all_preauth_keys(&self) -> impl Future<Output = Result<Vec<PreAuthKey>>> + Send;
+
+    /// mark a non-reusable pre-auth key as used.
     fn mark_preauth_key_used(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    /// soft-delete a pre-auth key.
     fn delete_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    /// expire a pre-auth key by setting its expiration to now.
     fn expire_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
 
-    // apikey operations
+    // ─── ApiKey Operations ───────────────────────────────────────────────────
+
+    /// create a new api key. Returns the key with its assigned ID.
     fn create_api_key(&self, key: &ApiKey) -> impl Future<Output = Result<ApiKey>> + Send;
+
+    /// get an api key by its key string.
     fn get_api_key(&self, key: &str) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+
+    /// get an api key by its numeric id.
     fn get_api_key_by_id(&self, id: u64) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+
+    /// list all api keys belonging to a specific user.
     fn list_api_keys(&self, user_id: UserId) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
+
+    /// list all api keys across all users.
     fn get_all_api_keys(&self) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
+
+    /// soft-delete an api key.
     fn delete_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    /// expire an api key by setting its expiration to now.
     fn expire_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    /// update the `last_used_at` timestamp for an api key.
     fn touch_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
 }
 

@@ -6,6 +6,8 @@
 //! - node registration protocol
 //! - derp integration
 
+#![warn(missing_docs)]
+
 mod error;
 mod map_request;
 mod noise;

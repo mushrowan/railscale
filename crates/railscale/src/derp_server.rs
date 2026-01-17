@@ -45,9 +45,11 @@ const DERP_MAGIC: &[u8; 8] = b"DERP\xF0\x9F\x94\x91";
 const DERP_PROTOCOL_VERSION: u32 = 2;
 const MAX_HTTP_REQUEST_SIZE: usize = 8 * 1024;
 
-/// tls assets used by the embedded derp listener.
+/// sHA-256 fingerprint of the certificate (hex-encoded)
 pub struct DerpTlsAssets {
+    /// the rustls server configuration with loaded certificates.
     pub tls_config: Arc<ServerConfig>,
+    /// sha-256 fingerprint of the certificate (hex-encoded).
     pub fingerprint: String,
 }
 
@@ -156,13 +158,19 @@ fn compute_fingerprint(der: &[u8]) -> String {
     hasher.finalize().encode_hex()
 }
 
-/// options for running the embedded derp listener.
+/// tLS configuration for the listener
 pub struct DerpListenerConfig {
+    /// spawn the embedded derp listener in a background task
     pub listen_addr: SocketAddr,
+    /// returns a join handle for the listener task
     pub tls_config: Arc<ServerConfig>,
+    /// the derp server instance to handle connections.
     pub server: EmbeddedDerpServer,
 }
 
+/// spawn the embedded derp listener in a background task.
+///
+/// returns a join handle for the listener task.
 pub async fn spawn_derp_listener(config: DerpListenerConfig) -> eyre::Result<JoinHandle<()>> {
     let listener = TcpListener::bind(config.listen_addr)
         .await
@@ -348,6 +356,10 @@ where
     stream.flush().await
 }
 
+/// tailscale clients when direct connections are not possible
+///
+/// handles derp protocol connections for relaying encrypted traffic between
+/// tailscale clients when direct connections are not possible.
 #[derive(Clone)]
 pub struct EmbeddedDerpServer {
     crypto: DerpKeyMaterial,
@@ -355,6 +367,7 @@ pub struct EmbeddedDerpServer {
 }
 
 impl EmbeddedDerpServer {
+    /// create a new derp server with the given options.
     pub fn new(options: EmbeddedDerpOptions) -> Self {
         Self {
             crypto: DerpKeyMaterial::new(options.keypair),
@@ -362,6 +375,9 @@ impl EmbeddedDerpServer {
         }
     }
 
+    /// handle a single derp connection.
+    ///
+    /// performs the derp handshake and then relays frames between clients.
     pub async fn handle_connection<S>(
         &self,
         stream: S,
@@ -552,11 +568,14 @@ impl EmbeddedDerpServer {
     }
 }
 
+/// options for creating an embedded derp server.
 pub struct EmbeddedDerpOptions {
+    /// the noise keypair for derp protocol encryption.
     pub keypair: Keypair,
 }
 
 impl EmbeddedDerpOptions {
+    /// create new derp options with the given keypair.
     pub fn new(keypair: Keypair) -> Self {
         Self { keypair }
     }
@@ -604,16 +623,22 @@ struct ServerFrame {
     payload: Vec<u8>,
 }
 
+/// cryptographic operation failed
 #[derive(Debug, Error)]
 pub enum DerpServerError {
+    /// i/o error during connection handling.
     #[error("io error: {0}")]
     Io(#[from] io::Error),
+    /// tls error during connection setup.
     #[error("tls error: {0}")]
     Tls(#[from] rustls::Error),
+    /// cryptographic operation failed.
     #[error("crypto error: {0}")]
     Crypto(String),
+    /// derp protocol error (invalid frame, unexpected state).
     #[error("protocol error: {0}")]
     Protocol(String),
+    /// derp handshake failed.
     #[error("handshake error: {0}")]
     Handshake(String),
 }

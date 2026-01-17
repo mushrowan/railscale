@@ -29,10 +29,12 @@ pub async fn register_redirect(
     Ok(Redirect::to(&auth_url))
 }
 
-/// query parameters for oidc callback.
+/// the authorization code from the identity provider
 #[derive(Debug, Deserialize)]
 pub struct OidcCallbackParams {
+    /// the authorization code from the identity provider.
     pub code: String,
+    /// the state parameter for csrf protection.
     pub state: String,
 }
 

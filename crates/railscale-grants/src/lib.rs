@@ -4,6 +4,8 @@
 //! access and application capabilities. Grants use deny-by-default semantics
 //! with union composition (multiple matching grants combine their permissions).
 
+#![warn(missing_docs)]
+
 pub mod capability;
 pub mod engine;
 pub mod error;

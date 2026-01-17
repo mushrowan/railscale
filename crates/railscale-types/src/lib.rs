@@ -6,6 +6,8 @@
 //! - [`preauthkey`]: pre-authentication keys for automated registration
 //! - [`config`]: application configuration
 
+#![warn(missing_docs)]
+
 mod api_key;
 mod config;
 mod error;

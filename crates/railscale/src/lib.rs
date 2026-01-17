@@ -1,13 +1,29 @@
 //! railscale library - HTTP handlers and application setup.
+//!this crate provides the http server and handlers for the railscale control server:
+//! - [`handlers`]: http request handlers for tailscale protocol endpoints
+//! - [`cli`]: Command-line interface implementation
+//! - [`oidc`]: OpenID Connect authentication provider
+//! - [`derp`]: derp relay map management
+//! - [`derp_server`]: Embedded derp relay server
+//! - [`resolver`]: Grants-based access control resolver
+//! - [`resolver`]: Grants-based access control resolver
 
+#![warn(missing_docs)]
+
+/// embedded derp relay server implementation
 pub mod cli;
+/// openID Connect authentication provider
 pub mod derp;
+/// embedded derp relay server implementation.
 pub mod derp_server;
 mod dns;
+/// http request handlers for tailscale protocol endpoints.
 pub mod handlers;
 mod noise_stream;
 mod notifier;
+/// openid connect authentication provider.
 pub mod oidc;
+/// grants-based access control resolver.
 pub mod resolver;
 
 pub use derp::{
@@ -31,13 +47,18 @@ use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
-/// application state shared across handlers.
+/// database connection for persistent storage
 #[derive(Clone)]
 pub struct AppState {
+    /// oidc authentication provider (None if oidc is disabled)
     pub db: RailscaleDb,
+    /// grants engine for access control evaluation.
     pub grants: GrantsEngine,
+    /// server configuration.
     pub config: Config,
+    /// oidc authentication provider (none if oidc is disabled).
     pub oidc: Option<oidc::AuthProviderOidc>,
+    /// notifier for broadcasting state changes to connected clients.
     pub notifier: StateNotifier,
     /// ip address allocator for new nodes.
     pub ip_allocator: Arc<Mutex<IpAllocator>>,

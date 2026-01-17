@@ -196,11 +196,14 @@ fn default_derp_private_key_path() -> PathBuf {
     PathBuf::from("/var/lib/railscale/derp_private.key")
 }
 
-/// runtime information for the embedded derp server populated at startup.
+/// the hostname to advertise to clients for this derp server
 #[derive(Debug, Clone)]
 pub struct EmbeddedDerpRuntime {
+    /// the hostname to advertise to clients for this derp server.
     pub advertise_host: String,
+    /// the port to advertise to clients.
     pub advertise_port: u16,
+    /// sha-256 fingerprint of the tls certificate (hex-encoded).
     pub cert_fingerprint: String,
 }
 

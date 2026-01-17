@@ -1,7 +1,7 @@
 //! cli subcommands for railscale.
 //!
 //! the cli is structured like headscale:
-//! - `railscale apikeys create` - Create an api key
+//! - `railscale serve` - Run the control server
 //! - `railscale preauthkeys create` - Create a preauth key
 //! - `railscale preauthkeys list` - List preauth keys
 //! - `railscale apikeys create` - Create an API key
@@ -27,6 +27,7 @@ use clap::{Parser, Subcommand};
 #[command(about = "Self-hosted Tailscale control server", long_about = None)]
 #[command(version)]
 pub struct Cli {
+    /// the subcommand to run.
     #[command(subcommand)]
     pub command: Command,
 }
