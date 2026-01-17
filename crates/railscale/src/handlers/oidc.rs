@@ -29,7 +29,7 @@ pub async fn register_redirect(
     Ok(Redirect::to(&auth_url))
 }
 
-/// the authorization code from the identity provider
+/// query parameters for oidc callback.
 #[derive(Debug, Deserialize)]
 pub struct OidcCallbackParams {
     /// the authorization code from the identity provider.
@@ -79,13 +79,13 @@ pub async fn oidc_callback(
 
     // get or create user
     let provider_identifier = claims.identifier();
-    let user = state
+    let existing_user = state
         .db
         .get_user_by_oidc_identifier(&provider_identifier)
         .await
         .map_internal()?;
 
-    let _user = if let Some(user) = user {
+    let user = if let Some(user) = existing_user {
         // user exists, return it
         user
     } else {
@@ -108,6 +108,62 @@ pub async fn oidc_callback(
         };
         state.db.create_user(&new_user).await.map_internal()?
     };
+
+    // look up the pending registration and complete node registration if found
+    if let Some(pending) = state.pending_registrations.get(&reg_info.registration_id) {
+        // allocate ip addresses for the new node
+        let (ipv4, ipv6) = {
+            let mut allocator = state.ip_allocator.lock().await;
+            allocator
+                .allocate()
+                .map_err(|e| ApiError::internal(e.to_string()))?
+        };
+
+        // create the node
+        let hostname = pending
+            .hostinfo
+            .as_ref()
+            .and_then(|h| h.hostname.clone())
+            .unwrap_or_default();
+
+        let now = chrono::Utc::now();
+        let node = railscale_types::Node {
+            id: railscale_types::NodeId(0),
+            machine_key: pending.machine_key.clone(),
+            node_key: pending.node_key.clone(),
+            disco_key: Default::default(),
+            ipv4,
+            ipv6,
+            endpoints: vec![],
+            hostinfo: pending.hostinfo.clone(),
+            hostname: hostname.clone(),
+            given_name: hostname,
+            user_id: Some(user.id),
+            register_method: railscale_types::RegisterMethod::Oidc,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: None,
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+        };
+
+        let node = state.db.create_node(&node).await.map_internal()?;
+
+        // complete the pending registration
+        state.notifier.notify_state_changed();
+
+        // complete the pending registration
+        let completed = crate::oidc::CompletedRegistration {
+            node,
+            user: user.clone(),
+        };
+        pending.complete(completed).await;
+    }
+    // if no pending registration found, the user was created but no node.
+    // this can happen if someone directly accesses the oidc auth url.
 
     // return success html
     Ok(Html(
