@@ -15,6 +15,14 @@ impl RegistrationId {
         Self(bytes)
     }
 
+    /// generate a new random registration ID.
+    pub fn generate() -> Self {
+        use rand::RngCore;
+        let mut bytes = [0u8; 32];
+        rand::rng().fill_bytes(&mut bytes);
+        Self(bytes)
+    }
+
     /// create a registration ID from a base64url-encoded string.
     pub fn from_string(s: &str) -> Result<Self, String> {
         use base64::Engine;

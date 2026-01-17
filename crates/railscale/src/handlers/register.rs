@@ -3,7 +3,7 @@
 //! implements tailscale's registration protocol. the request/response format
 //! matches what the official Tailscale client expects.
 
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Json, extract::State};
 use bytes::Bytes;
 use railscale_db::Database;
 use railscale_types::{HostInfo, MachineKey, Node, NodeId, NodeKey};
@@ -111,6 +111,13 @@ pub struct TailcfgLogin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use railscale_db::RailscaleDb;
+    use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
+    use tower::ServiceExt;
 
     #[test]
     fn test_register_request_parses_followup() {
@@ -134,12 +141,85 @@ mod tests {
         let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
         assert!(req.followup.is_empty());
     }
+
+    fn default_grants() -> GrantsEngine {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+        GrantsEngine::new(policy)
+    }
+
+    #[tokio::test]
+    async fn test_register_without_auth_key_returns_auth_url_when_oidc_disabled() {
+        // set up test database
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create app without OIDC
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None, // No OIDC
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // send register request without auth_key
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // parse response body
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // parse response body
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+
+        // should have an auth_url for web registration
+        assert!(!resp.machine_authorized);
+
+        // should have an auth_url for web registration
+        assert!(
+            resp.auth_url.starts_with("/register/"),
+            "auth_url should start with /register/, got: {}",
+            resp.auth_url
+        );
+    }
 }
 
-/// handle node registration via preauth key.
+/// 3. **Interactive (followup)**: Client polls with followup url after auth
 ///
 /// this endpoint is called by tailscale clients to register a new node
-/// with the control server.
+/// with the control server. It supports three registration flows:
+///
+/// 1. **Preauth key**: Client provides an auth_key in the request
+/// 2. **Interactive (initial)**: Client has no auth_key - returns auth_url
+/// 3. **Interactive (followup)**: Client polls with followup URL after auth
 ///
 /// when accessed via the ts2021 protocol, the machine key is extracted from
 /// the Noise handshake context (which is cryptographically authenticated).
@@ -150,10 +230,11 @@ pub async fn register(
     State(state): State<AppState>,
     OptionalMachineKeyContext(machine_key_ctx): OptionalMachineKeyContext,
     body: Bytes,
-) -> Result<impl IntoResponse, ApiError> {
+) -> Result<Json<RegisterResponse>, ApiError> {
     // parse json manually since tailscale client doesn't send content-type header
     let req: RegisterRequest =
         serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(e.to_string()))?;
+
     // machine key must come from noise context for ts2021
     let machine_key = match machine_key_ctx {
         Some(ctx) => ctx.0,
@@ -163,9 +244,33 @@ pub async fn register(
         }
     };
 
-    // extract auth key from nested auth struct
-    let auth_key_str = req.auth.as_ref().map(|a| a.auth_key.as_str()).unwrap_or("");
+    // extract auth key from nested auth struct (owned to avoid borrow issues)
+    let auth_key_str = req
+        .auth
+        .as_ref()
+        .map(|a| a.auth_key.clone())
+        .unwrap_or_default();
 
+    // route to appropriate registration flow
+    if !req.followup.is_empty() {
+        // followup request - wait for oidc completion (Phase 3)
+        return Err(ApiError::internal("followup not yet implemented"));
+    } else if !auth_key_str.is_empty() {
+        // preauth key registration - existing flow
+        return handle_preauth_registration(state, req, machine_key, &auth_key_str).await;
+    } else {
+        // interactive registration - return auth_url
+        return handle_interactive_registration(state, req, machine_key).await;
+    }
+}
+
+/// handle registration with a preauth key.
+async fn handle_preauth_registration(
+    state: AppState,
+    req: RegisterRequest,
+    machine_key: MachineKey,
+    auth_key_str: &str,
+) -> Result<Json<RegisterResponse>, ApiError> {
     let preauth_key = state
         .db
         .get_preauth_key(auth_key_str)
@@ -264,6 +369,45 @@ pub async fn register(
         node_key_expired: false,
         machine_authorized: true,
         auth_url: String::new(),
+        error: String::new(),
+    }))
+}
+
+/// to complete authentication (via oidc or web registration)
+///
+/// this creates a pending registration and returns an auth_url for the user
+/// to complete authentication (via OIDC or web registration).
+async fn handle_interactive_registration(
+    state: AppState,
+    req: RegisterRequest,
+    machine_key: MachineKey,
+) -> Result<Json<RegisterResponse>, ApiError> {
+    use crate::oidc::PendingRegistration;
+    use railscale_types::RegistrationId;
+    use std::sync::Arc;
+
+    // create and store pending registration
+    let registration_id = RegistrationId::generate();
+
+    // create and store pending registration
+    let pending = Arc::new(PendingRegistration::new(
+        req.node_key.clone(),
+        machine_key,
+        req.hostinfo,
+    ));
+    state
+        .pending_registrations
+        .insert(registration_id.clone(), pending);
+
+    // build auth_url - this is where the user will be redirected to authenticate
+    let auth_url = format!("/register/{}", registration_id);
+
+    Ok(Json(RegisterResponse {
+        user: TailcfgUser::default(),
+        login: TailcfgLogin::default(),
+        node_key_expired: false,
+        machine_authorized: false,
+        auth_url,
         error: String::new(),
     }))
 }
