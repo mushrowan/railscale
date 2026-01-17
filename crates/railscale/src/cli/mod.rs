@@ -1,16 +1,20 @@
-//! cLI subcommands for railscale
+//! cli subcommands for railscale.
 //!
 //! the cli is structured like headscale:
 //! - `railscale serve` - Run the control server
 //! - `railscale preauthkeys create` - Create a preauth key
 //! - `railscale preauthkeys list` - List preauth keys
-//! - etc
+//! - etc.
 
+mod nodes;
 mod preauthkeys;
 mod serve;
+mod users;
 
+pub use nodes::NodesCommand;
 pub use preauthkeys::PreauthkeysCommand;
 pub use serve::ServeCommand;
+pub use users::UsersCommand;
 
 use clap::{Parser, Subcommand};
 
@@ -33,4 +37,12 @@ pub enum Command {
     /// manage preauth keys
     #[command(subcommand)]
     Preauthkeys(PreauthkeysCommand),
+
+    /// manage users
+    #[command(subcommand)]
+    Users(UsersCommand),
+
+    /// manage nodes
+    #[command(subcommand)]
+    Nodes(NodesCommand),
 }

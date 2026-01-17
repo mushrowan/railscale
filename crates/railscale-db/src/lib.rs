@@ -43,6 +43,7 @@ pub trait Database: Send + Sync {
         identifier: &str,
     ) -> impl Future<Output = Result<Option<User>>> + Send;
     fn list_users(&self) -> impl Future<Output = Result<Vec<User>>> + Send;
+    fn update_user(&self, user: &User) -> impl Future<Output = Result<User>> + Send;
     fn delete_user(&self, id: UserId) -> impl Future<Output = Result<()>> + Send;
 
     // node operations
@@ -53,6 +54,10 @@ pub trait Database: Send + Sync {
         node_key: &railscale_types::NodeKey,
     ) -> impl Future<Output = Result<Option<Node>>> + Send;
     fn list_nodes(&self) -> impl Future<Output = Result<Vec<Node>>> + Send;
+    fn list_nodes_for_user(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<Vec<Node>>> + Send;
     fn update_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
     fn delete_node(&self, id: NodeId) -> impl Future<Output = Result<()>> + Send;
 
@@ -194,6 +199,12 @@ impl Database for RailscaleDb {
         Ok(results.into_iter().map(Into::into).collect())
     }
 
+    async fn update_user(&self, user: &User) -> Result<User> {
+        let model: entity::user::ActiveModel = user.into();
+        let result = model.update(&self.conn).await?;
+        Ok(result.into())
+    }
+
     async fn delete_user(&self, id: UserId) -> Result<()> {
         entity::user::Entity::update_many()
             .col_expr(
@@ -236,6 +247,15 @@ impl Database for RailscaleDb {
 
     async fn list_nodes(&self) -> Result<Vec<Node>> {
         let results = entity::node::Entity::find()
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .all(&self.conn)
+            .await?;
+        Ok(results.into_iter().map(Into::into).collect())
+    }
+
+    async fn list_nodes_for_user(&self, user_id: UserId) -> Result<Vec<Node>> {
+        let results = entity::node::Entity::find()
+            .filter(entity::node::Column::UserId.eq(user_id.0 as i64))
             .filter(entity::node::Column::DeletedAt.is_null())
             .all(&self.conn)
             .await?;

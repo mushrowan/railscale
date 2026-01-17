@@ -1,4 +1,4 @@
-//! the `preauthkeys` subcommand - manage preauth keys
+//! the `preauthkeys` subcommand - manage preauth keys.
 
 use chrono::{Duration, Utc};
 use clap::{Args, Subcommand};
@@ -31,7 +31,7 @@ pub struct DbArgs {
 }
 
 impl DbArgs {
-    async fn connect(&self) -> Result<RailscaleDb> {
+    pub async fn connect(&self) -> Result<RailscaleDb> {
         let config = self.to_config()?;
         RailscaleDb::new(&config)
             .await
@@ -204,7 +204,7 @@ async fn create_key(args: CreateArgs) -> Result<()> {
     Ok(())
 }
 
-/// generate a random preauth key string
+/// generate a random preauth key string.
 fn generate_preauth_key() -> String {
     use rand::Rng;
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";

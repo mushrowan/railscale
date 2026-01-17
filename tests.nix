@@ -51,7 +51,7 @@ pkgs.testers.runNixOSTest {
             };
 
             serviceConfig = {
-              ExecStart = "${pkgs.lib.getExe railscale}";
+              ExecStart = "${pkgs.lib.getExe railscale} serve";
               StateDirectory = "railscale";
               Restart = "on-failure";
             };
