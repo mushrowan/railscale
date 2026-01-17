@@ -6,6 +6,7 @@
 //! - [`preauthkey`]: pre-authentication keys for automated registration
 //! - [`config`]: application configuration
 
+mod api_key;
 mod config;
 mod error;
 mod keys;
@@ -15,6 +16,7 @@ mod preauth_key;
 pub mod test_utils;
 mod user;
 
+pub use api_key::ApiKey;
 pub use config::{Config, DatabaseConfig, EmbeddedDerpRuntime, OidcConfig, PkceConfig, PkceMethod};
 pub use error::Error;
 pub use keys::{DiscoKey, MachineKey, NodeKey};

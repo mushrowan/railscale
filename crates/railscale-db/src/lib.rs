@@ -25,7 +25,7 @@ use sea_orm::{
 };
 use sea_orm_migration::MigratorTrait;
 
-use railscale_types::{Config, Node, NodeId, PreAuthKey, User, UserId};
+use railscale_types::{ApiKey, Config, Node, NodeId, PreAuthKey, User, UserId};
 
 /// result type for database operations.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -76,6 +76,16 @@ pub trait Database: Send + Sync {
     fn mark_preauth_key_used(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
     fn delete_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
     fn expire_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    // apikey operations
+    fn create_api_key(&self, key: &ApiKey) -> impl Future<Output = Result<ApiKey>> + Send;
+    fn get_api_key(&self, key: &str) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+    fn get_api_key_by_id(&self, id: u64) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+    fn list_api_keys(&self, user_id: UserId) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
+    fn get_all_api_keys(&self) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
+    fn delete_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    fn expire_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    fn touch_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// the main database implementation using sea-orm.
@@ -350,6 +360,84 @@ impl Database for RailscaleDb {
             .await?;
         Ok(())
     }
+
+    // apikey operations
+
+    async fn create_api_key(&self, key: &ApiKey) -> Result<ApiKey> {
+        let model: entity::api_key::ActiveModel = key.into();
+        let result = model.insert(&self.conn).await?;
+        Ok(result.into())
+    }
+
+    async fn get_api_key(&self, key: &str) -> Result<Option<ApiKey>> {
+        let result = entity::api_key::Entity::find()
+            .filter(entity::api_key::Column::Key.eq(key))
+            .filter(entity::api_key::Column::DeletedAt.is_null())
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(Into::into))
+    }
+
+    async fn get_api_key_by_id(&self, id: u64) -> Result<Option<ApiKey>> {
+        let result = entity::api_key::Entity::find_by_id(id as i64)
+            .filter(entity::api_key::Column::DeletedAt.is_null())
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(Into::into))
+    }
+
+    async fn list_api_keys(&self, user_id: UserId) -> Result<Vec<ApiKey>> {
+        let results = entity::api_key::Entity::find()
+            .filter(entity::api_key::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::api_key::Column::DeletedAt.is_null())
+            .all(&self.conn)
+            .await?;
+        Ok(results.into_iter().map(Into::into).collect())
+    }
+
+    async fn get_all_api_keys(&self) -> Result<Vec<ApiKey>> {
+        let results = entity::api_key::Entity::find()
+            .filter(entity::api_key::Column::DeletedAt.is_null())
+            .all(&self.conn)
+            .await?;
+        Ok(results.into_iter().map(Into::into).collect())
+    }
+
+    async fn delete_api_key(&self, id: u64) -> Result<()> {
+        entity::api_key::Entity::update_many()
+            .col_expr(
+                entity::api_key::Column::DeletedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::api_key::Column::Id.eq(id as i64))
+            .exec(&self.conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn expire_api_key(&self, id: u64) -> Result<()> {
+        entity::api_key::Entity::update_many()
+            .col_expr(
+                entity::api_key::Column::Expiration,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::api_key::Column::Id.eq(id as i64))
+            .exec(&self.conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn touch_api_key(&self, id: u64) -> Result<()> {
+        entity::api_key::Entity::update_many()
+            .col_expr(
+                entity::api_key::Column::LastUsedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::api_key::Column::Id.eq(id as i64))
+            .exec(&self.conn)
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -457,6 +545,57 @@ mod tests {
             .get_user_by_oidc_identifier("https://accounts.google.com:12345678")
             .await
             .unwrap();
+        assert!(deleted.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_api_key_crud() {
+        let db = setup_test_db().await;
+
+        // create user first
+        let user = User::new(UserId(0), "apikeyowner".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        // create key
+        let key = ApiKey::new(
+            0,
+            "test-api-key-123".to_string(),
+            "My API Key".to_string(),
+            user.id,
+        );
+        let created = db.create_api_key(&key).await.unwrap();
+        assert!(created.id > 0);
+
+        // get by key string
+        let fetched = db.get_api_key("test-api-key-123").await.unwrap();
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().name, "My API Key");
+
+        // get by ID
+        let fetched_by_id = db.get_api_key_by_id(created.id).await.unwrap();
+        assert!(fetched_by_id.is_some());
+
+        // list by user
+        let keys = db.list_api_keys(user.id).await.unwrap();
+        assert_eq!(keys.len(), 1);
+
+        // get all
+        let all_keys = db.get_all_api_keys().await.unwrap();
+        assert_eq!(all_keys.len(), 1);
+
+        // touch (update last_used_at)
+        db.touch_api_key(created.id).await.unwrap();
+        let touched = db.get_api_key("test-api-key-123").await.unwrap().unwrap();
+        assert!(touched.last_used_at.is_some());
+
+        // expire
+        db.expire_api_key(created.id).await.unwrap();
+        let expired = db.get_api_key("test-api-key-123").await.unwrap().unwrap();
+        assert!(expired.is_expired());
+
+        // delete
+        db.delete_api_key(created.id).await.unwrap();
+        let deleted = db.get_api_key("test-api-key-123").await.unwrap();
         assert!(deleted.is_none());
     }
 

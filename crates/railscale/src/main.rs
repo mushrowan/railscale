@@ -23,6 +23,7 @@ async fn main() -> Result<()> {
     match cli.command {
         Command::Serve(cmd) => cmd.run().await,
         Command::Preauthkeys(cmd) => cmd.run().await,
+        Command::Apikeys(cmd) => cmd.run().await,
         Command::Users(cmd) => cmd.run().await,
         Command::Nodes(cmd) => cmd.run().await,
     }

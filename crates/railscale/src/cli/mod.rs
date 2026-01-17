@@ -1,16 +1,19 @@
 //! cli subcommands for railscale.
 //!
 //! the cli is structured like headscale:
-//! - `railscale serve` - Run the control server
+//! - `railscale apikeys create` - Create an api key
 //! - `railscale preauthkeys create` - Create a preauth key
 //! - `railscale preauthkeys list` - List preauth keys
+//! - `railscale apikeys create` - Create an API key
 //! - etc.
 
+mod apikeys;
 mod nodes;
 mod preauthkeys;
 mod serve;
 mod users;
 
+pub use apikeys::ApikeysCommand;
 pub use nodes::NodesCommand;
 pub use preauthkeys::PreauthkeysCommand;
 pub use serve::ServeCommand;
@@ -37,6 +40,10 @@ pub enum Command {
     /// manage preauth keys
     #[command(subcommand)]
     Preauthkeys(PreauthkeysCommand),
+
+    /// manage api keys
+    #[command(subcommand)]
+    Apikeys(ApikeysCommand),
 
     /// manage users
     #[command(subcommand)]
