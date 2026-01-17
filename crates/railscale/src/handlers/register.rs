@@ -41,6 +41,12 @@ pub struct RegisterRequest {
     /// request ephemeral node (auto-deleted when inactive).
     #[serde(default)]
     pub ephemeral: bool,
+
+    /// url to poll for authentication completion (interactive login).
+    /// when non-empty, the client is following up on a previous registration
+    /// that returned an auth_url.
+    #[serde(default)]
+    pub followup: String,
 }
 
 /// authentication info for registerrequest.
@@ -100,6 +106,34 @@ pub struct TailcfgLogin {
     pub login_name: String,
     #[serde(default)]
     pub display_name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_register_request_parses_followup() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+            "Followup": "/register/abc123"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert_eq!(req.followup, "/register/abc123");
+    }
+
+    #[test]
+    fn test_register_request_followup_defaults_to_empty() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert!(req.followup.is_empty());
+    }
 }
 
 /// handle node registration via preauth key.
