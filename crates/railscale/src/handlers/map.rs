@@ -81,6 +81,8 @@ pub async fn map(
 
     if needs_update {
         state.db.update_node(&node).await.map_internal()?;
+        // notify streaming clients that node state has changed
+        state.notifier.notify_state_changed();
     }
 
     let compression = Compression::from(req.compress.as_ref());

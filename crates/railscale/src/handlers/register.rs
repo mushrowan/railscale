@@ -196,6 +196,9 @@ pub async fn register(
 
     let _node = state.db.create_node(&node).await.map_internal()?;
 
+    // notify streaming clients that a new node has been added
+    state.notifier.notify_state_changed();
+
     if !preauth_key.reusable {
         state
             .db
