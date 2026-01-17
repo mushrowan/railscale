@@ -115,7 +115,9 @@ impl ServeCommand {
 
         // search default paths
         for path_str in CONFIG_SEARCH_PATHS {
-            let path = expand_tilde(path_str);
+            let path = expand_tilde::expand_tilde(path_str)
+                .map(|p| p.into_owned())
+                .unwrap_or_else(|_| PathBuf::from(path_str));
             if path.exists() {
                 debug!("Found config file at {:?}", path);
                 let content = std::fs::read_to_string(&path)
@@ -394,16 +396,6 @@ fn extract_port(addr: &str) -> Option<u16> {
     addr.rsplit(':').next()?.parse().ok()
 }
 
-/// expand ~ to home directory in path strings.
-fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(path)
-}
-
 /// parse a database url into databaseconfig.
 fn parse_database_url(db_url: &str) -> Result<railscale_types::DatabaseConfig> {
     let parsed =
@@ -434,30 +426,6 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tempfile::NamedTempFile;
-
-    #[test]
-    fn test_expand_tilde() {
-        // without tilde
-        assert_eq!(
-            expand_tilde("/etc/railscale/config.toml"),
-            PathBuf::from("/etc/railscale/config.toml")
-        );
-        assert_eq!(
-            expand_tilde("./config.toml"),
-            PathBuf::from("./config.toml")
-        );
-
-        // with tilde (depends on home being set)
-        if std::env::var_os("HOME").is_some() {
-            let expanded = expand_tilde("~/.config/railscale/config.toml");
-            assert!(!expanded.to_string_lossy().starts_with("~"));
-            assert!(
-                expanded
-                    .to_string_lossy()
-                    .ends_with(".config/railscale/config.toml")
-            );
-        }
-    }
 
     #[test]
     fn test_parse_database_url() {

@@ -260,16 +260,17 @@ async fn build_map_response(
         })
         .collect();
 
+    // acquire read lock on grants engine for policy evaluation
+    let grants = state.grants.read().await;
+
     let resolver =
-        crate::resolver::MapUserResolver::with_groups(users, state.grants.policy().groups.clone());
+        crate::resolver::MapUserResolver::with_groups(users, grants.policy().groups.clone());
 
     // use grants engine to filter visible peers
-    let visible_peers = state.grants.get_visible_peers(&node, &all_nodes, &resolver);
+    let visible_peers = grants.get_visible_peers(&node, &all_nodes, &resolver);
 
     // generate packet filter rules from grants
-    let packet_filter = state
-        .grants
-        .generate_filter_rules(&node, &all_nodes, &resolver);
+    let packet_filter = grants.generate_filter_rules(&node, &all_nodes, &resolver);
 
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);

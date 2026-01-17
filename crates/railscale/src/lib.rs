@@ -1,18 +1,18 @@
 //! railscale library - HTTP handlers and application setup.
-//!this crate provides the http server and handlers for the railscale control server:
-//! - [`handlers`]: http request handlers for tailscale protocol endpoints
+//!
+//! this crate provides the http server and handlers for the railscale control server:
+//! - [`handlers`]: HTTP request handlers for Tailscale protocol endpoints
 //! - [`cli`]: Command-line interface implementation
 //! - [`oidc`]: OpenID Connect authentication provider
-//! - [`derp`]: derp relay map management
-//! - [`derp_server`]: Embedded derp relay server
-//! - [`resolver`]: Grants-based access control resolver
+//! - [`derp`]: DERP relay map management
+//! - [`derp_server`]: Embedded DERP relay server
 //! - [`resolver`]: Grants-based access control resolver
 
 #![warn(missing_docs)]
 
-/// embedded derp relay server implementation
+/// command-line interface for railscale.
 pub mod cli;
-/// openID Connect authentication provider
+/// derp map loading and generation utilities.
 pub mod derp;
 /// embedded derp relay server implementation.
 pub mod derp_server;
@@ -41,19 +41,49 @@ use axum::{
     routing::{get, post},
 };
 use railscale_db::{Database, IpAllocator, RailscaleDb};
-use railscale_grants::GrantsEngine;
+use railscale_grants::{GrantsEngine, Policy};
 use railscale_types::Config;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
-/// database connection for persistent storage
+/// handle for hot-reloading policy at runtime.
+///
+/// obtained from [`create_app_with_policy_handle`] and can be used to update
+/// the policy without restarting the server.
+#[derive(Clone)]
+pub struct PolicyHandle {
+    engine: Arc<RwLock<GrantsEngine>>,
+}
+
+impl PolicyHandle {
+    /// reload the policy with a new one.
+    ///
+    /// this atomically updates the policy used by all handlers.
+    /// existing in-flight requests will complete with the old policy;
+    /// reload the policy synchronously (for use outside async context)
+    pub async fn reload(&self, policy: Policy) {
+        let mut engine = self.engine.write().await;
+        engine.update_policy(policy);
+    }
+
+    /// reload the policy synchronously (for use outside async context).
+    ///
+    /// # Panics
+    /// grants engine for access control evaluation (shared for hot-reload)
+    pub fn reload_blocking(&self, policy: Policy) {
+        let mut engine = self.engine.blocking_write();
+        engine.update_policy(policy);
+    }
+}
+
+/// application state shared across handlers.
 #[derive(Clone)]
 pub struct AppState {
-    /// oidc authentication provider (None if oidc is disabled)
+    /// database connection for persistent storage.
     pub db: RailscaleDb,
-    /// grants engine for access control evaluation.
-    pub grants: GrantsEngine,
+    /// grants engine for access control evaluation (shared for hot-reload).
+    pub grants: Arc<RwLock<GrantsEngine>>,
     /// server configuration.
     pub config: Config,
     /// oidc authentication provider (none if oidc is disabled).
@@ -123,6 +153,26 @@ pub async fn create_app(
     notifier: StateNotifier,
     keypair: Option<Keypair>,
 ) -> Router {
+    let (app, _handle) =
+        create_app_with_policy_handle(db, grants.policy().clone(), config, oidc, notifier, keypair)
+            .await;
+    app
+}
+
+/// reload the policy at runtime (e.g., in response to SIGHUP)
+///
+/// if `keypair` is None, a new keypair will be generated (not persisted)
+/// reload the policy at runtime (e.g., in response to SIGHUP).
+///
+/// if `keypair` is none, a new keypair will be generated (not persisted).
+pub async fn create_app_with_policy_handle(
+    db: RailscaleDb,
+    policy: Policy,
+    config: Config,
+    oidc: Option<oidc::AuthProviderOidc>,
+    notifier: StateNotifier,
+    keypair: Option<Keypair>,
+) -> (Router, PolicyHandle) {
     // generate keypair if not provided
     let keypair = keypair.unwrap_or_else(|| {
         railscale_proto::generate_keypair().expect("failed to generate noise keypair")
@@ -141,6 +191,12 @@ pub async fn create_app(
         ip_allocator.load_allocated(allocated_ips);
     }
 
+    // create shared grants engine
+    let grants = Arc::new(RwLock::new(GrantsEngine::new(policy)));
+    let handle = PolicyHandle {
+        engine: Arc::clone(&grants),
+    };
+
     let state = AppState {
         db,
         grants,
@@ -152,7 +208,7 @@ pub async fn create_app(
         noise_private_key: keypair.private,
     };
 
-    Router::new()
+    let router = Router::new()
         .route("/key", get(handlers::key))
         .route(
             "/ts2021",
@@ -165,5 +221,7 @@ pub async fn create_app(
             get(handlers::oidc::register_redirect),
         )
         .route("/oidc/callback", get(handlers::oidc::oidc_callback))
-        .with_state(state)
+        .with_state(state);
+
+    (router, handle)
 }

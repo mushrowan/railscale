@@ -609,4 +609,37 @@ mod tests {
         // user 1 cannot see user 3's device
         assert!(!engine.can_see(&node1_u1, &node3_u2, &resolver));
     }
+
+    #[test]
+    fn test_update_policy_changes_access() {
+        // start with empty policy (deny all)
+        let mut engine = GrantsEngine::empty();
+        let resolver = EmptyResolver;
+        let node1 = test_node(1, vec![]);
+        let node2 = test_node(2, vec![]);
+
+        // update to allow-all policy
+        assert!(!engine.can_see(&node1, &node2, &resolver));
+
+        // update to allow-all policy
+        let mut new_policy = Policy::empty();
+        new_policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+        engine.update_policy(new_policy);
+
+        // update back to empty policy
+        assert!(engine.can_see(&node1, &node2, &resolver));
+
+        // denied again
+        engine.update_policy(Policy::empty());
+
+        // denied again
+        assert!(!engine.can_see(&node1, &node2, &resolver));
+    }
 }
