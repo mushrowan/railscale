@@ -171,6 +171,11 @@ impl Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // install the ring crypto provider for rustls before any tls operations
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls crypto provider");
+
     color_eyre::install()?;
 
     let cli = Cli::parse();

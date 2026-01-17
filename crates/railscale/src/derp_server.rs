@@ -205,8 +205,11 @@ async fn handle_derp_stream(
 }
 
 #[derive(Debug)]
-struct UpgradeRequest {
-    fast_start: bool,
+enum DerpRequest {
+    /// normal derp upgrade request
+    Upgrade { fast_start: bool },
+    /// latency check endpoint (returns 200 ok immediately)
+    LatencyCheck,
 }
 
 async fn process_http_upgrade(
@@ -215,14 +218,26 @@ async fn process_http_upgrade(
     remote_addr: SocketAddr,
 ) -> Result<(), DerpServerError> {
     let (request_bytes, leftover) = read_http_request(&mut stream).await?;
-    let upgrade = parse_upgrade_request(&request_bytes)?;
+    let request = parse_derp_request(&request_bytes)?;
 
-    if !upgrade.fast_start {
-        write_upgrade_response(&mut stream, &server).await?;
+    match request {
+        DerpRequest::LatencyCheck => {
+            // return 200 ok for latency checks (used by netcheck)
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await?;
+            stream.flush().await?;
+            Ok(())
+        }
+        DerpRequest::Upgrade { fast_start } => {
+            if !fast_start {
+                write_upgrade_response(&mut stream, &server).await?;
+            }
+
+            let prefixed = PrefixedStream::new(stream, leftover);
+            server.handle_connection(prefixed, Some(remote_addr)).await
+        }
     }
-
-    let prefixed = PrefixedStream::new(stream, leftover);
-    server.handle_connection(prefixed, Some(remote_addr)).await
 }
 
 async fn read_http_request<S>(stream: &mut S) -> Result<(Vec<u8>, Vec<u8>), DerpServerError>
@@ -255,7 +270,7 @@ fn find_header_terminator(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|slice| slice == b"\r\n\r\n")
 }
 
-fn parse_upgrade_request(buf: &[u8]) -> Result<UpgradeRequest, DerpServerError> {
+fn parse_derp_request(buf: &[u8]) -> Result<DerpRequest, DerpServerError> {
     let mut headers = [httparse::Header {
         name: "",
         value: &[],
@@ -271,8 +286,16 @@ fn parse_upgrade_request(buf: &[u8]) -> Result<UpgradeRequest, DerpServerError> 
     if req.method != Some("GET") {
         return Err(DerpServerError::Handshake("unsupported HTTP method".into()));
     }
-    if req.path != Some("/derp") {
-        return Err(DerpServerError::Handshake("unknown DERP endpoint".into()));
+
+    // handle latency check endpoints (used by netcheck)
+    match req.path {
+        Some("/derp/probe") | Some("/derp/latency-check") => {
+            return Ok(DerpRequest::LatencyCheck);
+        }
+        Some("/derp") => {}
+        _ => {
+            return Err(DerpServerError::Handshake("unknown DERP endpoint".into()));
+        }
     }
 
     let upgrade =
@@ -289,7 +312,7 @@ fn parse_upgrade_request(buf: &[u8]) -> Result<UpgradeRequest, DerpServerError> 
     }
 
     let fast_start = header_eq(&headers, "Derp-Fast-Start", "1");
-    Ok(UpgradeRequest { fast_start })
+    Ok(DerpRequest::Upgrade { fast_start })
 }
 
 fn header_eq(headers: &[httparse::Header<'_>], name: &str, expected: &str) -> bool {

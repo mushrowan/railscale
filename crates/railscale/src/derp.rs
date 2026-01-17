@@ -3,8 +3,19 @@
 use railscale_proto::{DerpMap, DerpNode, DerpRegion};
 use railscale_types::Config;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::Path;
 use thiserror::Error;
+
+/// parse a hostname to extract ipv4/ipv6 fields if it's already an ip address.
+/// this prevents the client from doing unnecessary dns lookups.
+fn parse_ip_fields(host: &str) -> (Option<String>, Option<String>) {
+    match host.parse::<IpAddr>() {
+        Ok(IpAddr::V4(v4)) => (Some(v4.to_string()), None),
+        Ok(IpAddr::V6(v6)) => (None, Some(v6.to_string())),
+        Err(_) => (None, None), // It's a hostname, let client resolve
+    }
+}
 
 /// errors that can occur when loading derp maps.
 #[derive(Debug, Error)]
@@ -24,18 +35,6 @@ pub enum DerpError {
     /// file i/o failed.
     #[error("File I/O failed: {0}")]
     Io(#[from] std::io::Error),
-}
-
-/// extract hostname from a url, stripping scheme and port.
-///
-/// e.g. "https://example.com:443" -> "example.com"
-fn extract_hostname(url: &str) -> &str {
-    url.split("://")
-        .nth(1)
-        .unwrap_or(url)
-        .split(':')
-        .next()
-        .unwrap_or("localhost")
 }
 
 /// fetch a derp map from a url (expects json format).
@@ -87,6 +86,9 @@ pub fn generate_derp_map(config: &Config) -> DerpMap {
             let region_id = config.derp.embedded_derp.region_id;
             let host_name = runtime.advertise_host.clone();
 
+            // if host_name is an ip address, populate ipv4/ipv6 to avoid dns lookups
+            let (ipv4, ipv6) = parse_ip_fields(&host_name);
+
             let region = DerpRegion {
                 region_id,
                 region_code: "embedded".to_string(),
@@ -95,8 +97,8 @@ pub fn generate_derp_map(config: &Config) -> DerpMap {
                     name: format!("{}a", region_id),
                     region_id,
                     host_name,
-                    ipv4: None,
-                    ipv6: None,
+                    ipv4,
+                    ipv6,
                     stun_port: -1,
                     stun_only: false,
                     derp_port: runtime.advertise_port as i32,

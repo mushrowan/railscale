@@ -160,7 +160,8 @@ pub struct MapResponseNode {
     pub derp: String,
 
     /// home derp region id (modern integer format).
-    #[serde(default, skip_serializing_if = "is_zero")]
+    /// NOTE: json field is "homederp" (all caps derp) per go struct.
+    #[serde(rename = "HomeDERP", default, skip_serializing_if = "is_zero")]
     pub home_derp: i32,
 
     /// host information.
@@ -229,7 +230,7 @@ pub struct DnsConfig {
     pub routes: std::collections::HashMap<String, Vec<DnsResolver>>,
 }
 
-/// whether to omit tailscale's default regions
+/// derp map for relay servers.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct DerpMap {
@@ -237,7 +238,8 @@ pub struct DerpMap {
     pub regions: std::collections::HashMap<i32, DerpRegion>,
 
     /// whether to omit tailscale's default regions.
-    #[serde(rename = "OmitDefaultRegions", default)]
+    /// NOTE: this uses camelcase (not pascalcase) per tailscale's go struct tag.
+    #[serde(rename = "omitDefaultRegions", default)]
     pub omit_default_regions: bool,
 }
 

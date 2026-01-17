@@ -61,6 +61,11 @@ pkgs.testers.runNixOSTest {
         extraDaemonFlags = commonClientFlags;
       };
 
+      # Disable log uploads to avoid DNS lookups for log.tailscale.com
+      systemd.services.tailscaled.environment = {
+        TS_NO_LOGS_NO_SUPPORT = "1";
+      };
+
       environment.systemPackages = [pkgs.tailscale];
     };
 
@@ -72,6 +77,11 @@ pkgs.testers.runNixOSTest {
       services.tailscale = {
         enable = true;
         extraDaemonFlags = commonClientFlags;
+      };
+
+      # Disable log uploads to avoid DNS lookups for log.tailscale.com
+      systemd.services.tailscaled.environment = {
+        TS_NO_LOGS_NO_SUPPORT = "1";
       };
 
       environment.systemPackages = [pkgs.tailscale];
