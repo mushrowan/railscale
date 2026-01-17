@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 /// main configuration for railscale.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     /// server address to listen on.
     pub server_url: String,
@@ -70,6 +71,7 @@ impl Default for Config {
 
 /// database configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DatabaseConfig {
     /// database type: "sqlite" or "postgres".
     pub db_type: String,
@@ -89,6 +91,7 @@ impl Default for DatabaseConfig {
 
 /// derp (relay) configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DerpConfig {
     /// url to fetch the derp map from.
     pub derp_map_url: Option<String>,
@@ -116,6 +119,7 @@ impl Default for DerpConfig {
 
 /// embedded derp server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EmbeddedDerpConfig {
     /// whether to enable the embedded derp server.
     pub enabled: bool,
@@ -202,14 +206,14 @@ pub struct EmbeddedDerpRuntime {
 
 /// dns configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DnsConfig {
-    /// override local dns settings on clients
+    /// enable magicdns.
     pub magic_dns: bool,
 
     /// override local dns settings on clients.
     /// when true, forces clients to use railscale's dns config.
     /// when false, clients keep their local dns settings.
-    #[serde(default = "default_true")]
     pub override_local_dns: bool,
 
     /// nameservers configuration (global and split dns).
@@ -240,6 +244,7 @@ impl Default for DnsConfig {
 
 /// nameserver configuration with global and split dns support.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Nameservers {
     /// global nameservers used for all dns queries.
     /// can be ip addresses or doh urls (e.g., "https://dns.nextdns.io/abc123").
@@ -360,6 +365,7 @@ pub enum PkceMethod {
 
 /// performance tuning configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TuningConfig {
     /// nodestore batch size for write operations.
     pub node_store_batch_size: usize,
