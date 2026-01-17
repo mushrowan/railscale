@@ -10,23 +10,66 @@ use serde::Deserialize;
 use super::{ApiError, ResultExt};
 use crate::AppState;
 
+/// response type for register_redirect - either redirect or html.
+pub enum RegisterRedirectResponse {
+    /// redirect to oidc provider.
+    Redirect(Redirect),
+    /// html page for manual registration (when oidc not configured).
+    Html(Html<String>),
+}
+
+impl IntoResponse for RegisterRedirectResponse {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            RegisterRedirectResponse::Redirect(r) => r.into_response(),
+            RegisterRedirectResponse::Html(h) => h.into_response(),
+        }
+    }
+}
+
 /// get /register/{registration_id}
-/// redirects to oidc provider's authorization url.
+/// redirects to oidc provider, or shows manual registration page if oidc not configured.
 pub async fn register_redirect(
     State(state): State<AppState>,
     Path(registration_id_str): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    let oidc = state
-        .oidc
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("OIDC not configured"))?;
-
+) -> Result<RegisterRedirectResponse, ApiError> {
     let registration_id = RegistrationId::from_string(&registration_id_str)
         .map_err(|e| ApiError::bad_request(format!("invalid registration ID: {}", e)))?;
 
-    let (auth_url, _csrf_token, _nonce) = oidc.authorization_url(registration_id);
+    // if oidc is configured, redirect to it
+    if let Some(oidc) = state.oidc.as_ref() {
+        let (auth_url, _csrf_token, _nonce) = oidc.authorization_url(registration_id);
+        return Ok(RegisterRedirectResponse::Redirect(Redirect::to(&auth_url)));
+    }
 
-    Ok(Redirect::to(&auth_url))
+    // otherwise show manual registration page
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>Complete Registration</title>
+    <style>
+        body {{ font-family: system-ui, -apple-system, sans-serif; max-width: 600px; margin: 50px auto; padding: 20px; }}
+        h1 {{ color: #333; }}
+        code {{ background: #f4f4f4; padding: 2px 8px; border-radius: 4px; font-size: 14px; }}
+        .command {{ background: #1a1a2e; color: #eee; padding: 15px; border-radius: 8px; margin: 20px 0; }}
+        .command code {{ background: transparent; color: #4ade80; }}
+    </style>
+</head>
+<body>
+    <h1>Complete Your Registration</h1>
+    <p>To complete the registration of your device, run the following command on the server:</p>
+    <div class="command">
+        <code>railscale nodes approve {}</code>
+    </div>
+    <p>After running the command, the Tailscale client will automatically connect.</p>
+    <p><small>Registration ID: <code>{}</code></small></p>
+</body>
+</html>"#,
+        registration_id_str, registration_id_str
+    );
+
+    Ok(RegisterRedirectResponse::Html(Html(html)))
 }
 
 /// query parameters for oidc callback.
@@ -152,7 +195,7 @@ pub async fn oidc_callback(
 
         let node = state.db.create_node(&node).await.map_internal()?;
 
-        // complete the pending registration
+        // notify streaming clients that a new node has been added
         state.notifier.notify_state_changed();
 
         // complete the pending registration
@@ -189,7 +232,7 @@ mod tests {
     use tower::ServiceExt;
 
     #[tokio::test]
-    async fn test_register_redirect_without_oidc() {
+    async fn test_register_redirect_without_oidc_shows_manual_page() {
         // set up test database
         let db = RailscaleDb::new_in_memory().await.unwrap();
 
@@ -233,8 +276,26 @@ mod tests {
             .await
             .unwrap();
 
-        // should get an error since oidc is not configured
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        // check the response body contains the registration instructions
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // check the response body contains the registration instructions
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let body_str = String::from_utf8_lossy(&body);
+        assert!(
+            body_str.contains("Complete Your Registration"),
+            "should show registration page"
+        );
+        assert!(
+            body_str.contains("railscale nodes approve"),
+            "should show CLI command"
+        );
+        assert!(
+            body_str.contains(&reg_id_str),
+            "should include registration ID"
+        );
     }
 
     #[tokio::test]
