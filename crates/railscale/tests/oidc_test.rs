@@ -423,3 +423,218 @@ async fn test_oidc_callback_full_flow_creates_user() {
     assert_eq!(user.email, Some("alice@example.com".to_string()));
     assert_eq!(user.name, "alice");
 }
+
+/// 3. user authenticates via oidc (simulated)
+/// 4. Server receives oidc callback, creates node
+/// 5. Client sends followup request
+/// 6. Server returns machine_authorized: true
+/// 4. Server receives OIDC callback, creates node
+/// 5. Client sends followup request
+/// 6. Server returns machine_authorized: true
+#[tokio::test]
+async fn test_full_interactive_login_flow() {
+    use railscale::handlers::RegisterResponse;
+    use railscale_db::Database;
+
+    // start mock oidc server
+    let mock_server = MockServer::start().await;
+    let issuer = mock_server.uri();
+
+    // set up discovery endpoint
+    Mock::given(method("GET"))
+        .and(path("/.well-known/openid-configuration"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_discovery_response(&issuer)))
+        .mount(&mock_server)
+        .await;
+
+    // set up jwks endpoint with test RSA key
+    Mock::given(method("GET"))
+        .and(path("/jwks"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(test_jwks_response()))
+        .mount(&mock_server)
+        .await;
+
+    // create oidc provider
+    let oidc_config = test_oidc_config(&issuer);
+    let oidc = railscale::oidc::AuthProviderOidc::new(oidc_config, "http://localhost:8080")
+        .await
+        .expect("OIDC provider creation should succeed");
+
+    // set up test database
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    // create app with OIDC
+    let config = Config::default();
+    let app = railscale::create_app(
+        db.clone(),
+        default_grants(),
+        config,
+        Some(oidc.clone()),
+        railscale::StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    // step 1: initial register request without auth_key
+    let register_body = serde_json::json!({
+        "Version": 68,
+        "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&register_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let register_resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+
+    // should not be authorized yet
+    assert!(!register_resp.machine_authorized);
+    // should have auth_url
+    assert!(
+        register_resp.auth_url.starts_with("/register/"),
+        "auth_url should start with /register/"
+    );
+
+    let auth_url = register_resp.auth_url;
+    let reg_id = auth_url.strip_prefix("/register/").unwrap();
+
+    // step 2: follow the auth_url - this redirects to oidc
+    let redirect_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&auth_url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(redirect_response.status(), StatusCode::SEE_OTHER);
+
+    // get the oidc redirect url to extract state and nonce
+    let oidc_redirect = redirect_response
+        .headers()
+        .get("location")
+        .expect("should have location header")
+        .to_str()
+        .unwrap();
+
+    // extract state from the redirect url
+    let url = url::Url::parse(oidc_redirect).unwrap();
+    let state = url
+        .query_pairs()
+        .find(|(k, _)| k == "state")
+        .map(|(_, v)| v.to_string())
+        .expect("should have state parameter");
+
+    // get nonce from the registration info
+    let reg_info = oidc
+        .get_registration_info(&state)
+        .expect("registration info should be in cache");
+    let nonce = reg_info.nonce.clone();
+
+    // step 3: create signed id token and mock token endpoint
+    let id_token = create_test_id_token(&issuer, "test-client", &nonce);
+    let token_response = serde_json::json!({
+        "access_token": "mock_access_token",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "id_token": id_token
+    });
+
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(token_response))
+        .mount(&mock_server)
+        .await;
+
+    // step 4: call oidc callback - this creates the node
+    let callback_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/oidc/callback?code=test_code&state={}", state))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        callback_response.status(),
+        StatusCode::OK,
+        "OIDC callback should succeed"
+    );
+
+    // step 5: send followup request - should now be authorized
+    let followup_body = serde_json::json!({
+        "Version": 68,
+        "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+        "Followup": auth_url
+    });
+
+    let followup_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&followup_body).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(followup_response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(followup_response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let followup_resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+
+    // should now be authorized
+    assert!(
+        followup_resp.machine_authorized,
+        "machine should be authorized after OIDC flow"
+    );
+    assert!(
+        followup_resp.auth_url.is_empty(),
+        "auth_url should be empty after authorization"
+    );
+    assert_eq!(followup_resp.login.provider, "oidc");
+    assert_eq!(followup_resp.login.login_name, "alice");
+
+    // verify user was created
+    let provider_identifier = format!("{}:test-user-sub", issuer);
+    let user = db
+        .get_user_by_oidc_identifier(&provider_identifier)
+        .await
+        .expect("database query should succeed")
+        .expect("user should have been created");
+
+    assert_eq!(user.email, Some("alice@example.com".to_string()));
+
+    // verify node was created
+    let nodes = db.list_nodes().await.expect("should list nodes");
+    assert_eq!(nodes.len(), 1, "should have created one node");
+    assert_eq!(nodes[0].user_id, Some(user.id));
+}
