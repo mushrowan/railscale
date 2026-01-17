@@ -1,5 +1,6 @@
 //! railscale library - HTTP handlers and application setup.
 
+pub mod cli;
 pub mod derp;
 pub mod derp_server;
 mod dns;

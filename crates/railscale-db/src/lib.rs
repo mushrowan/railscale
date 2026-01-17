@@ -67,8 +67,10 @@ pub trait Database: Send + Sync {
         &self,
         user_id: UserId,
     ) -> impl Future<Output = Result<Vec<PreAuthKey>>> + Send;
+    fn get_all_preauth_keys(&self) -> impl Future<Output = Result<Vec<PreAuthKey>>> + Send;
     fn mark_preauth_key_used(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
     fn delete_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    fn expire_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// the main database implementation using sea-orm.
@@ -301,6 +303,26 @@ impl Database for RailscaleDb {
         entity::preauth_key::Entity::update_many()
             .col_expr(
                 entity::preauth_key::Column::DeletedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::preauth_key::Column::Id.eq(id as i64))
+            .exec(&self.conn)
+            .await?;
+        Ok(())
+    }
+
+    async fn get_all_preauth_keys(&self) -> Result<Vec<PreAuthKey>> {
+        let results = entity::preauth_key::Entity::find()
+            .filter(entity::preauth_key::Column::DeletedAt.is_null())
+            .all(&self.conn)
+            .await?;
+        Ok(results.into_iter().map(Into::into).collect())
+    }
+
+    async fn expire_preauth_key(&self, id: u64) -> Result<()> {
+        entity::preauth_key::Entity::update_many()
+            .col_expr(
+                entity::preauth_key::Column::Expiration,
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
             .filter(entity::preauth_key::Column::Id.eq(id as i64))
