@@ -1,4 +1,4 @@
-//! the `apikeys` subcommand - manage api keys
+//! the `apikeys` subcommand - manage api keys.
 
 use chrono::{Duration, Utc};
 use clap::{Args, Subcommand};
@@ -143,21 +143,16 @@ async fn create_key(args: CreateArgs) -> Result<()> {
     Ok(())
 }
 
-/// generate a random api key string
+/// generate a random api key string using cryptographically secure random bytes.
 fn generate_api_key() -> String {
-    use rand::Rng;
-    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    const KEY_LEN: usize = 32;
+    use base64::Engine;
+    use rand::RngCore;
 
-    let mut rng = rand::rng();
-    let random_part: String = (0..KEY_LEN)
-        .map(|_| {
-            let idx = rng.random_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
-        .collect();
+    let mut bytes = [0u8; 24]; // 24 bytes = 192 bits of entropy
+    rand::rng().fill_bytes(&mut bytes);
 
-    format!("rsapi_{}", random_part)
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    format!("rsapi_{}", encoded)
 }
 
 async fn list_keys(args: ListArgs) -> Result<()> {
@@ -247,4 +242,45 @@ async fn expire_key(args: ExpireArgs) -> Result<()> {
     println!("Expired API key {}", args.key_id);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_key_format() {
+        let key = generate_api_key();
+
+        // extract the random part (after prefix)
+        assert!(key.starts_with("rsapi_"), "key must start with rsapi_");
+
+        // random part should be 32 chars of base64 URL_SAFE_NO_PAD
+        let random_part = key.strip_prefix("rsapi_").unwrap();
+
+        // should be valid base64 URL_SAFE (only A-Z, a-z, 0-9, -, _)
+        assert_eq!(random_part.len(), 32, "random part should be 32 chars");
+
+        // should be valid base64 url_safe (only a-z, a-z, 0-9, -, _)
+        assert!(
+            random_part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "random part must be valid base64 URL_SAFE chars"
+        );
+
+        // should decode to 24 bytes
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(random_part)
+            .expect("should be valid base64");
+        assert_eq!(decoded.len(), 24, "should decode to 24 bytes");
+    }
+
+    #[test]
+    fn test_api_key_uniqueness() {
+        let key1 = generate_api_key();
+        let key2 = generate_api_key();
+        assert_ne!(key1, key2, "keys should be unique");
+    }
 }

@@ -14,7 +14,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use crate::derp_server::{self, DerpListenerConfig, EmbeddedDerpOptions};
 
-/// path to config file (TOML format)
+/// default config file search paths (in order of priority).
 const CONFIG_SEARCH_PATHS: &[&str] = &[
     "/etc/railscale/config.toml",
     "~/.config/railscale/config.toml",
@@ -129,14 +129,14 @@ impl ServeCommand {
         Ok(None)
     }
 
-    //start with defaults, then overlay config file if found
+    /// convert cli arguments into a config struct, merging with config file if present.
     ///
     /// priority order: defaults -> config file -> cli flags
     fn into_config(self) -> Result<Config> {
         // start with defaults, then overlay config file if found
         let mut config = match Self::load_config_file(self.config.as_ref())? {
             Some(file_config) => {
-                info!("No config file found, using defaults");
+                info!("Loaded configuration from file");
                 file_config
             }
             None => {
@@ -376,26 +376,29 @@ impl ServeCommand {
 }
 
 /// extract hostname from a url, stripping scheme and port.
-fn extract_host(url: &str) -> String {
-    url.split("://")
-        .nth(1)
-        .unwrap_or(url)
-        .split(':')
-        .next()
-        .unwrap_or("localhost")
-        .to_string()
+fn extract_host(url_str: &str) -> String {
+    url::Url::parse(url_str)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "localhost".to_string())
 }
 
-/// extract port from an address string like "0.0.0.0:3340".
+//fallback: take last colon-separated part (ipv4 case)
+/// handles both ipv4 (host:port) and ipv6 ([::1]:port) formats.
 fn extract_port(addr: &str) -> Option<u16> {
+    // try parsing as a socket address first (handles ipv6)
+    if let Ok(socket_addr) = addr.parse::<std::net::SocketAddr>() {
+        return Some(socket_addr.port());
+    }
+    // fallback: take last colon-separated part (ipv4 case)
     addr.rsplit(':').next()?.parse().ok()
 }
 
 /// expand ~ to home directory in path strings.
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = std::env::var_os("HOME") {
-            return PathBuf::from(home).join(rest);
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
         }
     }
     PathBuf::from(path)
@@ -403,18 +406,26 @@ fn expand_tilde(path: &str) -> PathBuf {
 
 /// parse a database url into databaseconfig.
 fn parse_database_url(db_url: &str) -> Result<railscale_types::DatabaseConfig> {
-    if db_url.starts_with("postgres://") {
-        Ok(railscale_types::DatabaseConfig {
+    let parsed =
+        url::Url::parse(db_url).with_context(|| format!("invalid database URL: {}", db_url))?;
+
+    match parsed.scheme() {
+        "postgres" | "postgresql" => Ok(railscale_types::DatabaseConfig {
             db_type: "postgres".to_string(),
             connection_string: db_url.to_string(),
-        })
-    } else if let Some(path) = db_url.strip_prefix("sqlite://") {
-        Ok(railscale_types::DatabaseConfig {
-            db_type: "sqlite".to_string(),
-            connection_string: path.to_string(),
-        })
-    } else {
-        bail!("database URL must start with sqlite:// or postgres://");
+        }),
+        "sqlite" => {
+            // extract path from sqlite:// url
+            let path = parsed.path();
+            Ok(railscale_types::DatabaseConfig {
+                db_type: "sqlite".to_string(),
+                connection_string: path.to_string(),
+            })
+        }
+        scheme => bail!(
+            "unsupported database scheme '{}', expected 'sqlite' or 'postgres'",
+            scheme
+        ),
     }
 }
 

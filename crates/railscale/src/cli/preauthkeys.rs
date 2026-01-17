@@ -204,19 +204,16 @@ async fn create_key(args: CreateArgs) -> Result<()> {
     Ok(())
 }
 
-/// generate a random preauth key string.
+/// generate a random preauth key string using cryptographically secure random bytes.
 fn generate_preauth_key() -> String {
-    use rand::Rng;
-    const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    const KEY_LEN: usize = 48;
+    use base64::Engine;
+    use rand::RngCore;
 
-    let mut rng = rand::rng();
-    (0..KEY_LEN)
-        .map(|_| {
-            let idx = rng.random_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
-        .collect()
+    let mut bytes = [0u8; 24]; // 24 bytes = 192 bits of entropy
+    rand::rng().fill_bytes(&mut bytes);
+
+    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
+    format!("rspak_{}", encoded)
 }
 
 async fn list_keys(args: ListArgs) -> Result<()> {
@@ -311,4 +308,45 @@ async fn expire_key(args: ExpireArgs) -> Result<()> {
     println!("Expired preauth key {}", args.key_id);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_preauth_key_format() {
+        let key = generate_preauth_key();
+
+        // extract the random part (after prefix)
+        assert!(key.starts_with("rspak_"), "key must start with rspak_");
+
+        // random part should be 32 chars of base64 URL_SAFE_NO_PAD
+        let random_part = key.strip_prefix("rspak_").unwrap();
+
+        // should be valid base64 URL_SAFE (only A-Z, a-z, 0-9, -, _)
+        assert_eq!(random_part.len(), 32, "random part should be 32 chars");
+
+        // should be valid base64 url_safe (only a-z, a-z, 0-9, -, _)
+        assert!(
+            random_part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+            "random part must be valid base64 URL_SAFE chars"
+        );
+
+        // should decode to 24 bytes
+        use base64::Engine;
+        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(random_part)
+            .expect("should be valid base64");
+        assert_eq!(decoded.len(), 24, "should decode to 24 bytes");
+    }
+
+    #[test]
+    fn test_preauth_key_uniqueness() {
+        let key1 = generate_preauth_key();
+        let key2 = generate_preauth_key();
+        assert_ne!(key1, key2, "keys should be unique");
+    }
 }
