@@ -6,34 +6,61 @@ use railscale_types::Config;
 use std::collections::HashMap;
 
 /// the magicdns resolver address.
+/// returns `None` if:
+/// - Magicdns is disabled, OR
 const MAGIC_DNS_RESOLVER: &str = "100.100.100.100";
 
-/// generate dns configuration for a client.
+//if override_local_dns is false, don't override client's dns
+//(but we still need routes for tailscale-specific domains)
+/// returns `none` if:
+/// - MagicDNS is disabled, OR
+/// - `override_local_dns` is false (client keeps local DNS settings)
 pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
+    // global resolvers from config (these handle general dns queries)
     if !config.dns.magic_dns {
         return None;
     }
 
+    // if override_local_dns is false, don't override client's dns
+    // (but we still need routes for Tailscale-specific domains)
+    if !config.dns.override_local_dns {
+        return generate_minimal_dns_config(config);
+    }
+
     let magic_resolver = DnsResolver::new(MAGIC_DNS_RESOLVER);
 
-    let mut resolvers = vec![magic_resolver.clone()];
-    resolvers.extend(
-        config
-            .dns
-            .nameservers
-            .iter()
-            .map(|ip| DnsResolver::new(ip.to_string())),
-    );
+    // route base domain to MagicDNS
+    let mut resolvers: Vec<DnsResolver> = config
+        .dns
+        .nameservers
+        .global
+        .iter()
+        .map(|addr| DnsResolver::new(addr.clone()))
+        .collect();
 
+    // add magicdns resolver last (for tailscale-specific lookups)
+    resolvers.push(magic_resolver.clone());
+
+    // search domains: base domain first, then any configured search domains
     let mut domains = vec![config.base_domain.clone()];
     domains.extend(config.dns.search_domains.clone());
 
+    // build routes map for split dns
     let mut routes = HashMap::new();
 
-    // add base domain route
+    // route base domain to magicdns
     routes.insert(config.base_domain.clone(), vec![magic_resolver.clone()]);
 
-    // generate reverse dns routes for ipv4 prefix
+    // add split dns routes from config
+    for (domain, nameservers) in &config.dns.nameservers.split {
+        let resolvers: Vec<DnsResolver> = nameservers
+            .iter()
+            .map(|addr| DnsResolver::new(addr.clone()))
+            .collect();
+        routes.insert(domain.clone(), resolvers);
+    }
+
+    // generate reverse dns routes for ipv4 prefix (for PTR lookups)
     if let Some(prefix_v4) = config.prefix_v4 {
         let v4_routes = generate_ipv4_reverse_dns_routes(prefix_v4);
         for route in v4_routes {
@@ -52,6 +79,35 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
     Some(DnsConfig {
         resolvers,
         domains,
+        routes,
+    })
+}
+
+/// generate minimal dns config when override_local_dns is false.
+/// only includes routes for tailscale-specific domains, not global resolvers.
+fn generate_minimal_dns_config(config: &Config) -> Option<DnsConfig> {
+    let magic_resolver = DnsResolver::new(MAGIC_DNS_RESOLVER);
+
+    let mut routes = HashMap::new();
+
+    // add reverse dns routes
+    routes.insert(config.base_domain.clone(), vec![magic_resolver.clone()]);
+
+    // add reverse dns routes
+    if let Some(prefix_v4) = config.prefix_v4 {
+        for route in generate_ipv4_reverse_dns_routes(prefix_v4) {
+            routes.insert(route, vec![magic_resolver.clone()]);
+        }
+    }
+    if let Some(prefix_v6) = config.prefix_v6 {
+        for route in generate_ipv6_reverse_dns_routes(prefix_v6) {
+            routes.insert(route, vec![magic_resolver.clone()]);
+        }
+    }
+
+    Some(DnsConfig {
+        resolvers: vec![], // empty = don't override client's resolvers
+        domains: vec![config.base_domain.clone()],
         routes,
     })
 }

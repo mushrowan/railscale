@@ -1,6 +1,5 @@
 //! configuration types for railscale.
 
-use std::net::IpAddr;
 use std::path::PathBuf;
 
 use ipnet::IpNet;
@@ -204,11 +203,17 @@ pub struct EmbeddedDerpRuntime {
 /// dns configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DnsConfig {
-    /// enable magicdns.
+    /// override local dns settings on clients
     pub magic_dns: bool,
 
-    /// nameservers to use.
-    pub nameservers: Vec<IpAddr>,
+    /// override local dns settings on clients.
+    /// when true, forces clients to use railscale's dns config.
+    /// when false, clients keep their local dns settings.
+    #[serde(default = "default_true")]
+    pub override_local_dns: bool,
+
+    /// nameservers configuration (global and split dns).
+    pub nameservers: Nameservers,
 
     /// search domains.
     pub search_domains: Vec<String>,
@@ -217,13 +222,45 @@ pub struct DnsConfig {
     pub extra_records: Vec<DnsRecord>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 impl Default for DnsConfig {
     fn default() -> Self {
         Self {
             magic_dns: true,
-            nameservers: vec![],
+            override_local_dns: true,
+            nameservers: Nameservers::default(),
             search_domains: vec![],
             extra_records: vec![],
+        }
+    }
+}
+
+/// nameserver configuration with global and split dns support.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Nameservers {
+    /// global nameservers used for all dns queries.
+    /// can be ip addresses or doh urls (e.g., "https://dns.nextdns.io/abc123").
+    pub global: Vec<String>,
+
+    /// split dns: map of domain suffixes to nameservers.
+    /// queries for these domains use the specified nameservers instead of global.
+    #[serde(default)]
+    pub split: std::collections::HashMap<String, Vec<String>>,
+}
+
+impl Default for Nameservers {
+    fn default() -> Self {
+        Self {
+            global: vec![
+                "1.1.1.1".to_string(),
+                "1.0.0.1".to_string(),
+                "8.8.8.8".to_string(),
+                "8.8.4.4".to_string(),
+            ],
+            split: std::collections::HashMap::new(),
         }
     }
 }
