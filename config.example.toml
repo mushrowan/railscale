@@ -1,0 +1,259 @@
+# Railscale Configuration Example
+# ================================
+#
+# Railscale looks for configuration in the following order:
+#   1. /etc/railscale/config.toml
+#   2. ~/.config/railscale/config.toml
+#   3. ./config.toml (current directory)
+#   4. Path specified with --config flag
+#
+# CLI flags override config file values.
+# Environment variables (RAILSCALE_*) override config file values.
+
+# -----------------------------------------------------------------------------
+# Server Configuration
+# -----------------------------------------------------------------------------
+
+# The URL clients will use to connect to this server.
+# Must be accessible from client machines.
+# For production, use HTTPS with a valid domain.
+server_url = "http://127.0.0.1:8080"
+
+# Address to bind the HTTP server to.
+# Use "0.0.0.0:8080" to listen on all interfaces.
+listen_addr = "127.0.0.1:8080"
+
+# Path to the Noise protocol private key file.
+# This key encrypts traffic between railscale and Tailscale clients.
+# A missing key will be automatically generated on first run.
+noise_private_key_path = "/var/lib/railscale/noise_private.key"
+
+# -----------------------------------------------------------------------------
+# IP Address Allocation
+# -----------------------------------------------------------------------------
+
+# IPv4 prefix for node address allocation.
+# Must be within 100.64.0.0/10 (CGNAT range reserved for Tailscale).
+prefix_v4 = "100.64.0.0/10"
+
+# IPv6 prefix for node address allocation.
+# Must be within fd7a:115c:a1e0::/48 (Tailscale's ULA range).
+prefix_v6 = "fd7a:115c:a1e0::/48"
+
+# Base domain for MagicDNS hostnames.
+# Nodes will be accessible as <hostname>.<base_domain>
+# This MUST be different from your server_url domain.
+base_domain = "railscale.net"
+
+# -----------------------------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------------------------
+
+[database]
+# Database type: "sqlite" or "postgres"
+# SQLite is recommended for most deployments.
+db_type = "sqlite"
+
+# For SQLite: path to the database file
+# For Postgres: connection string (e.g., "postgres://user:pass@host/db")
+connection_string = "/var/lib/railscale/db.sqlite"
+
+# -----------------------------------------------------------------------------
+# DERP (Relay) Configuration
+# -----------------------------------------------------------------------------
+#
+# DERP is a relay system that Tailscale uses when direct connections
+# cannot be established (NAT traversal, firewalls, etc.).
+# https://tailscale.com/blog/how-tailscale-works/#encrypted-tcp-relays-derp
+
+[derp]
+# URL to fetch the public DERP map from.
+# Set to null/empty to disable fetching from URL.
+derp_map_url = "https://controlplane.tailscale.com/derpmap/default"
+
+# Path to a local DERP map file (JSON format).
+# Use this to define custom DERP servers.
+# derp_map_path = "/etc/railscale/derp-map.json"
+
+# How often to refresh the DERP map (in seconds).
+update_frequency_secs = 3600
+
+# Embedded DERP server configuration.
+# Running your own DERP server improves latency and privacy.
+[derp.embedded_derp]
+# Enable the embedded DERP server.
+# When enabled, your railscale server also acts as a relay.
+enabled = false
+
+# Region ID for the embedded DERP server.
+# Must be unique if using multiple DERP regions.
+region_id = 999
+
+# Human-readable name shown in Tailscale UI.
+region_name = "railscale"
+
+# Address to bind the DERP HTTPS listener to.
+listen_addr = "0.0.0.0:3340"
+
+# Hostname or IP advertised to clients.
+# Defaults to the host from server_url if not set.
+# advertise_host = "derp.example.com"
+
+# Port advertised to clients.
+# Defaults to the port from listen_addr if not set.
+# advertise_port = 443
+
+# TLS certificate and key paths (PEM format).
+# Required when embedded DERP is enabled.
+cert_path = "/var/lib/railscale/derp_cert.pem"
+tls_key_path = "/var/lib/railscale/derp_tls_key.pem"
+
+# DERP protocol private key path.
+# A missing key will be automatically generated.
+private_key_path = "/var/lib/railscale/derp_private.key"
+
+# STUN server address for NAT traversal assistance.
+# STUN helps clients discover their public IP.
+stun_listen_addr = "0.0.0.0:3478"
+
+# -----------------------------------------------------------------------------
+# DNS Configuration
+# -----------------------------------------------------------------------------
+#
+# Railscale supports Tailscale's DNS features including MagicDNS.
+# See: https://tailscale.com/kb/1054/dns/
+#      https://tailscale.com/kb/1081/magicdns/
+#
+# For DNS to work, clients must have --accept-dns=true (the default).
+
+[dns]
+# Enable MagicDNS.
+# When enabled, nodes are accessible by hostname via the tailnet.
+magic_dns = true
+
+# Override local DNS settings on clients.
+# - true (default): Clients use railscale's DNS config exclusively
+# - false: Clients keep their local DNS, railscale only handles tailnet domains
+#
+# Set to false if you don't want to break clients' existing DNS setup.
+override_local_dns = true
+
+# Search domains added to client DNS config.
+# The base_domain is always included first when MagicDNS is enabled.
+search_domains = []
+
+# Extra DNS records served by MagicDNS.
+# Useful for internal services that should resolve on the tailnet.
+# extra_records = [
+#     { name = "grafana.railscale.net", record_type = "A", value = "100.64.0.5" },
+#     { name = "prometheus.railscale.net", record_type = "A", value = "100.64.0.6" },
+# ]
+
+[dns.nameservers]
+# Global nameservers for general DNS queries.
+# Can be IP addresses or DNS-over-HTTPS URLs.
+# These are used for all queries except split DNS domains.
+global = [
+    "1.1.1.1",          # Cloudflare primary
+    "1.0.0.1",          # Cloudflare secondary
+    "8.8.8.8",          # Google primary
+    "8.8.4.4",          # Google secondary
+]
+
+# For DNS-over-HTTPS (NextDNS example):
+# global = [
+#     "https://dns.nextdns.io/abc123",
+# ]
+
+# Split DNS: route specific domains to dedicated nameservers.
+# Queries for these domains bypass global nameservers.
+# Useful for resolving internal corporate domains.
+[dns.nameservers.split]
+# "corp.example.com" = ["10.0.0.53", "10.0.0.54"]
+# "internal.lan" = ["192.168.1.1"]
+
+# -----------------------------------------------------------------------------
+# OIDC Authentication (Optional)
+# -----------------------------------------------------------------------------
+#
+# Configure OpenID Connect for user authentication.
+# When enabled, users authenticate via your identity provider.
+
+# [oidc]
+# # OIDC issuer URL from your identity provider.
+# issuer = "https://sso.example.com"
+#
+# # Client credentials from your identity provider.
+# client_id = "railscale"
+# client_secret = "your-client-secret"
+#
+# # Alternatively, load secret from a file (supports env vars):
+# # client_secret_path = "${CREDENTIALS_DIRECTORY}/oidc_client_secret"
+#
+# # OAuth2 scopes to request.
+# scope = ["openid", "profile", "email"]
+#
+# # Require email to be verified by the identity provider.
+# email_verified_required = true
+#
+# # How long before a node needs to re-authenticate (seconds).
+# # Default: 180 days. Set to 0 for no expiry.
+# expiry_secs = 15552000
+#
+# # Use token expiry instead of expiry_secs.
+# # Only enable if you understand the implications.
+# use_expiry_from_token = false
+#
+# # Restrict access to specific email domains.
+# allowed_domains = ["example.com"]
+#
+# # Restrict access to specific email addresses.
+# allowed_users = ["alice@example.com", "bob@example.com"]
+#
+# # Restrict access to users in specific groups.
+# allowed_groups = ["/railscale-users"]
+#
+# # Extra parameters sent to the authorization endpoint.
+# [oidc.extra_params]
+# domain_hint = "example.com"
+#
+# # PKCE (Proof Key for Code Exchange) adds security to the OAuth flow.
+# [oidc.pkce]
+# enabled = false
+# method = "S256"  # or "Plain"
+
+# -----------------------------------------------------------------------------
+# Feature Flags
+# -----------------------------------------------------------------------------
+
+# Enable Taildrop file sharing between nodes.
+# Nodes can send files to each other using `tailscale file send`.
+# https://tailscale.com/kb/1106/taildrop/
+taildrop_enabled = true
+
+# Randomize WireGuard port on clients.
+# Helps with some buggy firewalls that block the default port 41641.
+# https://tailscale.com/kb/1181/firewalls/
+randomize_client_port = false
+
+# -----------------------------------------------------------------------------
+# Performance Tuning
+# -----------------------------------------------------------------------------
+#
+# Advanced settings. The defaults work well for most deployments.
+# Only modify if you've identified a specific performance issue.
+
+[tuning]
+# NodeStore batches write operations before rebuilding peer relationships.
+# Larger batches reduce CPU usage but increase latency.
+node_store_batch_size = 100
+node_store_batch_timeout_ms = 500
+
+# Registration cache settings.
+# The cache stores pending registrations to handle retries.
+register_cache_expiration_secs = 900    # 15 minutes
+register_cache_cleanup_secs = 1200      # 20 minutes
+
+# Interval between keep-alive messages for long-polling map sessions.
+# Helps detect stale connections. Set to 0 to disable.
+map_keepalive_interval_secs = 60
