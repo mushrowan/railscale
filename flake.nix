@@ -25,9 +25,8 @@
       imports = [
         inputs.treefmt-nix.flakeModule
       ];
-      # For now only build for current arch, to silence `nix flake check` warnings
+
       systems = [ "x86_64-linux" ];
-      # systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
 
       perSystem =
         {
@@ -48,45 +47,9 @@
 
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-          # Common source filtering - include proto files for tonic-build
-          protoFilter = path: _type: builtins.match ".*\\.proto$" path != null;
-          src = pkgs.lib.cleanSourceWith {
-            src = ./.;
-            filter = path: type: (protoFilter path type) || (craneLib.filterCargoSources path type);
-          };
-
-          # Common arguments for all builds
-          commonArgs = {
-            inherit src;
-            strictDeps = true;
-
-            nativeBuildInputs = with pkgs; [
-              pkg-config
-              protobuf # For tonic-build (gRPC)
-            ];
-
-            buildInputs =
-              with pkgs;
-              [
-                openssl
-              ]
-              ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-                pkgs.darwin.apple_sdk.frameworks.Security
-                pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
-              ];
-          };
-
-          # Build just the cargo dependencies for caching
-          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
-
-          # Build the actual package
-          railscale = craneLib.buildPackage (
-            commonArgs
-            // {
-              inherit cargoArtifacts;
-              meta.mainProgram = "railscale";
-            }
-          );
+          # Import package build
+          packageSet = import ./nix/package.nix { inherit pkgs craneLib; };
+          inherit (packageSet) railscale cargoArtifacts commonArgs;
         in
         {
           _module.args.pkgs = import inputs.nixpkgs {
@@ -109,21 +72,22 @@
             {
               inherit railscale;
 
-              # Run clippy
               clippy = clippyBase { cargoClippyExtraArgs = "--all-targets"; };
               clippyDenyWarnings = clippyBase { cargoClippyExtraArgs = "--all-targets -- --deny warnings"; };
 
-              # Check formatting
               fmt = craneLib.cargoFmt {
-                inherit src cargoArtifacts;
+                inherit (commonArgs) src;
+                inherit cargoArtifacts;
               };
               cargoTest = craneLib.cargoTest (commonArgs // { inherit cargoArtifacts; });
             }
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
               # NixOS integration tests (Linux only)
-              nixos-test = import ./tests.nix {
-                inherit pkgs;
-                railscale = railscale;
+              nixos-test = import ./nix/tests/cli-integration.nix {
+                inherit pkgs railscale;
+              };
+              nixos-test-policy = import ./nix/tests/policy-reload.nix {
+                inherit pkgs railscale;
               };
             };
 
@@ -132,69 +96,20 @@
             inherit railscale;
           };
 
-          devShells.default = craneLib.devShell {
+          devShells.default = import ./nix/devshell.nix {
+            inherit pkgs craneLib;
             checks = self'.checks;
-
-            packages = with pkgs; [
-              cargo-update
-              cargo-edit
-              curl
-              jq
-              protobuf # For tonic-build (gRPC)
-
-              # Run the NixOS VM integration test with full logs
-              (writeShellScriptBin "vmtest" ''
-                set -e
-                echo "=== Running NixOS VM integration test ==="
-                nix build .#checks.x86_64-linux.nixos-test --print-build-logs --rebuild "$@"
-                echo "=== VM test passed! ==="
-              '')
-
-              # Run nix flake check with full logs
-              (writeShellScriptBin "check-verbose" ''
-                set -e
-                echo "=== check-verbose: Build all flake checks with full logs ==="
-                echo ""
-                echo "Cached builds show no logs. To force rebuild and see logs:"
-                echo "  check-verbose --rebuild    (may fail on non-deterministic derivations)"
-                echo "  nix build .#checks.x86_64-linux.nixos-test -L --rebuild"
-                echo ""
-
-                # Get system architecture
-                system=$(nix eval --impure --raw --expr 'builtins.currentSystem')
-
-                # Get list of checks for this system
-                checks=$(nix eval ".#checks.$system" --apply 'builtins.attrNames' --json | ${pkgs.jq}/bin/jq -r '.[]')
-
-                # Build each check with verbose logging
-                for check in $checks; do
-                  echo "=== Building: $check ==="
-                  nix build ".#checks.$system.$check" \
-                    --no-link \
-                    --print-build-logs \
-                    "$@" || { echo "FAILED: $check"; exit 1; }
-                done
-
-                echo ""
-                echo "=== All checks passed! ==="
-              '')
-            ];
-
-            RUST_LOG = "railscale=debug";
           };
 
           # treefmt configuration for `nix fmt`
           treefmt = {
             projectRootFile = "flake.nix";
             programs = {
-              # Nix formatting
               nixfmt.enable = true;
-              # Rust formatting
               rustfmt = {
                 enable = true;
                 package = rustToolchain;
               };
-              # TOML formatting
               taplo.enable = true;
             };
           };
@@ -202,7 +117,6 @@
 
       # Flake-wide outputs (not per-system)
       flake = {
-        # NixOS module for services.railscale
         nixosModules = {
           railscale = ./nix/module.nix;
           default = ./nix/module.nix;
