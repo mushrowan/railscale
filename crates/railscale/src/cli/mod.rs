@@ -1,7 +1,8 @@
 //! cli subcommands for railscale.
-//!
+//!- `railscale policy reload` - Reload policy from file
 //! the cli is structured like headscale:
 //! - `railscale serve` - Run the control server
+//! - `railscale policy reload` - Reload policy from file
 //! - `railscale preauthkeys create` - Create a preauth key
 //! - `railscale preauthkeys list` - List preauth keys
 //! - `railscale apikeys create` - Create an API key
@@ -9,6 +10,7 @@
 
 mod apikeys;
 mod nodes;
+mod policy;
 mod preauthkeys;
 /// the `serve` subcommand module.
 pub mod serve;
@@ -16,6 +18,7 @@ mod users;
 
 pub use apikeys::ApikeysCommand;
 pub use nodes::NodesCommand;
+pub use policy::{PolicyCommand, SocketArgs};
 pub use preauthkeys::PreauthkeysCommand;
 pub use serve::ServeCommand;
 pub use users::UsersCommand;
@@ -36,8 +39,12 @@ pub struct Cli {
 /// top-level commands
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// run the control server
+    /// manage policy (reload, get, set)
     Serve(ServeCommand),
+
+    /// manage policy (reload, get, set)
+    #[command(subcommand)]
+    Policy(PolicyCommand),
 
     /// manage preauth keys
     #[command(subcommand)]
