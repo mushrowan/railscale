@@ -99,7 +99,7 @@ pub struct AppState {
     pub ip_allocator: Arc<Mutex<IpAllocator>>,
     /// server's noise public key for ts2021 protocol.
     pub noise_public_key: Vec<u8>,
-    /// maps RegistrationId -> Arc<PendingRegistration>
+    /// server's noise private key for ts2021 protocol handshakes.
     pub noise_private_key: Vec<u8>,
     /// cache of pending registrations waiting for oidc completion.
     /// maps registrationid -> arc<pendingregistration>.
@@ -223,6 +223,7 @@ pub async fn create_app_with_policy_handle(
     };
 
     let router = Router::new()
+        .route("/health", get(handlers::health))
         .route("/key", get(handlers::key))
         .route(
             "/ts2021",
