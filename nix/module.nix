@@ -84,6 +84,27 @@ in
       '';
     };
 
+    adminSocket = {
+      path = lib.mkOption {
+        type = lib.types.path;
+        default = "${runDir}/admin.sock";
+        description = ''
+          Path to the admin gRPC Unix socket.
+          CLI commands use this socket to communicate with the server.
+        '';
+      };
+
+      group = lib.mkOption {
+        type = lib.types.str;
+        default = cfg.group;
+        defaultText = lib.literalExpression "config.services.railscale.group";
+        description = ''
+          Group that can access the admin socket.
+          Users in this group can run railscale CLI commands.
+        '';
+      };
+    };
+
     settings = lib.mkOption {
       description = ''
         Configuration settings for railscale.
@@ -477,6 +498,7 @@ in
 
         exec ${lib.getExe cfg.package} serve \
           --config ${configFile} \
+          --admin-socket ${cfg.adminSocket.path} \
           ${lib.optionalString (cfg.policyFile != null) "--policy-file ${cfg.policyFile}"}
       '';
 
@@ -536,6 +558,9 @@ in
 
     # Add CLI to system packages for administration
     environment.systemPackages = [ cfg.package ];
+
+    # Set default socket path for CLI commands
+    environment.variables.RAILSCALE_ADMIN_SOCKET = cfg.adminSocket.path;
 
     # Open firewall ports if embedded DERP is enabled
     networking.firewall = lib.mkIf cfg.settings.derp.embedded_derp.enabled {
