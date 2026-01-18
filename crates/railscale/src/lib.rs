@@ -81,6 +81,13 @@ impl PolicyHandle {
         let mut engine = self.engine.blocking_write();
         engine.update_policy(policy);
     }
+
+    /// get a clone of the inner grants engine.
+    ///
+    /// useful for creating compatible handles in other crates (e.g., admin service).
+    pub fn engine(&self) -> Arc<RwLock<GrantsEngine>> {
+        Arc::clone(&self.engine)
+    }
 }
 
 /// application state shared across handlers.
@@ -102,7 +109,7 @@ pub struct AppState {
     pub noise_public_key: Vec<u8>,
     /// server's noise private key for ts2021 protocol handshakes.
     pub noise_private_key: Vec<u8>,
-    /// derp map for relay coordination (shared for dynamic updates)
+    /// cache of pending registrations waiting for oidc completion.
     /// maps registrationid -> arc<pendingregistration>.
     pub pending_registrations: Cache<RegistrationId, Arc<PendingRegistration>>,
     /// derp map for relay coordination (shared for dynamic updates).
@@ -153,7 +160,7 @@ pub async fn load_or_generate_noise_keypair(path: &Path) -> std::io::Result<Keyp
     }
 }
 
-/// if `derp_map` is None, a default empty map will be used
+/// create the axum application with all routes.
 ///
 /// if `keypair` is none, a new keypair will be generated (not persisted).
 /// if `derp_map` is none, a default empty map will be used.
@@ -181,7 +188,7 @@ pub async fn create_app(
 /// create the axum application with a handle for policy hot-reload.
 ///
 /// returns both the router and a [`policyhandle`] that can be used to
-/// if `derp_map` is None, a default empty map will be used
+/// reload the policy at runtime (e.g., in response to SIGHUP).
 ///
 /// if `keypair` is none, a new keypair will be generated (not persisted).
 /// if `derp_map` is none, a default empty map will be used.

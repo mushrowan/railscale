@@ -1,15 +1,19 @@
 //! the `serve` subcommand - runs the control server.
 
 use std::net::SocketAddr;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use clap::Args;
 use color_eyre::eyre::{Context, Result, bail};
+use railscale_admin::{AdminServiceImpl, AdminServiceServer};
 use railscale_db::RailscaleDb;
 use railscale_grants::Policy;
 use railscale_types::{Config, EmbeddedDerpRuntime};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, UnixListener};
 use tokio::signal::unix::{SignalKind, signal};
+use tonic::transport::Server as TonicServer;
 use tracing::{Level, debug, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
@@ -181,6 +185,14 @@ pub struct ServeCommand {
     /// derp protocol private key path (curve25519)
     #[arg(long, env = "RAILSCALE_DERP_PRIVATE_KEY_PATH")]
     derp_private_key_path: Option<PathBuf>,
+
+    /// path to admin unix socket
+    #[arg(
+        long,
+        env = "RAILSCALE_ADMIN_SOCKET",
+        default_value = "/run/railscale/admin.sock"
+    )]
+    admin_socket: PathBuf,
 }
 
 impl ServeCommand {
@@ -302,8 +314,9 @@ impl ServeCommand {
 
         info!("Starting railscale...");
 
-        // save policy file path for hot-reload (before into_config consumes self)
+        // save paths before into_config consumes self
         let policy_file_path = self.policy_file.clone();
+        let admin_socket_path = self.admin_socket.clone();
 
         // load policy if provided
         let policy = if let Some(policy_path) = &policy_file_path {
@@ -471,6 +484,9 @@ impl ServeCommand {
             None
         };
 
+        // clone db for admin service (before create_app_with_policy_handle consumes it)
+        let admin_db = db.clone();
+
         // build router with policy handle for hot-reload
         let notifier = crate::StateNotifier::new();
         let (app, policy_handle) = crate::create_app_with_policy_handle(
@@ -484,9 +500,14 @@ impl ServeCommand {
         )
         .await;
 
+        // create admin policy handle from the same grants engine
+        let admin_policy_handle =
+            railscale_admin::server::PolicyHandle::new(policy_handle.engine());
+
         // spawn sighup handler for policy hot-reload
-        if let Some(policy_path) = policy_file_path {
+        if let Some(ref policy_path) = policy_file_path {
             let policy_handle = policy_handle.clone();
+            let policy_path = policy_path.clone();
             tokio::spawn(async move {
                 let mut sighup = match signal(SignalKind::hangup()) {
                     Ok(s) => s,
@@ -508,13 +529,59 @@ impl ServeCommand {
                                 info!("Policy reloaded successfully ({} grants)", grant_count);
                             }
                             Err(e) => {
-                                error!("Failed to read policy file: {}", e);
+                                error!("Failed to parse policy file: {}", e);
                             }
                         },
                         Err(e) => {
                             error!("Failed to read policy file: {}", e);
                         }
                     }
+                }
+            });
+        }
+
+        // spawn admin grpc server on unix socket
+        {
+            let admin_service =
+                AdminServiceImpl::new(admin_db, admin_policy_handle, policy_file_path);
+
+            // create parent directory if needed
+            let _ = std::fs::remove_file(&admin_socket_path);
+
+            // create parent directory if needed
+            if let Some(parent) = admin_socket_path.parent() {
+                if !parent.exists() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!("failed to create admin socket directory: {:?}", parent)
+                    })?;
+                }
+            }
+
+            let uds = UnixListener::bind(&admin_socket_path)
+                .with_context(|| format!("failed to bind admin socket: {:?}", admin_socket_path))?;
+
+            // set socket permissions (group read/write)
+            #[cfg(unix)]
+            {
+                let perms = std::fs::Permissions::from_mode(0o660);
+                std::fs::set_permissions(&admin_socket_path, perms).with_context(|| {
+                    format!(
+                        "failed to set admin socket permissions: {:?}",
+                        admin_socket_path
+                    )
+                })?;
+            }
+
+            info!("Starting admin gRPC server on {:?}", admin_socket_path);
+
+            tokio::spawn(async move {
+                let incoming = tokio_stream::wrappers::UnixListenerStream::new(uds);
+                if let Err(e) = TonicServer::builder()
+                    .add_service(AdminServiceServer::new(admin_service))
+                    .serve_with_incoming(incoming)
+                    .await
+                {
+                    error!("Admin gRPC server error: {}", e);
                 }
             });
         }
@@ -744,6 +811,7 @@ map_keepalive_interval_secs = 60
             derp_cert_path: None,
             derp_tls_key_path: None,
             derp_private_key_path: None,
+            admin_socket: PathBuf::from("/run/railscale/admin.sock"),
         };
 
         let config = cmd.into_config().unwrap();
@@ -786,6 +854,7 @@ map_keepalive_interval_secs = 60
             derp_cert_path: None,
             derp_tls_key_path: None,
             derp_private_key_path: None,
+            admin_socket: PathBuf::from("/run/railscale/admin.sock"),
         };
 
         let config = cmd.into_config().unwrap();

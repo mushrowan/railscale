@@ -18,6 +18,7 @@ railscale-types = { workspace = true }
 railscale-db = { workspace = true }
 railscale-proto = { workspace = true }
 railscale-grants = { workspace = true }
+railscale-admin = { workspace = true }
 tokio = { workspace = true }
 color-eyre = { workspace = true }
 thiserror = { workspace = true }
@@ -71,6 +72,10 @@ tokio-rustls = "0.26"
 
 # Compression
 zstd = "0.13"
+
+# Admin gRPC
+tonic = "0.12"
+tokio-stream = { version = "0.1", features = ["net"] }
 
 [dev-dependencies]
 tower = "0.5"

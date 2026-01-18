@@ -1,6 +1,6 @@
-//! admin gRPC service for railscale
+//! admin grpc service for railscale.
 //!
-//! provides a Unix socket-based admin api for cli commands and remote administration
+//! provides a unix socket-based admin api for cli commands and remote administration.
 //!
 //! # Usage
 //!
@@ -14,9 +14,9 @@
 //! let uds = UnixListener::bind("/run/railscale/admin.sock")?;
 //!
 //! server::builder()
-//! .add_service(AdminServiceServer::new(admin))
-//! .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(uds))
-//! .await?;
+//!     .add_service(AdminServiceServer::new(admin))
+//!     .serve_with_incoming(tokio_stream::wrappers::UnixListenerStream::new(uds))
+//!     .await?;
 //! ```
 //!
 //! client:
@@ -27,11 +27,11 @@
 //! let response = client.reload_policy().await?;
 //! ```
 
-mod server;
+pub mod server;
 
-pub use server::AdminServiceImpl;
+pub use server::{AdminServiceImpl, PolicyHandle};
 
-/// generated protobuf types and service definitions
+/// generated protobuf types and service definitions.
 pub mod pb {
     tonic::include_proto!("railscale.admin.v1");
 }
@@ -39,16 +39,16 @@ pub mod pb {
 pub use pb::admin_service_client::AdminServiceClient;
 pub use pb::admin_service_server::{AdminService, AdminServiceServer};
 
-/// default path for the admin Unix socket
+/// default path for the admin unix socket.
 pub const DEFAULT_SOCKET_PATH: &str = "/run/railscale/admin.sock";
 
-/// client wrapper for the admin service with Unix socket support
+/// client wrapper for the admin service with unix socket support.
 pub struct AdminClient {
     inner: AdminServiceClient<tonic::transport::Channel>,
 }
 
 impl AdminClient {
-    /// connect to the admin service via Unix socket
+    /// connect to the admin service via unix socket.
     pub async fn connect_unix(
         path: impl AsRef<std::path::Path>,
     ) -> Result<Self, tonic::transport::Error> {
@@ -75,7 +75,7 @@ impl AdminClient {
         })
     }
 
-    /// reload policy from the configured file
+    /// reload policy from the configured file.
     pub async fn reload_policy(&mut self) -> Result<pb::ReloadPolicyResponse, tonic::Status> {
         let request = tonic::Request::new(pb::ReloadPolicyRequest {});
         self.inner
@@ -84,13 +84,13 @@ impl AdminClient {
             .map(|r| r.into_inner())
     }
 
-    /// get the current policy as json
+    /// get the current policy as JSON.
     pub async fn get_policy(&mut self) -> Result<pb::GetPolicyResponse, tonic::Status> {
         let request = tonic::Request::new(pb::GetPolicyRequest {});
         self.inner.get_policy(request).await.map(|r| r.into_inner())
     }
 
-    /// set policy from json string
+    /// set policy from json string.
     pub async fn set_policy(
         &mut self,
         policy_json: String,
@@ -101,7 +101,7 @@ impl AdminClient {
 
     // ============ Users ============
 
-    /// create a new user
+    /// create a new user.
     pub async fn create_user(
         &mut self,
         email: String,
@@ -117,13 +117,13 @@ impl AdminClient {
             .map(|r| r.into_inner())
     }
 
-    /// get a user by id
+    /// get a user by id.
     pub async fn get_user(&mut self, id: u64) -> Result<pb::User, tonic::Status> {
         let request = tonic::Request::new(pb::GetUserRequest { id });
         self.inner.get_user(request).await.map(|r| r.into_inner())
     }
 
-    /// list all users
+    /// list all users.
     pub async fn list_users(&mut self) -> Result<Vec<pb::User>, tonic::Status> {
         let request = tonic::Request::new(pb::ListUsersRequest {});
         self.inner
@@ -132,13 +132,13 @@ impl AdminClient {
             .map(|r| r.into_inner().users)
     }
 
-    /// delete a user
+    /// delete a user.
     pub async fn delete_user(&mut self, id: u64) -> Result<(), tonic::Status> {
         let request = tonic::Request::new(pb::DeleteUserRequest { id });
         self.inner.delete_user(request).await.map(|_| ())
     }
 
-    /// rename a user
+    /// rename a user.
     pub async fn rename_user(
         &mut self,
         id: u64,
@@ -153,13 +153,13 @@ impl AdminClient {
 
     // ============ Nodes ============
 
-    /// get a node by id
+    /// get a node by id.
     pub async fn get_node(&mut self, id: u64) -> Result<pb::Node, tonic::Status> {
         let request = tonic::Request::new(pb::GetNodeRequest { id });
         self.inner.get_node(request).await.map(|r| r.into_inner())
     }
 
-    /// list nodes with optional filters
+    /// list nodes with optional filters.
     pub async fn list_nodes(
         &mut self,
         user_id: Option<u64>,
@@ -172,13 +172,13 @@ impl AdminClient {
             .map(|r| r.into_inner().nodes)
     }
 
-    /// delete a node
+    /// delete a node.
     pub async fn delete_node(&mut self, id: u64) -> Result<(), tonic::Status> {
         let request = tonic::Request::new(pb::DeleteNodeRequest { id });
         self.inner.delete_node(request).await.map(|_| ())
     }
 
-    /// expire a node
+    /// expire a node.
     pub async fn expire_node(&mut self, id: u64) -> Result<pb::Node, tonic::Status> {
         let request = tonic::Request::new(pb::ExpireNodeRequest { id });
         self.inner
@@ -187,7 +187,7 @@ impl AdminClient {
             .map(|r| r.into_inner())
     }
 
-    /// rename a node
+    /// rename a node.
     pub async fn rename_node(
         &mut self,
         id: u64,
@@ -200,7 +200,7 @@ impl AdminClient {
             .map(|r| r.into_inner())
     }
 
-    /// set tags on a node
+    /// set tags on a node.
     pub async fn set_tags(
         &mut self,
         id: u64,
@@ -210,7 +210,7 @@ impl AdminClient {
         self.inner.set_tags(request).await.map(|r| r.into_inner())
     }
 
-    /// set approved routes on a node
+    /// set approved routes on a node.
     pub async fn set_approved_routes(
         &mut self,
         id: u64,
@@ -225,7 +225,7 @@ impl AdminClient {
 
     // ============ PreAuth Keys ============
 
-    /// create a preauth key
+    /// create a preauth key.
     pub async fn create_preauth_key(
         &mut self,
         user_id: u64,
@@ -247,7 +247,7 @@ impl AdminClient {
             .map(|r| r.into_inner())
     }
 
-    /// list preauth keys
+    /// list preauth keys.
     pub async fn list_preauth_keys(
         &mut self,
         user_id: Option<u64>,
@@ -263,13 +263,13 @@ impl AdminClient {
             .map(|r| r.into_inner().keys)
     }
 
-    /// expire a preauth key
+    /// expire a preauth key.
     pub async fn expire_preauth_key(&mut self, id: u64) -> Result<(), tonic::Status> {
         let request = tonic::Request::new(pb::ExpirePreauthKeyRequest { id });
         self.inner.expire_preauth_key(request).await.map(|_| ())
     }
 
-    /// delete a preauth key
+    /// delete a preauth key.
     pub async fn delete_preauth_key(&mut self, id: u64) -> Result<(), tonic::Status> {
         let request = tonic::Request::new(pb::DeletePreauthKeyRequest { id });
         self.inner.delete_preauth_key(request).await.map(|_| ())
@@ -277,7 +277,7 @@ impl AdminClient {
 
     // ============ api keys ============
 
-    /// create an api key
+    /// create an api key.
     pub async fn create_api_key(
         &mut self,
         user_id: u64,
@@ -295,7 +295,7 @@ impl AdminClient {
             .map(|r| r.into_inner())
     }
 
-    /// list api keys
+    /// list api keys.
     pub async fn list_api_keys(
         &mut self,
         user_id: Option<u64>,
@@ -311,13 +311,13 @@ impl AdminClient {
             .map(|r| r.into_inner().keys)
     }
 
-    /// expire an api key
+    /// expire an api key.
     pub async fn expire_api_key(&mut self, id: u64) -> Result<(), tonic::Status> {
         let request = tonic::Request::new(pb::ExpireApiKeyRequest { id });
         self.inner.expire_api_key(request).await.map(|_| ())
     }
 
-    /// delete an api key
+    /// delete an api key.
     pub async fn delete_api_key(&mut self, id: u64) -> Result<(), tonic::Status> {
         let request = tonic::Request::new(pb::DeleteApiKeyRequest { id });
         self.inner.delete_api_key(request).await.map(|_| ())
