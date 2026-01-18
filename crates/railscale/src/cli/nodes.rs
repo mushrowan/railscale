@@ -1,11 +1,10 @@
-//! the `nodes` subcommand - manage nodes
+//! the `nodes` subcommand - manage nodes via admin socket
 
 use clap::{Args, Subcommand};
-use color_eyre::eyre::{Context, Result, bail};
-use railscale_db::Database;
-use railscale_types::{NodeId, UserId};
+use color_eyre::eyre::{Context, Result};
+use railscale_admin::AdminClient;
 
-use super::preauthkeys::DbArgs;
+use super::SocketArgs;
 
 /// manage nodes
 #[derive(Subcommand, Debug)]
@@ -38,7 +37,7 @@ pub enum NodesCommand {
 #[derive(Args, Debug)]
 pub struct ListNodesArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// filter by user id
     #[arg(short, long)]
@@ -57,7 +56,7 @@ pub struct ListNodesArgs {
 #[derive(Args, Debug)]
 pub struct ShowNodeArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id
     node_id: u64,
@@ -71,7 +70,7 @@ pub struct ShowNodeArgs {
 #[derive(Args, Debug)]
 pub struct DeleteNodeArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id to delete
     node_id: u64,
@@ -81,7 +80,7 @@ pub struct DeleteNodeArgs {
 #[derive(Args, Debug)]
 pub struct ExpireNodeArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id to expire
     node_id: u64,
@@ -91,7 +90,7 @@ pub struct ExpireNodeArgs {
 #[derive(Args, Debug)]
 pub struct RenameNodeArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id to rename
     node_id: u64,
@@ -117,7 +116,7 @@ pub enum TagsCommand {
 #[derive(Args, Debug)]
 pub struct AddTagsArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id
     node_id: u64,
@@ -131,7 +130,7 @@ pub struct AddTagsArgs {
 #[derive(Args, Debug)]
 pub struct RemoveTagsArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id
     node_id: u64,
@@ -145,7 +144,7 @@ pub struct RemoveTagsArgs {
 #[derive(Args, Debug)]
 pub struct SetTagsArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id
     node_id: u64,
@@ -172,7 +171,7 @@ pub enum RoutesCommand {
 #[derive(Args, Debug)]
 pub struct ListRoutesArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id
     node_id: u64,
@@ -182,7 +181,7 @@ pub struct ListRoutesArgs {
 #[derive(Args, Debug)]
 pub struct ApproveRoutesArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id
     node_id: u64,
@@ -196,7 +195,7 @@ pub struct ApproveRoutesArgs {
 #[derive(Args, Debug)]
 pub struct UnapproveRoutesArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// node id
     node_id: u64,
@@ -229,23 +228,23 @@ impl NodesCommand {
     }
 }
 
-async fn list_nodes(args: ListNodesArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+async fn connect_client(socket: &SocketArgs) -> Result<AdminClient> {
+    AdminClient::connect_unix(&socket.socket)
+        .await
+        .with_context(|| format!("failed to connect to admin socket: {:?}", socket.socket))
+}
 
-    let nodes = if let Some(user_id) = args.user {
-        db.list_nodes_for_user(UserId(user_id))
-            .await
-            .context("failed to list nodes")?
-    } else {
-        db.list_nodes().await.context("failed to list nodes")?
-    };
+async fn list_nodes(args: ListNodesArgs) -> Result<()> {
+    let mut client = connect_client(&args.socket).await?;
+
+    let nodes = client
+        .list_nodes(args.user, None)
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("failed to list nodes: {}", e))?;
 
     // filter online if requested
     let nodes: Vec<_> = if args.online {
-        nodes
-            .into_iter()
-            .filter(|n| n.is_online == Some(true))
-            .collect()
+        nodes.into_iter().filter(|n| n.online).collect()
     } else {
         nodes
     };
@@ -268,21 +267,14 @@ async fn list_nodes(args: ListNodesArgs) -> Result<()> {
     println!("{}", "-".repeat(80));
 
     for node in nodes {
-        let ipv4 = node
-            .ipv4
-            .map(|ip| ip.to_string())
-            .unwrap_or_else(|| "-".to_string());
+        let ipv4 = node.ipv4.as_deref().unwrap_or("-");
 
         let user = node
             .user_id
-            .map(|u| u.0.to_string())
+            .map(|u| u.to_string())
             .unwrap_or_else(|| "-".to_string());
 
-        let online = match node.is_online {
-            Some(true) => "yes",
-            Some(false) => "no",
-            None => "-",
-        };
+        let online = if node.online { "yes" } else { "no" };
 
         let tags = if node.tags.is_empty() {
             "-".to_string()
@@ -292,7 +284,7 @@ async fn list_nodes(args: ListNodesArgs) -> Result<()> {
 
         println!(
             "{:<6} {:<20} {:<16} {:<8} {:<10} {}",
-            node.id.0, node.given_name, ipv4, user, online, tags
+            node.id, node.given_name, ipv4, user, online, tags
         );
     }
 
@@ -300,16 +292,12 @@ async fn list_nodes(args: ListNodesArgs) -> Result<()> {
 }
 
 async fn show_node(args: ShowNodeArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    let node = client
+        .get_node(args.node_id)
         .await
-        .context("failed to get node")?;
-
-    let Some(node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
+        .map_err(|e| color_eyre::eyre::eyre!("failed to get node: {}", e))?;
 
     if args.output == "json" {
         println!("{}", serde_json::to_string_pretty(&node)?);
@@ -317,42 +305,30 @@ async fn show_node(args: ShowNodeArgs) -> Result<()> {
     }
 
     println!("Node Details:");
-    println!("  ID:              {}", node.id.0);
+    println!("  ID:              {}", node.id);
     println!("  Hostname:        {}", node.hostname);
     println!("  Given Name:      {}", node.given_name);
-    println!(
-        "  IPv4:            {}",
-        node.ipv4.map(|ip| ip.to_string()).unwrap_or("-".into())
-    );
-    println!(
-        "  IPv6:            {}",
-        node.ipv6.map(|ip| ip.to_string()).unwrap_or("-".into())
-    );
+    println!("  IPv4:            {}", node.ipv4.as_deref().unwrap_or("-"));
+    println!("  IPv6:            {}", node.ipv6.as_deref().unwrap_or("-"));
     println!(
         "  User:            {}",
-        node.user_id.map(|u| u.0.to_string()).unwrap_or("-".into())
+        node.user_id
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| "-".to_string())
     );
-    println!("  Register Method: {:?}", node.register_method);
     println!(
         "  Online:          {}",
-        match node.is_online {
-            Some(true) => "yes",
-            Some(false) => "no",
-            None => "-",
-        }
+        if node.online { "yes" } else { "no" }
     );
     println!(
         "  Last Seen:       {}",
-        node.last_seen.map(|t| t.to_rfc3339()).unwrap_or("-".into())
+        node.last_seen.as_deref().unwrap_or("-")
     );
     println!(
         "  Expiry:          {}",
-        node.expiry
-            .map(|t| t.to_rfc3339())
-            .unwrap_or("never".into())
+        node.expiry.as_deref().unwrap_or("never")
     );
-    println!("  Created:         {}", node.created_at.to_rfc3339());
-    println!("  Updated:         {}", node.updated_at.to_rfc3339());
+    println!("  Created:         {}", node.created_at);
 
     if !node.tags.is_empty() {
         println!("  Tags:            {}", node.tags.join(", "));
@@ -365,32 +341,16 @@ async fn show_node(args: ShowNodeArgs) -> Result<()> {
         }
     }
 
-    if !node.endpoints.is_empty() {
-        println!("  Endpoints:");
-        for endpoint in &node.endpoints {
-            println!("    - {}", endpoint);
-        }
-    }
-
     Ok(())
 }
 
 async fn delete_node(args: DeleteNodeArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    // check if node exists
-    let node = db
-        .get_node(NodeId(args.node_id))
+    client
+        .delete_node(args.node_id)
         .await
-        .context("failed to query node")?;
-
-    if node.is_none() {
-        bail!("node {} not found", args.node_id);
-    }
-
-    db.delete_node(NodeId(args.node_id))
-        .await
-        .context("failed to delete node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to delete node: {}", e))?;
 
     println!("Deleted node {}", args.node_id);
 
@@ -398,22 +358,12 @@ async fn delete_node(args: DeleteNodeArgs) -> Result<()> {
 }
 
 async fn expire_node(args: ExpireNodeArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    client
+        .expire_node(args.node_id)
         .await
-        .context("failed to query node")?;
-
-    let Some(mut node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
-
-    node.expiry = Some(chrono::Utc::now());
-
-    db.update_node(&node)
-        .await
-        .context("failed to update node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to expire node: {}", e))?;
 
     println!("Expired node {}", args.node_id);
 
@@ -421,28 +371,14 @@ async fn expire_node(args: ExpireNodeArgs) -> Result<()> {
 }
 
 async fn rename_node(args: RenameNodeArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    let node = client
+        .rename_node(args.node_id, args.new_name.clone())
         .await
-        .context("failed to query node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to rename node: {}", e))?;
 
-    let Some(mut node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
-
-    let old_name = node.given_name.clone();
-    node.given_name = args.new_name.clone();
-
-    db.update_node(&node)
-        .await
-        .context("failed to update node")?;
-
-    println!(
-        "Renamed node {} from '{}' to '{}'",
-        args.node_id, old_name, args.new_name
-    );
+    println!("Renamed node {} to '{}'", args.node_id, node.given_name);
 
     Ok(())
 }
@@ -457,27 +393,28 @@ fn normalize_tag(tag: &str) -> String {
 }
 
 async fn add_tags(args: AddTagsArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    // merge tags
+    let node = client
+        .get_node(args.node_id)
         .await
-        .context("failed to query node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to get node: {}", e))?;
 
-    let Some(mut node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
-
+    // merge tags
+    let mut tags = node.tags;
     for tag in args.tags {
         let normalized = normalize_tag(&tag);
-        if !node.tags.contains(&normalized) {
-            node.tags.push(normalized);
+        if !tags.contains(&normalized) {
+            tags.push(normalized);
         }
     }
 
-    db.update_node(&node)
+    // set merged tags
+    let node = client
+        .set_tags(args.node_id, tags)
         .await
-        .context("failed to update node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to set tags: {}", e))?;
 
     println!("Tags for node {}: {}", args.node_id, node.tags.join(", "));
 
@@ -485,23 +422,27 @@ async fn add_tags(args: AddTagsArgs) -> Result<()> {
 }
 
 async fn remove_tags(args: RemoveTagsArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    // remove specified tags
+    let node = client
+        .get_node(args.node_id)
         .await
-        .context("failed to query node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to get node: {}", e))?;
 
-    let Some(mut node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
-
+    // remove specified tags
     let tags_to_remove: Vec<String> = args.tags.iter().map(|t| normalize_tag(t)).collect();
-    node.tags.retain(|t| !tags_to_remove.contains(t));
+    let tags: Vec<String> = node
+        .tags
+        .into_iter()
+        .filter(|t| !tags_to_remove.contains(t))
+        .collect();
 
-    db.update_node(&node)
+    // set filtered tags
+    let node = client
+        .set_tags(args.node_id, tags)
         .await
-        .context("failed to update node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to set tags: {}", e))?;
 
     if node.tags.is_empty() {
         println!("Node {} now has no tags", args.node_id);
@@ -513,22 +454,14 @@ async fn remove_tags(args: RemoveTagsArgs) -> Result<()> {
 }
 
 async fn set_tags(args: SetTagsArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    let tags: Vec<String> = args.tags.iter().map(|t| normalize_tag(t)).collect();
+
+    let node = client
+        .set_tags(args.node_id, tags)
         .await
-        .context("failed to query node")?;
-
-    let Some(mut node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
-
-    node.tags = args.tags.iter().map(|t| normalize_tag(t)).collect();
-
-    db.update_node(&node)
-        .await
-        .context("failed to update node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to set tags: {}", e))?;
 
     if node.tags.is_empty() {
         println!("Node {} now has no tags", args.node_id);
@@ -540,16 +473,12 @@ async fn set_tags(args: SetTagsArgs) -> Result<()> {
 }
 
 async fn list_routes(args: ListRoutesArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    let node = client
+        .get_node(args.node_id)
         .await
-        .context("failed to query node")?;
-
-    let Some(node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
+        .map_err(|e| color_eyre::eyre::eyre!("failed to get node: {}", e))?;
 
     if node.approved_routes.is_empty() {
         println!("Node {} has no approved routes", args.node_id);
@@ -564,73 +493,79 @@ async fn list_routes(args: ListRoutesArgs) -> Result<()> {
 }
 
 async fn approve_routes(args: ApproveRoutesArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    // merge routes (validate cidr format)
+    let node = client
+        .get_node(args.node_id)
         .await
-        .context("failed to query node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to get node: {}", e))?;
 
-    let Some(mut node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
-
+    // set merged routes
+    let mut routes = node.approved_routes;
     for route in args.routes {
-        // parse and validate cidr format
-        let parsed: ipnet::IpNet = route
+        // validate cidr format
+        let _: ipnet::IpNet = route
             .parse()
             .map_err(|_| color_eyre::eyre::eyre!("invalid CIDR: {}", route))?;
 
-        if !node.approved_routes.contains(&parsed) {
-            node.approved_routes.push(parsed);
+        if !routes.contains(&route) {
+            routes.push(route);
         }
     }
 
-    db.update_node(&node)
+    // set merged routes
+    let node = client
+        .set_approved_routes(args.node_id, routes)
         .await
-        .context("failed to update node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to set routes: {}", e))?;
 
-    let routes_str: Vec<String> = node.approved_routes.iter().map(|r| r.to_string()).collect();
     println!(
         "Approved routes for node {}: {}",
         args.node_id,
-        routes_str.join(", ")
+        node.approved_routes.join(", ")
     );
 
     Ok(())
 }
 
 async fn unapprove_routes(args: UnapproveRoutesArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let node = db
-        .get_node(NodeId(args.node_id))
+    // get current routes
+    let node = client
+        .get_node(args.node_id)
         .await
-        .context("failed to query node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to get node: {}", e))?;
 
-    let Some(mut node) = node else {
-        bail!("node {} not found", args.node_id);
-    };
+    // parse routes to remove (ignore invalid ones)
+    let routes_to_remove: Vec<String> = args
+        .routes
+        .iter()
+        .filter(|r| r.parse::<ipnet::IpNet>().is_ok())
+        .cloned()
+        .collect();
 
-    // parse the routes to remove
-    let routes_to_remove: Vec<ipnet::IpNet> =
-        args.routes.iter().filter_map(|r| r.parse().ok()).collect();
+    // filter out removed routes
+    let routes: Vec<String> = node
+        .approved_routes
+        .into_iter()
+        .filter(|r| !routes_to_remove.contains(r))
+        .collect();
 
-    node.approved_routes
-        .retain(|r| !routes_to_remove.contains(r));
-
-    db.update_node(&node)
+    // set filtered routes
+    let node = client
+        .set_approved_routes(args.node_id, routes)
         .await
-        .context("failed to update node")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to set routes: {}", e))?;
 
     if node.approved_routes.is_empty() {
         println!("Node {} now has no approved routes", args.node_id);
     } else {
-        let routes_str: Vec<String> = node.approved_routes.iter().map(|r| r.to_string()).collect();
         println!(
             "Approved routes for node {}: {}",
             args.node_id,
-            routes_str.join(", ")
+            node.approved_routes.join(", ")
         );
     }
 

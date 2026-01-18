@@ -1,12 +1,10 @@
-//! the `apikeys` subcommand - manage api keys.
+//! the `apikeys` subcommand - manage api keys via admin socket
 
-use chrono::{Duration, Utc};
 use clap::{Args, Subcommand};
-use color_eyre::eyre::{Context, Result, bail};
-use railscale_db::Database;
-use railscale_types::{ApiKey, UserId};
+use color_eyre::eyre::{Context, Result};
+use railscale_admin::AdminClient;
 
-use super::preauthkeys::DbArgs;
+use super::SocketArgs;
 
 /// manage api keys
 #[derive(Subcommand, Debug)]
@@ -28,7 +26,7 @@ pub enum ApikeysCommand {
 #[derive(Args, Debug)]
 pub struct CreateArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// user id to create the key for
     #[arg(short, long)]
@@ -47,7 +45,7 @@ pub struct CreateArgs {
 #[derive(Args, Debug)]
 pub struct ListArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// filter by user id
     #[arg(short, long)]
@@ -66,7 +64,7 @@ pub struct ListArgs {
 #[derive(Args, Debug)]
 pub struct DeleteArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// key id to delete
     key_id: u64,
@@ -76,7 +74,7 @@ pub struct DeleteArgs {
 #[derive(Args, Debug)]
 pub struct ExpireArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// key id to expire
     key_id: u64,
@@ -94,48 +92,34 @@ impl ApikeysCommand {
     }
 }
 
-async fn create_key(args: CreateArgs) -> Result<()> {
-    let db = args.db.connect().await?;
-
-    // verify user exists
-    let user = db
-        .get_user(UserId(args.user))
+async fn connect_client(socket: &SocketArgs) -> Result<AdminClient> {
+    AdminClient::connect_unix(&socket.socket)
         .await
-        .context("failed to query user")?;
+        .with_context(|| format!("failed to connect to admin socket: {:?}", socket.socket))
+}
 
-    if user.is_none() {
-        bail!("user {} not found", args.user);
-    }
+async fn create_key(args: CreateArgs) -> Result<()> {
+    let mut client = connect_client(&args.socket).await?;
 
-    let now = Utc::now();
-    let expiration = if args.expiration_days == 0 {
+    let expiration_days = if args.expiration_days == 0 {
         None
     } else {
-        Some(now + Duration::days(args.expiration_days))
+        Some(args.expiration_days)
     };
 
-    // generate a random key
-    let key_string = generate_api_key();
-
-    let mut key = ApiKey::new(0, key_string, args.name, UserId(args.user));
-    key.expiration = expiration;
-
-    let created = db
-        .create_api_key(&key)
+    let key = client
+        .create_api_key(args.user, args.name.clone(), expiration_days)
         .await
-        .context("failed to create API key")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to create API key: {}", e))?;
 
     println!("Created API key:");
-    println!("  ID:         {}", created.id);
-    println!("  Key:        {}", created.key);
-    println!("  Name:       {}", created.name);
-    println!("  User:       {}", created.user_id.0);
+    println!("  ID:         {}", key.id);
+    println!("  Key:        {}", key.key);
+    println!("  Name:       {}", key.name);
+    println!("  User:       {}", key.user_id);
     println!(
         "  Expires:    {}",
-        created
-            .expiration
-            .map(|e| e.to_rfc3339())
-            .unwrap_or_else(|| "never".to_string())
+        key.expiration.as_deref().unwrap_or("never")
     );
     println!();
     println!("IMPORTANT: Save this key now. It cannot be retrieved later.");
@@ -143,37 +127,13 @@ async fn create_key(args: CreateArgs) -> Result<()> {
     Ok(())
 }
 
-/// generate a random api key string using cryptographically secure random bytes.
-fn generate_api_key() -> String {
-    use base64::Engine;
-    use rand::RngCore;
-
-    let mut bytes = [0u8; 24]; // 24 bytes = 192 bits of entropy
-    rand::rng().fill_bytes(&mut bytes);
-
-    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    format!("rsapi_{}", encoded)
-}
-
 async fn list_keys(args: ListArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let keys = if let Some(user_id) = args.user {
-        db.list_api_keys(UserId(user_id))
-            .await
-            .context("failed to list API keys")?
-    } else {
-        db.get_all_api_keys()
-            .await
-            .context("failed to list API keys")?
-    };
-
-    // filter expired if needed
-    let keys: Vec<_> = if args.show_expired {
-        keys
-    } else {
-        keys.into_iter().filter(|k| k.is_valid()).collect()
-    };
+    let keys = client
+        .list_api_keys(args.user, args.show_expired)
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("failed to list API keys: {}", e))?;
 
     if args.output == "json" {
         println!("{}", serde_json::to_string_pretty(&keys)?);
@@ -193,16 +153,20 @@ async fn list_keys(args: ListArgs) -> Result<()> {
     println!("{}", "-".repeat(90));
 
     for key in keys {
-        let prefix = format!("{}...", key.prefix());
+        let prefix = format!("{}...", key.prefix);
 
         let expires = key
             .expiration
-            .map(|e: chrono::DateTime<chrono::Utc>| e.format("%Y-%m-%d %H:%M").to_string())
+            .as_ref()
+            .and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok())
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_else(|| "never".to_string());
 
         let last_used = key
             .last_used_at
-            .map(|e: chrono::DateTime<chrono::Utc>| e.format("%Y-%m-%d %H:%M").to_string())
+            .as_ref()
+            .and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok())
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_else(|| "never".to_string());
 
         let name = if key.name.len() > 18 {
@@ -213,7 +177,7 @@ async fn list_keys(args: ListArgs) -> Result<()> {
 
         println!(
             "{:<6} {:<12} {:<20} {:<6} {:<20} {}",
-            key.id, prefix, name, key.user_id.0, expires, last_used
+            key.id, prefix, name, key.user_id, expires, last_used
         );
     }
 
@@ -221,11 +185,12 @@ async fn list_keys(args: ListArgs) -> Result<()> {
 }
 
 async fn delete_key(args: DeleteArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    db.delete_api_key(args.key_id)
+    client
+        .delete_api_key(args.key_id)
         .await
-        .context("failed to delete API key")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to delete API key: {}", e))?;
 
     println!("Deleted API key {}", args.key_id);
 
@@ -233,54 +198,14 @@ async fn delete_key(args: DeleteArgs) -> Result<()> {
 }
 
 async fn expire_key(args: ExpireArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    db.expire_api_key(args.key_id)
+    client
+        .expire_api_key(args.key_id)
         .await
-        .context("failed to expire API key")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to expire API key: {}", e))?;
 
     println!("Expired API key {}", args.key_id);
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_api_key_format() {
-        let key = generate_api_key();
-
-        // extract the random part (after prefix)
-        assert!(key.starts_with("rsapi_"), "key must start with rsapi_");
-
-        // random part should be 32 chars of base64 URL_SAFE_NO_PAD
-        let random_part = key.strip_prefix("rsapi_").unwrap();
-
-        // should be valid base64 URL_SAFE (only A-Z, a-z, 0-9, -, _)
-        assert_eq!(random_part.len(), 32, "random part should be 32 chars");
-
-        // should be valid base64 url_safe (only a-z, a-z, 0-9, -, _)
-        assert!(
-            random_part
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
-            "random part must be valid base64 URL_SAFE chars"
-        );
-
-        // should decode to 24 bytes
-        use base64::Engine;
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(random_part)
-            .expect("should be valid base64");
-        assert_eq!(decoded.len(), 24, "should decode to 24 bytes");
-    }
-
-    #[test]
-    fn test_api_key_uniqueness() {
-        let key1 = generate_api_key();
-        let key2 = generate_api_key();
-        assert_ne!(key1, key2, "keys should be unique");
-    }
 }

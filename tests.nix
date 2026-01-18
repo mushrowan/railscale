@@ -198,7 +198,7 @@ pkgs.testers.runNixOSTest {
     # PHASE 2: User Management CLI Tests
     # =========================================================================
     with subtest("Create user via CLI"):
-        output = railscale("users create alice --display-name 'Alice Smith' --email alice@example.com")
+        output = railscale("users create alice@example.com --display-name 'Alice Smith'")
         assert "Created user" in output
         assert "alice" in output
         print(f"Created user output: {output}")
@@ -211,33 +211,33 @@ pkgs.testers.runNixOSTest {
     with subtest("List users JSON output"):
         users = railscale_json("users list")
         assert len(users) == 1
-        assert users[0]["name"] == "alice"
+        assert users[0]["email"] == "alice@example.com"
         print(f"Users JSON: {users}")
 
     with subtest("Create second user"):
-        railscale("users create bob --email bob@example.com")
+        railscale("users create bob@example.com")
         users = railscale_json("users list")
         assert len(users) == 2
-        user_names = [u["name"] for u in users]
-        assert "alice" in user_names
-        assert "bob" in user_names
+        user_names = [u["email"] for u in users]
+        assert "alice@example.com" in user_names
+        assert "bob@example.com" in user_names
 
     with subtest("Rename user"):
         users = railscale_json("users list")
-        bob = next(u for u in users if u["name"] == "bob")
+        bob = next(u for u in users if u["email"] == "bob@example.com")
         bob_id = bob["id"]
 
-        output = railscale(f"users rename {bob_id} robert")
+        output = railscale(f"users rename {bob_id} robert@example.com")
         assert "Renamed" in output
 
         users = railscale_json("users list")
-        user_names = [u["name"] for u in users]
-        assert "robert" in user_names
-        assert "bob" not in user_names
+        user_emails = [u["email"] for u in users]
+        assert "robert@example.com" in user_emails
+        assert "bob@example.com" not in user_emails
 
     with subtest("Delete user"):
         users = railscale_json("users list")
-        robert = next(u for u in users if u["name"] == "robert")
+        robert = next(u for u in users if u["email"] == "robert@example.com")
         robert_id = robert["id"]
 
         output = railscale(f"users delete {robert_id}")
@@ -245,7 +245,7 @@ pkgs.testers.runNixOSTest {
 
         users = railscale_json("users list")
         assert len(users) == 1
-        assert users[0]["name"] == "alice"
+        assert users[0]["email"] == "alice@example.com"
 
     # Get alice's ID for later use
     users = railscale_json("users list")
@@ -305,7 +305,7 @@ pkgs.testers.runNixOSTest {
     with subtest("List API keys JSON output"):
         keys = railscale_json("apikeys list")
         assert len(keys) >= 1
-        assert any("rsapi_" in k["key"] for k in keys)
+        assert any("rsapi_" in k["prefix"] for k in keys)
         print(f"API keys JSON: {keys}")
 
     with subtest("Create API key with no expiration"):
@@ -535,12 +535,13 @@ pkgs.testers.runNixOSTest {
     # =========================================================================
     # PHASE 9: Verify Users Cannot Be Deleted With Nodes
     # =========================================================================
-    with subtest("User with nodes cannot be deleted without force"):
-        # Try to delete alice (who has client1 node)
+    with subtest("User with nodes cannot be deleted"):
+        # Headscale behavior: users cannot be deleted if they have nodes
+        # User must delete nodes first
         result = server.execute(f"railscale users delete {alice_id} 2>&1")
         # Should fail because alice has nodes
-        assert result[0] != 0 or "has" in result[1].lower() or "force" in result[1].lower(), \
-            "Deleting user with nodes should fail or warn about force"
+        assert result[0] != 0 or "node" in result[1].lower(), \
+            "Deleting user with nodes should fail"
         print("Correctly prevented deletion of user with nodes")
 
     # =========================================================================
@@ -712,13 +713,13 @@ pkgs.testers.runNixOSTest {
     # =========================================================================
     with subtest("Setup for group access control tests"):
         # Create a user NOT in engineering group
-        railscale("users create eve --email eve@example.com")
+        railscale("users create eve@example.com")
         print("Created user eve (not in any group)")
 
         # Verify alice (in engineering) and eve (not in group) exist
         users = railscale_json("users list")
-        alice = next(u for u in users if u["name"] == "alice")
-        eve = next(u for u in users if u["name"] == "eve")
+        alice = next(u for u in users if u["email"] == "alice@example.com")
+        eve = next(u for u in users if u["email"] == "eve@example.com")
         eve_id = eve["id"]
         print(f"Alice ID: {alice_id}, Eve ID: {eve_id}")
 

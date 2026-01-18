@@ -1,10 +1,10 @@
-//! the `preauthkeys` subcommand - manage preauth keys.
+//! the `preauthkeys` subcommand - manage preauth keys via admin socket
 
-use chrono::{Duration, Utc};
 use clap::{Args, Subcommand};
-use color_eyre::eyre::{Context, Result, bail};
-use railscale_db::{Database, RailscaleDb};
-use railscale_types::{Config, PreAuthKey, UserId};
+use color_eyre::eyre::{Context, Result};
+use railscale_admin::AdminClient;
+
+use super::SocketArgs;
 
 /// manage preauth keys
 #[derive(Subcommand, Debug)]
@@ -22,53 +22,11 @@ pub enum PreauthkeysCommand {
     Expire(ExpireArgs),
 }
 
-/// common database arguments
-#[derive(Args, Debug, Clone)]
-pub struct DbArgs {
-    /// database url (sqlite:// or postgres://)
-    #[arg(long, env = "RAILSCALE_DATABASE_URL")]
-    database_url: Option<String>,
-}
-
-impl DbArgs {
-    pub async fn connect(&self) -> Result<RailscaleDb> {
-        let config = self.to_config()?;
-        RailscaleDb::new(&config)
-            .await
-            .context("failed to connect to database")
-    }
-
-    fn to_config(&self) -> Result<Config> {
-        let database = if let Some(db_url) = &self.database_url {
-            if db_url.starts_with("postgres://") {
-                railscale_types::DatabaseConfig {
-                    db_type: "postgres".to_string(),
-                    connection_string: db_url.clone(),
-                }
-            } else if let Some(path) = db_url.strip_prefix("sqlite://") {
-                railscale_types::DatabaseConfig {
-                    db_type: "sqlite".to_string(),
-                    connection_string: path.to_string(),
-                }
-            } else {
-                bail!("database URL must start with sqlite:// or postgres://");
-            }
-        } else {
-            railscale_types::DatabaseConfig::default()
-        };
-
-        Ok(Config {
-            database,
-            ..Default::default()
-        })
-    }
-}
-
 /// create a new preauth key
 #[derive(Args, Debug)]
 pub struct CreateArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// user id to create the key for
     #[arg(short, long)]
@@ -95,7 +53,7 @@ pub struct CreateArgs {
 #[derive(Args, Debug)]
 pub struct ListArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// filter by user id
     #[arg(short, long)]
@@ -114,7 +72,7 @@ pub struct ListArgs {
 #[derive(Args, Debug)]
 pub struct DeleteArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// key id to delete
     key_id: u64,
@@ -124,7 +82,7 @@ pub struct DeleteArgs {
 #[derive(Args, Debug)]
 pub struct ExpireArgs {
     #[command(flatten)]
-    db: DbArgs,
+    socket: SocketArgs,
 
     /// key id to expire
     key_id: u64,
@@ -142,99 +100,61 @@ impl PreauthkeysCommand {
     }
 }
 
-async fn create_key(args: CreateArgs) -> Result<()> {
-    let db = args.db.connect().await?;
-
-    // verify user exists
-    let user = db
-        .get_user(UserId(args.user))
+async fn connect_client(socket: &SocketArgs) -> Result<AdminClient> {
+    AdminClient::connect_unix(&socket.socket)
         .await
-        .context("failed to query user")?;
+        .with_context(|| format!("failed to connect to admin socket: {:?}", socket.socket))
+}
 
-    if user.is_none() {
-        bail!("user {} not found", args.user);
+/// normalize tag to have tag: prefix
+fn normalize_tag(tag: &str) -> String {
+    if tag.starts_with("tag:") {
+        tag.to_string()
+    } else {
+        format!("tag:{}", tag)
     }
+}
+
+async fn create_key(args: CreateArgs) -> Result<()> {
+    let mut client = connect_client(&args.socket).await?;
 
     // normalize tags (ensure they have tag: prefix)
-    let tags: Vec<String> = args
-        .tags
-        .iter()
-        .map(|t| {
-            if t.starts_with("tag:") {
-                t.clone()
-            } else {
-                format!("tag:{}", t)
-            }
-        })
-        .collect();
+    let tags: Vec<String> = args.tags.iter().map(|t| normalize_tag(t)).collect();
 
-    let now = Utc::now();
-    let expiration = now + Duration::days(args.expiration_days);
-
-    // generate a random key
-    let key_string = generate_preauth_key();
-
-    let mut key = PreAuthKey::new(0, key_string, UserId(args.user));
-    key.reusable = args.reusable;
-    key.ephemeral = args.ephemeral;
-    key.expiration = Some(expiration);
-    key.tags = tags;
-
-    let created = db
-        .create_preauth_key(&key)
+    let key = client
+        .create_preauth_key(
+            args.user,
+            args.reusable,
+            args.ephemeral,
+            tags,
+            Some(args.expiration_days),
+        )
         .await
-        .context("failed to create preauth key")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to create preauth key: {}", e))?;
 
     println!("Created preauth key:");
-    println!("  Key:       {}", created.key);
-    println!("  User:      {}", created.user_id.0);
-    println!("  Reusable:  {}", created.reusable);
-    println!("  Ephemeral: {}", created.ephemeral);
+    println!("  Key:       {}", key.key);
+    println!("  User:      {}", key.user_id);
+    println!("  Reusable:  {}", key.reusable);
+    println!("  Ephemeral: {}", key.ephemeral);
     println!(
         "  Expires:   {}",
-        created
-            .expiration
-            .map(|e| e.to_rfc3339())
-            .unwrap_or_else(|| "never".to_string())
+        key.expiration.as_deref().unwrap_or("never")
     );
-    if !created.tags.is_empty() {
-        println!("  Tags:      {}", created.tags.join(", "));
+    if !key.tags.is_empty() {
+        println!("  Tags:      {}", key.tags.join(", "));
     }
 
     Ok(())
 }
 
-/// generate a random preauth key string using cryptographically secure random bytes.
-fn generate_preauth_key() -> String {
-    use base64::Engine;
-    use rand::RngCore;
-
-    let mut bytes = [0u8; 24]; // 24 bytes = 192 bits of entropy
-    rand::rng().fill_bytes(&mut bytes);
-
-    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    format!("rspak_{}", encoded)
-}
-
 async fn list_keys(args: ListArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    let keys = if let Some(user_id) = args.user {
-        db.list_preauth_keys(UserId(user_id))
-            .await
-            .context("failed to list preauth keys")?
-    } else {
-        db.get_all_preauth_keys()
-            .await
-            .context("failed to list preauth keys")?
-    };
-
-    // filter expired if needed
-    let keys: Vec<_> = if args.show_expired {
-        keys
-    } else {
-        keys.into_iter().filter(|k| k.is_valid()).collect()
-    };
+    let keys = client
+        .list_preauth_keys(args.user, args.show_expired)
+        .await
+        .map_err(|e| color_eyre::eyre::eyre!("failed to list preauth keys: {}", e))?;
 
     if args.output == "json" {
         println!("{}", serde_json::to_string_pretty(&keys)?);
@@ -262,7 +182,9 @@ async fn list_keys(args: ListArgs) -> Result<()> {
 
         let expires = key
             .expiration
-            .map(|e: chrono::DateTime<chrono::Utc>| e.format("%Y-%m-%d %H:%M").to_string())
+            .as_ref()
+            .and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok())
+            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_else(|| "never".to_string());
 
         let tags = if key.tags.is_empty() {
@@ -271,13 +193,16 @@ async fn list_keys(args: ListArgs) -> Result<()> {
             key.tags.join(", ")
         };
 
+        // use_count > 0 means used
+        let used = key.use_count > 0;
+
         println!(
             "{:<6} {:<12} {:<6} {:<8} {:<8} {:<20} {}",
             key.id,
             key_preview,
-            key.user_id.0,
+            key.user_id,
             if key.reusable { "yes" } else { "no" },
-            if key.used { "yes" } else { "no" },
+            if used { "yes" } else { "no" },
             expires,
             tags
         );
@@ -287,11 +212,12 @@ async fn list_keys(args: ListArgs) -> Result<()> {
 }
 
 async fn delete_key(args: DeleteArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    db.delete_preauth_key(args.key_id)
+    client
+        .delete_preauth_key(args.key_id)
         .await
-        .context("failed to delete preauth key")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to delete preauth key: {}", e))?;
 
     println!("Deleted preauth key {}", args.key_id);
 
@@ -299,11 +225,12 @@ async fn delete_key(args: DeleteArgs) -> Result<()> {
 }
 
 async fn expire_key(args: ExpireArgs) -> Result<()> {
-    let db = args.db.connect().await?;
+    let mut client = connect_client(&args.socket).await?;
 
-    db.expire_preauth_key(args.key_id)
+    client
+        .expire_preauth_key(args.key_id)
         .await
-        .context("failed to expire preauth key")?;
+        .map_err(|e| color_eyre::eyre::eyre!("failed to expire preauth key: {}", e))?;
 
     println!("Expired preauth key {}", args.key_id);
 
@@ -315,38 +242,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_preauth_key_format() {
-        let key = generate_preauth_key();
-
-        // extract the random part (after prefix)
-        assert!(key.starts_with("rspak_"), "key must start with rspak_");
-
-        // random part should be 32 chars of base64 URL_SAFE_NO_PAD
-        let random_part = key.strip_prefix("rspak_").unwrap();
-
-        // should be valid base64 URL_SAFE (only A-Z, a-z, 0-9, -, _)
-        assert_eq!(random_part.len(), 32, "random part should be 32 chars");
-
-        // should be valid base64 url_safe (only a-z, a-z, 0-9, -, _)
-        assert!(
-            random_part
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
-            "random part must be valid base64 URL_SAFE chars"
-        );
-
-        // should decode to 24 bytes
-        use base64::Engine;
-        let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .decode(random_part)
-            .expect("should be valid base64");
-        assert_eq!(decoded.len(), 24, "should decode to 24 bytes");
+    fn test_normalize_tag_with_prefix() {
+        assert_eq!(normalize_tag("tag:web"), "tag:web");
     }
 
     #[test]
-    fn test_preauth_key_uniqueness() {
-        let key1 = generate_preauth_key();
-        let key2 = generate_preauth_key();
-        assert_ne!(key1, key2, "keys should be unique");
+    fn test_normalize_tag_without_prefix() {
+        assert_eq!(normalize_tag("web"), "tag:web");
     }
 }

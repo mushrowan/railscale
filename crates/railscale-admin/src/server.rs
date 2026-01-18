@@ -1,4 +1,4 @@
-//! admin service implementation
+//! admin service implementation.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,32 +11,32 @@ use tracing::info;
 
 use crate::pb::{self, admin_service_server::AdminService};
 
-/// policy handle for hot-reload (mirrors railscale::PolicyHandle)
+/// policy handle for hot-reload (mirrors railscale::policyhandle).
 #[derive(Clone)]
 pub struct PolicyHandle {
     engine: Arc<RwLock<railscale_grants::GrantsEngine>>,
 }
 
 impl PolicyHandle {
-    /// create a new policy handle from a shared grants engine
+    /// create a new policy handle from a shared grants engine.
     pub fn new(engine: Arc<RwLock<railscale_grants::GrantsEngine>>) -> Self {
         Self { engine }
     }
 
-    /// reload the policy
+    /// reload the policy.
     pub async fn reload(&self, policy: Policy) {
         let mut engine = self.engine.write().await;
         engine.update_policy(policy);
     }
 
-    /// get the current policy
+    /// get the current policy.
     pub async fn get_policy(&self) -> Policy {
         let engine = self.engine.read().await;
         engine.policy().clone()
     }
 }
 
-/// admin service implementation
+/// admin service implementation.
 pub struct AdminServiceImpl {
     db: RailscaleDb,
     policy_handle: PolicyHandle,
@@ -44,7 +44,7 @@ pub struct AdminServiceImpl {
 }
 
 impl AdminServiceImpl {
-    /// create a new admin service
+    /// create a new admin service.
     pub fn new(
         db: RailscaleDb,
         policy_handle: PolicyHandle,
@@ -81,7 +81,7 @@ impl AdminService for AdminServiceImpl {
         let grants_loaded = policy.grants.len() as u32;
         self.policy_handle.reload(policy).await;
 
-        info!("policy reloaded via admin api ({} grants)", grants_loaded);
+        info!("Policy reloaded via admin API ({} grants)", grants_loaded);
 
         Ok(Response::new(pb::ReloadPolicyResponse {
             success: true,
@@ -113,7 +113,7 @@ impl AdminService for AdminServiceImpl {
         let grants_loaded = policy.grants.len() as u32;
         self.policy_handle.reload(policy).await;
 
-        info!("policy set via admin api ({} grants)", grants_loaded);
+        info!("Policy set via admin API ({} grants)", grants_loaded);
 
         Ok(Response::new(pb::SetPolicyResponse {
             success: true,
@@ -181,6 +181,57 @@ impl AdminService for AdminServiceImpl {
     ) -> Result<Response<pb::DeleteUserResponse>, Status> {
         let id = railscale_types::UserId(request.into_inner().id);
 
+        // check if user exists
+        let _user = self
+            .db
+            .get_user(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get user: {}", e)))?
+            .ok_or_else(|| Status::not_found("User not found"))?;
+
+        // check if user has nodes (headscale behavior: refuse to delete if nodes exist)
+        let nodes = self
+            .db
+            .list_nodes_for_user(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list nodes: {}", e)))?;
+
+        if !nodes.is_empty() {
+            return Err(Status::failed_precondition(format!(
+                "user not empty: {} node(s) found. Delete the nodes first.",
+                nodes.len()
+            )));
+        }
+
+        // delete preauth keys for this user (Headscale behavior)
+        let preauth_keys = self
+            .db
+            .list_preauth_keys(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list preauth keys: {}", e)))?;
+
+        for key in preauth_keys {
+            self.db
+                .delete_preauth_key(key.id)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to delete preauth key: {}", e)))?;
+        }
+
+        // delete API keys for this user
+        let api_keys = self
+            .db
+            .list_api_keys(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list API keys: {}", e)))?;
+
+        for key in api_keys {
+            self.db
+                .delete_api_key(key.id)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to delete API key: {}", e)))?;
+        }
+
+        // now delete the user
         self.db
             .delete_user(id)
             .await
@@ -191,10 +242,29 @@ impl AdminService for AdminServiceImpl {
 
     async fn rename_user(
         &self,
-        _request: Request<pb::RenameUserRequest>,
+        request: Request<pb::RenameUserRequest>,
     ) -> Result<Response<pb::User>, Status> {
-        // TODO: implement when db supports rename_user
-        Err(Status::unimplemented("rename_user not yet implemented"))
+        let req = request.into_inner();
+        let id = railscale_types::UserId(req.id);
+
+        let mut user = self
+            .db
+            .get_user(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get user: {}", e)))?
+            .ok_or_else(|| Status::not_found("User not found"))?;
+
+        // new_name is the new email/name
+        user.name = req.new_name.clone();
+        user.email = Some(req.new_name);
+
+        let updated = self
+            .db
+            .update_user(&user)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to update user: {}", e)))?;
+
+        Ok(Response::new(user_to_pb(&updated)))
     }
 
     // ============ Nodes ============
@@ -261,36 +331,111 @@ impl AdminService for AdminServiceImpl {
 
     async fn expire_node(
         &self,
-        _request: Request<pb::ExpireNodeRequest>,
+        request: Request<pb::ExpireNodeRequest>,
     ) -> Result<Response<pb::Node>, Status> {
-        // TODO: implement when db supports expire_node
-        Err(Status::unimplemented("expire_node not yet implemented"))
+        let id = railscale_types::NodeId(request.into_inner().id);
+
+        let mut node = self
+            .db
+            .get_node(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
+            .ok_or_else(|| Status::not_found("Node not found"))?;
+
+        node.expiry = Some(chrono::Utc::now());
+
+        let updated = self
+            .db
+            .update_node(&node)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
+
+        Ok(Response::new(node_to_pb(&updated)))
     }
 
     async fn rename_node(
         &self,
-        _request: Request<pb::RenameNodeRequest>,
+        request: Request<pb::RenameNodeRequest>,
     ) -> Result<Response<pb::Node>, Status> {
-        // TODO: implement when db supports rename_node
-        Err(Status::unimplemented("rename_node not yet implemented"))
+        let req = request.into_inner();
+        let id = railscale_types::NodeId(req.id);
+
+        let mut node = self
+            .db
+            .get_node(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
+            .ok_or_else(|| Status::not_found("Node not found"))?;
+
+        node.given_name = req.new_name;
+
+        let updated = self
+            .db
+            .update_node(&node)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
+
+        Ok(Response::new(node_to_pb(&updated)))
     }
 
     async fn set_tags(
         &self,
-        _request: Request<pb::SetTagsRequest>,
+        request: Request<pb::SetTagsRequest>,
     ) -> Result<Response<pb::Node>, Status> {
-        // TODO: implement when db supports set_node_tags
-        Err(Status::unimplemented("set_tags not yet implemented"))
+        let req = request.into_inner();
+        let id = railscale_types::NodeId(req.id);
+
+        let mut node = self
+            .db
+            .get_node(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
+            .ok_or_else(|| Status::not_found("Node not found"))?;
+
+        node.tags = req.tags;
+
+        let updated = self
+            .db
+            .update_node(&node)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
+
+        Ok(Response::new(node_to_pb(&updated)))
     }
 
     async fn set_approved_routes(
         &self,
-        _request: Request<pb::SetApprovedRoutesRequest>,
+        request: Request<pb::SetApprovedRoutesRequest>,
     ) -> Result<Response<pb::Node>, Status> {
-        // TODO: implement when db supports set_approved_routes
-        Err(Status::unimplemented(
-            "set_approved_routes not yet implemented",
-        ))
+        let req = request.into_inner();
+        let id = railscale_types::NodeId(req.id);
+
+        let mut node = self
+            .db
+            .get_node(id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
+            .ok_or_else(|| Status::not_found("Node not found"))?;
+
+        // parse and validate cidr routes
+        let routes: Vec<ipnet::IpNet> = req
+            .routes
+            .iter()
+            .map(|r| {
+                r.parse()
+                    .map_err(|_| Status::invalid_argument(format!("Invalid CIDR: {}", r)))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        node.approved_routes = routes;
+
+        let updated = self
+            .db
+            .update_node(&node)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
+
+        Ok(Response::new(node_to_pb(&updated)))
     }
 
     // ============ PreAuth Keys ============
@@ -539,7 +684,7 @@ fn api_key_to_pb(key: &railscale_types::ApiKey) -> pb::ApiKey {
     }
 }
 
-/// generate a random preauth key string
+/// generate a random preauth key string.
 fn generate_preauth_key() -> String {
     use base64::Engine;
     use rand::RngCore;
@@ -551,7 +696,7 @@ fn generate_preauth_key() -> String {
     format!("rskey_{}", encoded)
 }
 
-/// generate a random api key string
+/// generate a random api key string.
 fn generate_api_key() -> String {
     use base64::Engine;
     use rand::RngCore;

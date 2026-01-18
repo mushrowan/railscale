@@ -48,8 +48,12 @@
 
           craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-          # Common source filtering
-          src = craneLib.cleanCargoSource ./.;
+          # Common source filtering - include proto files for tonic-build
+          protoFilter = path: _type: builtins.match ".*\\.proto$" path != null;
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type: (protoFilter path type) || (craneLib.filterCargoSources path type);
+          };
 
           # Common arguments for all builds
           commonArgs = {
@@ -58,7 +62,7 @@
 
             nativeBuildInputs = with pkgs; [
               pkg-config
-              protobuf  # For tonic-build (gRPC)
+              protobuf # For tonic-build (gRPC)
             ];
 
             buildInputs =
@@ -136,7 +140,7 @@
               cargo-edit
               curl
               jq
-              protobuf  # For tonic-build (gRPC)
+              protobuf # For tonic-build (gRPC)
 
               # Run the NixOS VM integration test with full logs
               (writeShellScriptBin "vmtest" ''
