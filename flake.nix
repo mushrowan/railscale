@@ -58,6 +58,7 @@
 
             nativeBuildInputs = with pkgs; [
               pkg-config
+              protobuf  # For tonic-build (gRPC)
             ];
 
             buildInputs =
@@ -135,6 +136,7 @@
               cargo-edit
               curl
               jq
+              protobuf  # For tonic-build (gRPC)
 
               # Run the NixOS VM integration test with full logs
               (writeShellScriptBin "vmtest" ''

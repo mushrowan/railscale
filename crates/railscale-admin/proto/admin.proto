@@ -1,0 +1,249 @@
+syntax = "proto3";
+package railscale.admin.v1;
+
+service AdminService {
+  // Policy
+  rpc ReloadPolicy(ReloadPolicyRequest) returns (ReloadPolicyResponse);
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+  rpc SetPolicy(SetPolicyRequest) returns (SetPolicyResponse);
+
+  // Users
+  rpc CreateUser(CreateUserRequest) returns (User);
+  rpc GetUser(GetUserRequest) returns (User);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  rpc RenameUser(RenameUserRequest) returns (User);
+
+  // Nodes
+  rpc GetNode(GetNodeRequest) returns (Node);
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc DeleteNode(DeleteNodeRequest) returns (DeleteNodeResponse);
+  rpc ExpireNode(ExpireNodeRequest) returns (Node);
+  rpc RenameNode(RenameNodeRequest) returns (Node);
+  rpc SetTags(SetTagsRequest) returns (Node);
+  rpc SetApprovedRoutes(SetApprovedRoutesRequest) returns (Node);
+
+  // PreAuth Keys
+  rpc CreatePreauthKey(CreatePreauthKeyRequest) returns (PreauthKey);
+  rpc ListPreauthKeys(ListPreauthKeysRequest) returns (ListPreauthKeysResponse);
+  rpc ExpirePreauthKey(ExpirePreauthKeyRequest) returns (ExpirePreauthKeyResponse);
+  rpc DeletePreauthKey(DeletePreauthKeyRequest) returns (DeletePreauthKeyResponse);
+
+  // API Keys
+  rpc CreateApiKey(CreateApiKeyRequest) returns (ApiKeyWithSecret);
+  rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse);
+  rpc ExpireApiKey(ExpireApiKeyRequest) returns (ExpireApiKeyResponse);
+  rpc DeleteApiKey(DeleteApiKeyRequest) returns (DeleteApiKeyResponse);
+}
+
+// ============ Common Types ============
+
+message User {
+  uint64 id = 1;
+  string email = 2;
+  string display_name = 3;
+  string created_at = 4;  // RFC3339
+}
+
+message Node {
+  uint64 id = 1;
+  string machine_key = 2;
+  string node_key = 3;
+  string hostname = 4;
+  string given_name = 5;
+  optional string ipv4 = 6;
+  optional string ipv6 = 7;
+  optional uint64 user_id = 8;
+  repeated string tags = 9;
+  optional string last_seen = 10;
+  optional string expiry = 11;
+  repeated string approved_routes = 12;
+  string created_at = 13;
+  bool online = 14;
+}
+
+message PreauthKey {
+  uint64 id = 1;
+  string key = 2;
+  uint64 user_id = 3;
+  bool reusable = 4;
+  bool ephemeral = 5;
+  repeated string tags = 6;
+  optional string expiration = 7;
+  string created_at = 8;
+  uint32 use_count = 9;
+}
+
+message ApiKey {
+  uint64 id = 1;
+  string prefix = 2;  // Only prefix, not full key
+  string name = 3;
+  uint64 user_id = 4;
+  optional string expiration = 5;
+  optional string last_used_at = 6;
+  string created_at = 7;
+}
+
+// Full key returned only on create
+message ApiKeyWithSecret {
+  uint64 id = 1;
+  string key = 2;  // Full key
+  string name = 3;
+  uint64 user_id = 4;
+  optional string expiration = 5;
+  string created_at = 6;
+}
+
+// ============ policy ============
+
+message ReloadPolicyRequest {}
+
+message ReloadPolicyResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 grants_loaded = 3;
+}
+
+message GetPolicyRequest {}
+
+message GetPolicyResponse {
+  string policy_json = 1;
+}
+
+message SetPolicyRequest {
+  string policy_json = 1;
+}
+
+message SetPolicyResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 grants_loaded = 3;
+}
+
+// ============ Users ============
+
+message CreateUserRequest {
+  string email = 1;
+  optional string display_name = 2;
+}
+
+message GetUserRequest {
+  uint64 id = 1;
+}
+
+message ListUsersRequest {}
+
+message ListUsersResponse {
+  repeated User users = 1;
+}
+
+message DeleteUserRequest {
+  uint64 id = 1;
+}
+
+message DeleteUserResponse {}
+
+message RenameUserRequest {
+  uint64 id = 1;
+  string new_name = 2;
+}
+
+// ============ Nodes ============
+
+message GetNodeRequest {
+  uint64 id = 1;
+}
+
+message ListNodesRequest {
+  optional uint64 user_id = 1;
+  optional string tag = 2;
+}
+
+message ListNodesResponse {
+  repeated Node nodes = 1;
+}
+
+message DeleteNodeRequest {
+  uint64 id = 1;
+}
+
+message DeleteNodeResponse {}
+
+message ExpireNodeRequest {
+  uint64 id = 1;
+}
+
+message RenameNodeRequest {
+  uint64 id = 1;
+  string new_name = 2;
+}
+
+message SetTagsRequest {
+  uint64 id = 1;
+  repeated string tags = 2;
+}
+
+message SetApprovedRoutesRequest {
+  uint64 id = 1;
+  repeated string routes = 2;
+}
+
+// ============ PreAuth Keys ============
+
+message CreatePreauthKeyRequest {
+  uint64 user_id = 1;
+  bool reusable = 2;
+  bool ephemeral = 3;
+  repeated string tags = 4;
+  optional int64 expiration_days = 5;
+}
+
+message ListPreauthKeysRequest {
+  optional uint64 user_id = 1;
+  bool show_expired = 2;
+}
+
+message ListPreauthKeysResponse {
+  repeated PreauthKey keys = 1;
+}
+
+message ExpirePreauthKeyRequest {
+  uint64 id = 1;
+}
+
+message ExpirePreauthKeyResponse {}
+
+message DeletePreauthKeyRequest {
+  uint64 id = 1;
+}
+
+message DeletePreauthKeyResponse {}
+
+// ============ api keys ============
+
+message CreateApiKeyRequest {
+  uint64 user_id = 1;
+  string name = 2;
+  optional int64 expiration_days = 3;
+}
+
+message ListApiKeysRequest {
+  optional uint64 user_id = 1;
+  bool show_expired = 2;
+}
+
+message ListApiKeysResponse {
+  repeated ApiKey keys = 1;
+}
+
+message ExpireApiKeyRequest {
+  uint64 id = 1;
+}
+
+message ExpireApiKeyResponse {}
+
+message DeleteApiKeyRequest {
+  uint64 id = 1;
+}
+
+message DeleteApiKeyResponse {}

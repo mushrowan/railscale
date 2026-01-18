@@ -6,6 +6,7 @@ members = [
   "crates/railscale-db",
   "crates/railscale-proto",
   "crates/railscale-grants",
+  "crates/railscale-admin",
 ]
 
 [workspace.metadata.crane]
@@ -62,6 +63,7 @@ railscale-types = { path = "crates/railscale-types" }
 railscale-db = { path = "crates/railscale-db" }
 railscale-proto = { path = "crates/railscale-proto" }
 railscale-grants = { path = "crates/railscale-grants" }
+railscale-admin = { path = "crates/railscale-admin" }
 
 [patch.crates-io]
 snow = { path = "vendor/snow" }
