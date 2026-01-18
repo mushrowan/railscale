@@ -8,6 +8,7 @@ mod map;
 pub mod oidc;
 mod register;
 mod ts2021;
+mod verify;
 mod version;
 
 pub use error::{ApiError, OptionExt, ResultExt};
@@ -17,4 +18,5 @@ pub use machine_key_context::{MachineKeyContext, OptionalMachineKeyContext};
 pub use map::map;
 pub use register::{RegisterResponse, register};
 pub use ts2021::{ts2021, ts2021_http_upgrade};
+pub use verify::verify;
 pub use version::version;

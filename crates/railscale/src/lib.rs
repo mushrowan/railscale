@@ -225,6 +225,7 @@ pub async fn create_app_with_policy_handle(
     let router = Router::new()
         .route("/health", get(handlers::health))
         .route("/version", get(handlers::version))
+        .route("/verify", post(handlers::verify))
         .route("/key", get(handlers::key))
         .route(
             "/ts2021",
