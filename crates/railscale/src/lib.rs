@@ -45,6 +45,7 @@ use std::time::Duration;
 use moka::sync::Cache;
 use railscale_db::{Database, IpAllocator, RailscaleDb};
 use railscale_grants::{GrantsEngine, Policy};
+use railscale_proto::DerpMap;
 use railscale_types::{Config, RegistrationId};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -101,9 +102,11 @@ pub struct AppState {
     pub noise_public_key: Vec<u8>,
     /// server's noise private key for ts2021 protocol handshakes.
     pub noise_private_key: Vec<u8>,
-    /// cache of pending registrations waiting for oidc completion.
+    /// derp map for relay coordination (shared for dynamic updates)
     /// maps registrationid -> arc<pendingregistration>.
     pub pending_registrations: Cache<RegistrationId, Arc<PendingRegistration>>,
+    /// derp map for relay coordination (shared for dynamic updates).
+    pub derp_map: Arc<RwLock<DerpMap>>,
 }
 
 /// load a noise keypair from file, or generate and save a new one.
@@ -150,9 +153,10 @@ pub async fn load_or_generate_noise_keypair(path: &Path) -> std::io::Result<Keyp
     }
 }
 
-/// create the axum application with all routes.
+/// if `derp_map` is None, a default empty map will be used
 ///
 /// if `keypair` is none, a new keypair will be generated (not persisted).
+/// if `derp_map` is none, a default empty map will be used.
 pub async fn create_app(
     db: RailscaleDb,
     grants: GrantsEngine,
@@ -161,18 +165,26 @@ pub async fn create_app(
     notifier: StateNotifier,
     keypair: Option<Keypair>,
 ) -> Router {
-    let (app, _handle) =
-        create_app_with_policy_handle(db, grants.policy().clone(), config, oidc, notifier, keypair)
-            .await;
+    let (app, _handle) = create_app_with_policy_handle(
+        db,
+        grants.policy().clone(),
+        config,
+        oidc,
+        notifier,
+        keypair,
+        None,
+    )
+    .await;
     app
 }
 
 /// create the axum application with a handle for policy hot-reload.
 ///
 /// returns both the router and a [`policyhandle`] that can be used to
-/// reload the policy at runtime (e.g., in response to SIGHUP).
+/// if `derp_map` is None, a default empty map will be used
 ///
 /// if `keypair` is none, a new keypair will be generated (not persisted).
+/// if `derp_map` is none, a default empty map will be used.
 pub async fn create_app_with_policy_handle(
     db: RailscaleDb,
     policy: Policy,
@@ -180,6 +192,7 @@ pub async fn create_app_with_policy_handle(
     oidc: Option<oidc::AuthProviderOidc>,
     notifier: StateNotifier,
     keypair: Option<Keypair>,
+    derp_map: Option<DerpMap>,
 ) -> (Router, PolicyHandle) {
     // generate keypair if not provided
     let keypair = keypair.unwrap_or_else(|| {
@@ -210,6 +223,9 @@ pub async fn create_app_with_policy_handle(
         .time_to_live(Duration::from_secs(900))
         .build();
 
+    // initialize derp map (default to empty if not provided)
+    let derp_map = Arc::new(RwLock::new(derp_map.unwrap_or_default()));
+
     let state = AppState {
         db,
         grants,
@@ -220,12 +236,14 @@ pub async fn create_app_with_policy_handle(
         noise_public_key: keypair.public,
         noise_private_key: keypair.private,
         pending_registrations,
+        derp_map,
     };
 
     let router = Router::new()
         .route("/health", get(handlers::health))
         .route("/version", get(handlers::version))
         .route("/verify", post(handlers::verify))
+        .route("/bootstrap-dns", get(handlers::bootstrap_dns))
         .route("/key", get(handlers::key))
         .route(
             "/ts2021",

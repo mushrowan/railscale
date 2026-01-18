@@ -1,6 +1,6 @@
-//! tests for policy hot-reload functionality
+//! tests for policy hot-reload functionality.
 //!
-//! tests that policy can be reloaded at runtime without restarting the server
+//! tests that policy can be reloaded at runtime without restarting the server.
 
 mod map_common;
 
@@ -91,6 +91,7 @@ async fn test_policy_hot_reload_changes_visibility() {
         config,
         None,
         StateNotifier::default(),
+        None,
         None,
     )
     .await;
