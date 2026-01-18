@@ -491,6 +491,9 @@ in
           RestartSec = "5s";
           Type = "simple";
 
+          # Enable policy hot-reload via: systemctl reload railscale
+          ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
+
           # State and runtime directories
           StateDirectory = "railscale";
           StateDirectoryMode = "0750";

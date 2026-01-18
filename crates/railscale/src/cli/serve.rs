@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use clap::Args;
 use color_eyre::eyre::{Context, Result, bail};
 use railscale_db::RailscaleDb;
-use railscale_grants::{GrantsEngine, Policy};
+use railscale_grants::Policy;
 use railscale_types::{Config, EmbeddedDerpRuntime};
 use tokio::net::TcpListener;
-use tracing::{Level, debug, info, warn};
+use tokio::signal::unix::{SignalKind, signal};
+use tracing::{Level, debug, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 use crate::derp_server::{self, DerpListenerConfig, EmbeddedDerpOptions};
@@ -61,10 +62,10 @@ fn migrate_env_var(
     }
 }
 
-/// set RAILSCALE_X to the HEADSCALE_X value. This allows users migrating from
-///headscale to use their existing environment configuration
+/// apply headscale_* -> railscale_* environment variable migration.
+///
 /// for each known env var suffix, if headscale_x is set but railscale_x is not,
-/// call this before clap parses arguments
+/// set RAILSCALE_X to the HEADSCALE_X value. This allows users migrating from
 /// headscale to use their existing environment configuration.
 ///
 /// call this before clap parses arguments.
@@ -301,8 +302,11 @@ impl ServeCommand {
 
         info!("Starting railscale...");
 
+        // save policy file path for hot-reload (before into_config consumes self)
+        let policy_file_path = self.policy_file.clone();
+
         // load policy if provided
-        let policy = if let Some(policy_path) = &self.policy_file {
+        let policy = if let Some(policy_path) = &policy_file_path {
             info!("Loading policy from {:?}", policy_path);
             let policy_content = std::fs::read_to_string(policy_path)
                 .with_context(|| format!("failed to read policy file: {:?}", policy_path))?;
@@ -313,8 +317,7 @@ impl ServeCommand {
             Policy::empty()
         };
 
-        let grants = GrantsEngine::new(policy);
-        info!("Loaded policy with {} grants", grants.policy().grants.len());
+        info!("Loaded policy with {} grants", policy.grants.len());
 
         // load configuration
         let config = self.into_config()?;
@@ -468,10 +471,53 @@ impl ServeCommand {
             None
         };
 
-        // build router
+        // build router with policy handle for hot-reload
         let notifier = crate::StateNotifier::new();
-        let app =
-            crate::create_app(db, grants, config.clone(), oidc, notifier, Some(keypair)).await;
+        let (app, policy_handle) = crate::create_app_with_policy_handle(
+            db,
+            policy,
+            config.clone(),
+            oidc,
+            notifier,
+            Some(keypair),
+            None,
+        )
+        .await;
+
+        // spawn sighup handler for policy hot-reload
+        if let Some(policy_path) = policy_file_path {
+            let policy_handle = policy_handle.clone();
+            tokio::spawn(async move {
+                let mut sighup = match signal(SignalKind::hangup()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("Failed to register SIGHUP handler: {}", e);
+                        return;
+                    }
+                };
+
+                loop {
+                    sighup.recv().await;
+                    info!("Received SIGHUP, reloading policy from {:?}", policy_path);
+
+                    match std::fs::read_to_string(&policy_path) {
+                        Ok(content) => match serde_json::from_str::<Policy>(&content) {
+                            Ok(new_policy) => {
+                                let grant_count = new_policy.grants.len();
+                                policy_handle.reload(new_policy).await;
+                                info!("Policy reloaded successfully ({} grants)", grant_count);
+                            }
+                            Err(e) => {
+                                error!("Failed to read policy file: {}", e);
+                            }
+                        },
+                        Err(e) => {
+                            error!("Failed to read policy file: {}", e);
+                        }
+                    }
+                }
+            });
+        }
 
         // parse listen address
         let addr: SocketAddr = config
@@ -750,7 +796,7 @@ map_keepalive_interval_secs = 60
 
     #[test]
     fn test_migrate_headscale_env_vars() {
-        // hEADSCALE_SERVER_URL -> RAILSCALE_SERVER_URL
+        // test that headscale_* env vars are migrated to railscale_*
         // when RAILSCALE_* is not set
 
         // headscale_server_url -> railscale_server_url
