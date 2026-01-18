@@ -30,39 +30,24 @@ pkgs.testers.runNixOSTest {
           ];
 
           # Policy with groups for testing access control
+          # Uses autogroup:member for basic connectivity (all registered nodes can reach each other)
+          # Plus group-specific grants for testing group-based access control
           environment.etc."railscale/policy.json".text = builtins.toJSON {
-            # Group definitions - alice is in engineering, bob is not
             groups = {
               "group:engineering" = [ "alice@example.com" ];
               "group:admins" = [ "admin@example.com" ];
             };
             grants = [
-              # Allow all for initial connectivity tests
-              {
-                src = [ "*" ];
-                dst = [ "*" ];
-                ip = [ "*" ];
-              }
-            ];
-          };
-
-          # Group-restricted policy for access control tests
-          environment.etc."railscale/policy-groups.json".text = builtins.toJSON {
-            groups = {
-              "group:engineering" = [ "alice@example.com" ];
-              "group:admins" = [ "admin@example.com" ];
-            };
-            grants = [
-              # Engineering group can access tagged servers
-              {
-                src = [ "group:engineering" ];
-                dst = [ "tag:server" ];
-                ip = [ "*" ];
-              }
-              # Everyone can access each other (for basic connectivity)
+              # All registered members can reach each other (basic connectivity)
               {
                 src = [ "autogroup:member" ];
                 dst = [ "autogroup:member" ];
+                ip = [ "*" ];
+              }
+              # Engineering group can additionally access tagged servers
+              {
+                src = [ "group:engineering" ];
+                dst = [ "tag:server" ];
                 ip = [ "*" ];
               }
             ];
@@ -736,15 +721,6 @@ pkgs.testers.runNixOSTest {
         eve = next(u for u in users if u["name"] == "eve")
         eve_id = eve["id"]
         print(f"Alice ID: {alice_id}, Eve ID: {eve_id}")
-
-    with subtest("Restart server with group-restricted policy"):
-        # Update the policy file to use group-restricted grants
-        server.succeed("cp /etc/railscale/policy-groups.json /etc/railscale/policy.json")
-        server.succeed("systemctl restart railscale")
-        server.wait_for_unit("railscale.service")
-        server.wait_for_open_port(8080)
-        time.sleep(2)
-        print("Server restarted with group-restricted policy")
 
     with subtest("Connect clients for group test"):
         # Create keys for alice (in engineering) and eve (not in group)
