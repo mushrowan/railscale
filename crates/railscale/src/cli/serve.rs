@@ -451,6 +451,16 @@ impl ServeCommand {
                 port = %advertise_port,
                 "Embedded DERP server started"
             );
+
+            // spawn stun server if configured
+            if let Some(ref stun_addr) = config.derp.embedded_derp.stun_listen_addr {
+                let stun_listen_addr: SocketAddr =
+                    stun_addr.parse().context("invalid STUN listen address")?;
+
+                crate::stun::spawn_stun_server(stun_listen_addr)
+                    .await
+                    .context("failed to spawn STUN server")?;
+            }
         }
 
         // initialize oidc if configured
@@ -545,7 +555,7 @@ impl ServeCommand {
             let admin_service =
                 AdminServiceImpl::new(admin_db, admin_policy_handle, policy_file_path);
 
-            // create parent directory if needed
+            // remove old socket file if it exists
             let _ = std::fs::remove_file(&admin_socket_path);
 
             // create parent directory if needed

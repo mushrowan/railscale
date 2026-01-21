@@ -25,6 +25,8 @@ mod notifier;
 pub mod oidc;
 /// grants-based access control resolver.
 pub mod resolver;
+/// minimal stun server for nat traversal.
+pub mod stun;
 
 pub use derp::{
     DerpError, fetch_derp_map_from_url, generate_derp_map, load_derp_map_from_path, merge_derp_maps,
