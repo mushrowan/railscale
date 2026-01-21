@@ -1,4 +1,8 @@
-//! apiKey entity for database storage
+//! apikey entity for database storage.
+//!api keys use a split-token pattern for secure storage:
+//! - `selector`: hex-encoded lookup key (indexed for O(1) lookup)
+//! - `verifier_hash`: SHA-256 hash of the verifier portion
+//! - `verifier_hash`: SHA-256 hash of the verifier portion
 
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
@@ -6,13 +10,16 @@ use sea_orm::{ActiveValue::NotSet, Set};
 
 use railscale_types::{ApiKey, UserId};
 
-/// apiKey database model
+/// apikey database model.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "api_keys")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub key: String,
+    /// selector portion for database lookup (hex-encoded, 32 chars).
+    pub selector: String,
+    /// sha-256 hash of the verifier (hex-encoded, 64 chars).
+    pub verifier_hash: String,
     pub name: String,
     pub user_id: i64,
     pub expiration: Option<DateTime<Utc>>,
@@ -43,7 +50,8 @@ impl From<Model> for ApiKey {
     fn from(model: Model) -> Self {
         ApiKey {
             id: model.id as u64,
-            key: model.key,
+            selector: model.selector,
+            verifier_hash: model.verifier_hash,
             name: model.name,
             user_id: UserId(model.user_id as u64),
             expiration: model.expiration,
@@ -61,7 +69,8 @@ impl From<&ApiKey> for ActiveModel {
             } else {
                 Set(key.id as i64)
             },
-            key: Set(key.key.clone()),
+            selector: Set(key.selector.clone()),
+            verifier_hash: Set(key.verifier_hash.clone()),
             name: Set(key.name.clone()),
             user_id: Set(key.user_id.0 as i64),
             expiration: Set(key.expiration),

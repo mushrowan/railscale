@@ -35,12 +35,12 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// database trait for railscale storage operations.
 ///
 /// this trait abstracts over different database backends (sqlite, postgresql).
-//─── Health Check ─────────────────────────────────────────────────────────
+/// all operations use soft-delete semantics - records are marked with a `deleted_at`
 /// timestamp rather than being physically removed.
 pub trait Database: Send + Sync {
     // ─── Health Check ─────────────────────────────────────────────────────────
 
-    /// used for health checks with a recommended timeout of 1 second
+    /// ping the database to verify connectivity.
     ///
     /// returns `ok(())` if the database is reachable, `err` otherwise.
     /// used for health checks with a recommended timeout of 1 second.
@@ -133,11 +133,14 @@ pub trait Database: Send + Sync {
 
     // ─── ApiKey Operations ───────────────────────────────────────────────────
 
-    /// create a new api key. Returns the key with its assigned ID.
+    /// get an api key by its selector (for split-token lookup)
     fn create_api_key(&self, key: &ApiKey) -> impl Future<Output = Result<ApiKey>> + Send;
 
-    /// get an api key by its key string.
-    fn get_api_key(&self, key: &str) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+    /// get an api key by its selector (for split-token lookup).
+    fn get_api_key_by_selector(
+        &self,
+        selector: &str,
+    ) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
 
     /// get an api key by its numeric id.
     fn get_api_key_by_id(&self, id: u64) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
@@ -450,9 +453,9 @@ impl Database for RailscaleDb {
         Ok(result.into())
     }
 
-    async fn get_api_key(&self, key: &str) -> Result<Option<ApiKey>> {
+    async fn get_api_key_by_selector(&self, selector: &str) -> Result<Option<ApiKey>> {
         let result = entity::api_key::Entity::find()
-            .filter(entity::api_key::Column::Key.eq(key))
+            .filter(entity::api_key::Column::Selector.eq(selector))
             .filter(entity::api_key::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -638,26 +641,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_api_key_crud() {
+        use railscale_types::ApiKeySecret;
+
         let db = setup_test_db().await;
 
         // create user first
         let user = User::new(UserId(0), "apikeyowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
+        // verify the full token works
+        let secret = ApiKeySecret::generate();
+
         // create key
-        let key = ApiKey::new(
-            0,
-            "test-api-key-123".to_string(),
-            "My API Key".to_string(),
-            user.id,
-        );
+        let key = ApiKey::new(0, &secret, "My API Key".to_string(), user.id);
         let created = db.create_api_key(&key).await.unwrap();
         assert!(created.id > 0);
 
-        // get by key string
-        let fetched = db.get_api_key("test-api-key-123").await.unwrap();
+        // get by selector
+        let fetched = db.get_api_key_by_selector(&secret.selector).await.unwrap();
         assert!(fetched.is_some());
-        assert_eq!(fetched.unwrap().name, "My API Key");
+        let fetched = fetched.unwrap();
+        assert_eq!(fetched.name, "My API Key");
+
+        // verify the full token works
+        assert!(fetched.verify(&secret.full_key));
 
         // get by ID
         let fetched_by_id = db.get_api_key_by_id(created.id).await.unwrap();
@@ -673,17 +680,25 @@ mod tests {
 
         // touch (update last_used_at)
         db.touch_api_key(created.id).await.unwrap();
-        let touched = db.get_api_key("test-api-key-123").await.unwrap().unwrap();
+        let touched = db
+            .get_api_key_by_selector(&secret.selector)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(touched.last_used_at.is_some());
 
         // expire
         db.expire_api_key(created.id).await.unwrap();
-        let expired = db.get_api_key("test-api-key-123").await.unwrap().unwrap();
+        let expired = db
+            .get_api_key_by_selector(&secret.selector)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(expired.is_expired());
 
         // delete
         db.delete_api_key(created.id).await.unwrap();
-        let deleted = db.get_api_key("test-api-key-123").await.unwrap();
+        let deleted = db.get_api_key_by_selector(&secret.selector).await.unwrap();
         assert!(deleted.is_none());
     }
 

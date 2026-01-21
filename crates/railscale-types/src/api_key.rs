@@ -1,16 +1,16 @@
 //! api key type for authenticating api requests.
 //!
-//! ## Security Model
+//! api keys allow programmatic access to the railscale api for automation,
 //! integrations, and tooling.
-//!api keys use a split-token pattern for secure storage:
+//!
+//! ## Security Model
+//!
+//! api keys use a split-token pattern for secure storage:
 //! - **Full key** (given to user once): `rsapi_{selector}_{verifier}`
-//!- **Selector** (stored in DB, indexed): Used for O(1) lookup
+//! - **Selector** (stored in DB, indexed): Used for O(1) lookup
 //! - **Verifier hash** (stored in DB): SHA-256 hash for verification
-//! - **Full key** (given to user once): `rsapi_{selector}_{verifier}`
+//!
 //! this design ensures:
-//! - Database lookups are timing-safe (lookup by selector, not by comparing hashes)
-//!- Keys cannot be recovered from database breach (only hash is stored)
-//! - Verification uses constant-time comparison
 //! - Database lookups are timing-safe (lookup by selector, not by comparing hashes)
 //! - Keys cannot be recovered from database breach (only hash is stored)
 //! - Verification uses constant-time comparison
@@ -23,10 +23,10 @@ use subtle::ConstantTimeEq;
 
 use crate::user::UserId;
 
-/// a generated api key secret with its components for storage
+/// prefix for railscale api keys.
 const API_KEY_PREFIX: &str = "rsapi_";
 
-/// be shown to the user exactly once, while `selector` and `verifier_hash` are
+/// size of the selector in bytes (16 bytes = ~22 base64 chars).
 const SELECTOR_BYTES: usize = 16;
 
 /// size of the verifier in bytes (16 bytes = ~22 base64 chars).
@@ -34,7 +34,7 @@ const VERIFIER_BYTES: usize = 16;
 
 /// a generated api key secret with its components for storage.
 ///
-/// the selector portion (stored in DB, used for lookup)
+/// this struct is returned when generating a new api key. the `full_key` should
 /// be shown to the user exactly once, while `selector` and `verifier_hash` are
 /// stored in the database.
 #[derive(Debug, Clone)]
@@ -46,7 +46,7 @@ pub struct ApiKeySecret {
     /// the selector portion (stored in db, used for lookup).
     pub selector: String,
 
-    /// key format: `rsapi_{selector}_{verifier}` where both are hex-encoded
+    /// sha-256 hash of the verifier (stored in db, hex-encoded).
     pub verifier_hash: String,
 }
 
@@ -82,7 +82,7 @@ impl ApiKeySecret {
         }
     }
 
-    //must have selector_verifier format (hex selector is 32 chars)
+    /// verify a user-provided token against stored selector and verifier hash.
     ///
     /// this function uses constant-time comparison to prevent timing attacks.
     pub fn verify(token: &str, stored_selector: &str, stored_verifier_hash: &str) -> bool {
@@ -116,16 +116,24 @@ impl ApiKeySecret {
 ///
 /// api keys are used for:
 /// - CLI automation
-/// - External integrations
-/// - Programmatic control plane access
+/// this struct represents the stored form of an api key. The actual secret
+/// is only available at creation time via [`ApiKeySecret`]
+///selector portion for database lookup (hex-encoded)
+/// this is safe to show in listings
+/// is only available at creation time via [`ApiKeySecret`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {
-    /// unique identifier.
+    /// used for verification, never shown to users
     pub id: u64,
 
-    /// the secret key string used for authentication.
-    /// only shown once at creation time.
-    pub key: String,
+    /// selector portion for database lookup (hex-encoded).
+    /// this is safe to show in listings.
+    pub selector: String,
+
+    /// sha-256 hash of the verifier (hex-encoded).
+    /// used for verification, never shown to users.
+    #[serde(skip_serializing)]
+    pub verifier_hash: String,
 
     /// human-readable name/description for this key.
     pub name: String,
@@ -144,11 +152,12 @@ pub struct ApiKey {
 }
 
 impl ApiKey {
-    /// create a new api key.
-    pub fn new(id: u64, key: String, name: String, user_id: UserId) -> Self {
+    /// create a new api key from an [`ApiKeySecret`].
+    pub fn new(id: u64, secret: &ApiKeySecret, name: String, user_id: UserId) -> Self {
         Self {
             id,
-            key,
+            selector: secret.selector.clone(),
+            verifier_hash: secret.verifier_hash.clone(),
             name,
             user_id,
             expiration: None,
@@ -170,13 +179,20 @@ impl ApiKey {
         !self.is_expired()
     }
 
-    /// generate a prefix for display (first 8 chars).
-    pub fn prefix(&self) -> &str {
-        if self.key.len() >= 8 {
-            &self.key[..8]
+    /// generate a prefix for display.
+    /// returns "rsapi_{first 8 chars of selector}" for identification.
+    pub fn prefix(&self) -> String {
+        let selector_prefix = if self.selector.len() >= 8 {
+            &self.selector[..8]
         } else {
-            &self.key
-        }
+            &self.selector
+        };
+        format!("rsapi_{}", selector_prefix)
+    }
+
+    /// verify a user-provided token against this key.
+    pub fn verify(&self, token: &str) -> bool {
+        ApiKeySecret::verify(token, &self.selector, &self.verifier_hash)
     }
 }
 
@@ -186,24 +202,16 @@ mod tests {
 
     #[test]
     fn test_api_key_valid() {
-        let key = ApiKey::new(
-            1,
-            "test-key-secret".to_string(),
-            "My Key".to_string(),
-            UserId(1),
-        );
+        let secret = ApiKeySecret::generate();
+        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
         assert!(key.is_valid());
         assert!(!key.is_expired());
     }
 
     #[test]
     fn test_api_key_expired() {
-        let mut key = ApiKey::new(
-            1,
-            "test-key-secret".to_string(),
-            "My Key".to_string(),
-            UserId(1),
-        );
+        let secret = ApiKeySecret::generate();
+        let mut key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
         key.expiration = Some(Utc::now() - chrono::Duration::hours(1));
         assert!(key.is_expired());
         assert!(!key.is_valid());
@@ -211,12 +219,8 @@ mod tests {
 
     #[test]
     fn test_api_key_not_expired_with_future_expiration() {
-        let mut key = ApiKey::new(
-            1,
-            "test-key-secret".to_string(),
-            "My Key".to_string(),
-            UserId(1),
-        );
+        let secret = ApiKeySecret::generate();
+        let mut key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
         key.expiration = Some(Utc::now() + chrono::Duration::hours(1));
         assert!(!key.is_expired());
         assert!(key.is_valid());
@@ -224,19 +228,24 @@ mod tests {
 
     #[test]
     fn test_api_key_prefix() {
-        let key = ApiKey::new(
-            1,
-            "abcdefghijklmnop".to_string(),
-            "My Key".to_string(),
-            UserId(1),
-        );
-        assert_eq!(key.prefix(), "abcdefgh");
+        let secret = ApiKeySecret::generate();
+        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
+        // prefix is "rsapi_" + first 8 hex chars = 14 chars total
+        let prefix = key.prefix();
+        assert!(prefix.starts_with("rsapi_"));
+        assert_eq!(prefix.len(), 14); // "rsapi_" (6) + 8 hex chars
     }
 
     #[test]
-    fn test_api_key_prefix_short() {
-        let key = ApiKey::new(1, "abc".to_string(), "My Key".to_string(), UserId(1));
-        assert_eq!(key.prefix(), "abc");
+    fn test_api_key_verify() {
+        let secret = ApiKeySecret::generate();
+        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
+
+        // should verify with the correct full key
+        assert!(key.verify(&secret.full_key));
+
+        // should not verify with wrong key
+        assert!(!key.verify("rsapi_wrong_key"));
     }
 
     // split-token api key tests
@@ -245,7 +254,7 @@ mod tests {
     fn test_api_key_secret_generate_format() {
         let secret = ApiKeySecret::generate();
 
-        // should have two underscore-separated parts after prefix
+        // should have rsapi_ prefix
         assert!(secret.full_key.starts_with("rsapi_"));
 
         // should have two underscore-separated parts after prefix

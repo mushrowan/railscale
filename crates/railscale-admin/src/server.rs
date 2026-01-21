@@ -542,12 +542,12 @@ impl AdminService for AdminServiceImpl {
             .expiration_days
             .map(|days| chrono::Utc::now() + chrono::Duration::days(days));
 
-        // generate a random key
-        let key_string = generate_api_key();
+        // generate a new api key secret (split-token pattern)
+        let secret = railscale_types::ApiKeySecret::generate();
 
         let mut key = railscale_types::ApiKey::new(
             0, // Will be assigned by DB
-            key_string,
+            &secret,
             req.name,
             railscale_types::UserId(req.user_id),
         );
@@ -561,7 +561,7 @@ impl AdminService for AdminServiceImpl {
 
         Ok(Response::new(pb::ApiKeyWithSecret {
             id: created.id,
-            key: created.key, // Full key, only on create
+            key: secret.full_key, // Full key shown only on create
             name: created.name,
             user_id: created.user_id.0,
             expiration: created.expiration.map(|e| e.to_rfc3339()),
@@ -694,16 +694,4 @@ fn generate_preauth_key() -> String {
 
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
     format!("rskey_{}", encoded)
-}
-
-/// generate a random api key string.
-fn generate_api_key() -> String {
-    use base64::Engine;
-    use rand::RngCore;
-
-    let mut bytes = [0u8; 24];
-    rand::rng().fill_bytes(&mut bytes);
-
-    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    format!("rsapi_{}", encoded)
 }
