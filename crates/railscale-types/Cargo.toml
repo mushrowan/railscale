@@ -14,5 +14,7 @@ ipnet = { workspace = true }
 base64 = "0.22"
 hex = "0.4"
 rand = "0.9"
+sha2 = "0.10"
+subtle = "2.5"
 
 [dev-dependencies]

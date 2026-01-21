@@ -1,46 +1,150 @@
-//! api key type for authenticating api requests
+//! api key type for authenticating api requests.
 //!
-//! api keys allow programmatic access to the railscale api for automation,
-//! integrations, and tooling
+//! ## Security Model
+//! integrations, and tooling.
+//!api keys use a split-token pattern for secure storage:
+//! - **Full key** (given to user once): `rsapi_{selector}_{verifier}`
+//!- **Selector** (stored in DB, indexed): Used for O(1) lookup
+//! - **Verifier hash** (stored in DB): SHA-256 hash for verification
+//! - **Full key** (given to user once): `rsapi_{selector}_{verifier}`
+//! this design ensures:
+//! - Database lookups are timing-safe (lookup by selector, not by comparing hashes)
+//!- Keys cannot be recovered from database breach (only hash is stored)
+//! - Verification uses constant-time comparison
+//! - Database lookups are timing-safe (lookup by selector, not by comparing hashes)
+//! - Keys cannot be recovered from database breach (only hash is stored)
+//! - Verification uses constant-time comparison
 
 use chrono::{DateTime, Utc};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use crate::user::UserId;
 
-/// an api key for authenticating api requests
+/// a generated api key secret with its components for storage
+const API_KEY_PREFIX: &str = "rsapi_";
+
+/// be shown to the user exactly once, while `selector` and `verifier_hash` are
+const SELECTOR_BYTES: usize = 16;
+
+/// size of the verifier in bytes (16 bytes = ~22 base64 chars).
+const VERIFIER_BYTES: usize = 16;
+
+/// a generated api key secret with its components for storage.
+///
+/// the selector portion (stored in DB, used for lookup)
+/// be shown to the user exactly once, while `selector` and `verifier_hash` are
+/// stored in the database.
+#[derive(Debug, Clone)]
+pub struct ApiKeySecret {
+    /// the full api key to give to the user (only shown once).
+    /// format: `rsapi_{selector}_{verifier}`
+    pub full_key: String,
+
+    /// the selector portion (stored in db, used for lookup).
+    pub selector: String,
+
+    /// key format: `rsapi_{selector}_{verifier}` where both are hex-encoded
+    pub verifier_hash: String,
+}
+
+impl ApiKeySecret {
+    /// generate a new api key with cryptographically secure random values.
+    ///
+    /// returns the full key (for the user) and the components to store in the database.
+    ///
+    /// key format: `rsapi_{selector}_{verifier}` where both are hex-encoded.
+    pub fn generate() -> Self {
+        let mut rng = rand::rng();
+
+        // generate random bytes
+        let mut selector_bytes = [0u8; SELECTOR_BYTES];
+        let mut verifier_bytes = [0u8; VERIFIER_BYTES];
+        rng.fill_bytes(&mut selector_bytes);
+        rng.fill_bytes(&mut verifier_bytes);
+
+        // encode as hex (deterministic length, no separator conflicts)
+        let selector = hex::encode(selector_bytes);
+        let verifier = hex::encode(verifier_bytes);
+
+        // hash the verifier for storage (hash the hex string, not raw bytes)
+        let verifier_hash = hex::encode(Sha256::digest(verifier.as_bytes()));
+
+        // build the full key
+        let full_key = format!("{API_KEY_PREFIX}{selector}_{verifier}");
+
+        Self {
+            full_key,
+            selector,
+            verifier_hash,
+        }
+    }
+
+    //must have selector_verifier format (hex selector is 32 chars)
+    ///
+    /// this function uses constant-time comparison to prevent timing attacks.
+    pub fn verify(token: &str, stored_selector: &str, stored_verifier_hash: &str) -> bool {
+        // must start with prefix
+        let Some(without_prefix) = token.strip_prefix(API_KEY_PREFIX) else {
+            return false;
+        };
+
+        // must have selector_verifier format (hex selector is 32 chars)
+        let Some((selector, verifier)) = without_prefix.split_once('_') else {
+            return false;
+        };
+
+        // check selector matches (this is what db lookup would do)
+        if selector != stored_selector {
+            return false;
+        }
+
+        // hash the provided verifier and compare with constant-time comparison
+        let provided_hash = Sha256::digest(verifier.as_bytes());
+        let Ok(expected_hash) = hex::decode(stored_verifier_hash) else {
+            return false;
+        };
+
+        // constant-time comparison to prevent timing attacks
+        provided_hash.ct_eq(&expected_hash[..]).into()
+    }
+}
+
+/// an api key for authenticating api requests.
 ///
 /// api keys are used for:
-/// - cli automation
+/// - CLI automation
 /// - External integrations
 /// - Programmatic control plane access
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {
-    /// unique identifier
+    /// unique identifier.
     pub id: u64,
 
-    /// the secret key string used for authentication
-    /// only shown once at creation time
+    /// the secret key string used for authentication.
+    /// only shown once at creation time.
     pub key: String,
 
-    /// human-readable name/description for this key
+    /// human-readable name/description for this key.
     pub name: String,
 
-    /// user who owns this key
+    /// user who owns this key.
     pub user_id: UserId,
 
-    /// when this key expires (None = never)
+    /// when this key expires (none = never).
     pub expiration: Option<DateTime<Utc>>,
 
-    /// when this key was created
+    /// when this key was created.
     pub created_at: DateTime<Utc>,
 
-    /// when this key was last used (for auditing)
+    /// when this key was last used (for auditing).
     pub last_used_at: Option<DateTime<Utc>>,
 }
 
 impl ApiKey {
-    /// create a new api key
+    /// create a new api key.
     pub fn new(id: u64, key: String, name: String, user_id: UserId) -> Self {
         Self {
             id,
@@ -53,7 +157,7 @@ impl ApiKey {
         }
     }
 
-    /// check if this key is expired
+    /// check if this key is expired.
     pub fn is_expired(&self) -> bool {
         match &self.expiration {
             None => false,
@@ -61,12 +165,12 @@ impl ApiKey {
         }
     }
 
-    /// check if this key is valid for use
+    /// check if this key is valid for use.
     pub fn is_valid(&self) -> bool {
         !self.is_expired()
     }
 
-    /// generate a prefix for display (first 8 chars)
+    /// generate a prefix for display (first 8 chars).
     pub fn prefix(&self) -> &str {
         if self.key.len() >= 8 {
             &self.key[..8]
@@ -133,5 +237,102 @@ mod tests {
     fn test_api_key_prefix_short() {
         let key = ApiKey::new(1, "abc".to_string(), "My Key".to_string(), UserId(1));
         assert_eq!(key.prefix(), "abc");
+    }
+
+    // split-token api key tests
+
+    #[test]
+    fn test_api_key_secret_generate_format() {
+        let secret = ApiKeySecret::generate();
+
+        // should have two underscore-separated parts after prefix
+        assert!(secret.full_key.starts_with("rsapi_"));
+
+        // should have two underscore-separated parts after prefix
+        let without_prefix = secret.full_key.strip_prefix("rsapi_").unwrap();
+        let parts: Vec<&str> = without_prefix.split('_').collect();
+        assert_eq!(parts.len(), 2, "Should have selector_verifier format");
+
+        // selector should be non-empty and match stored selector
+        assert!(!secret.selector.is_empty());
+        assert_eq!(parts[0], secret.selector);
+
+        // verifier hash should be non-empty (sha-256 = 32 bytes = 64 hex chars)
+        assert_eq!(secret.verifier_hash.len(), 64);
+    }
+
+    #[test]
+    fn test_api_key_secret_verify_valid() {
+        let secret = ApiKeySecret::generate();
+
+        // should verify with the correct full key
+        assert!(ApiKeySecret::verify(
+            &secret.full_key,
+            &secret.selector,
+            &secret.verifier_hash
+        ));
+    }
+
+    #[test]
+    fn test_api_key_secret_verify_wrong_verifier() {
+        let secret = ApiKeySecret::generate();
+
+        // tamper with the verifier portion
+        let tampered = format!("rsapi_{}_{}", secret.selector, "wrongverifier123");
+
+        assert!(!ApiKeySecret::verify(
+            &tampered,
+            &secret.selector,
+            &secret.verifier_hash
+        ));
+    }
+
+    #[test]
+    fn test_api_key_secret_verify_wrong_selector() {
+        let secret = ApiKeySecret::generate();
+
+        // use a different selector
+        assert!(!ApiKeySecret::verify(
+            &secret.full_key,
+            "wrongselector",
+            &secret.verifier_hash
+        ));
+    }
+
+    #[test]
+    fn test_api_key_secret_verify_malformed_token() {
+        let secret = ApiKeySecret::generate();
+
+        // missing prefix
+        assert!(!ApiKeySecret::verify(
+            "not_a_valid_token",
+            &secret.selector,
+            &secret.verifier_hash
+        ));
+
+        // empty string
+        assert!(!ApiKeySecret::verify(
+            "",
+            &secret.selector,
+            &secret.verifier_hash
+        ));
+
+        // only prefix
+        assert!(!ApiKeySecret::verify(
+            "rsapi_",
+            &secret.selector,
+            &secret.verifier_hash
+        ));
+    }
+
+    #[test]
+    fn test_api_key_secret_uniqueness() {
+        let secret1 = ApiKeySecret::generate();
+        let secret2 = ApiKeySecret::generate();
+
+        // each generation should produce unique values
+        assert_ne!(secret1.full_key, secret2.full_key);
+        assert_ne!(secret1.selector, secret2.selector);
+        assert_ne!(secret1.verifier_hash, secret2.verifier_hash);
     }
 }
