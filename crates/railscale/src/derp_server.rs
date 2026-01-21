@@ -45,7 +45,7 @@ const DERP_MAGIC: &[u8; 8] = b"DERP\xF0\x9F\x94\x91";
 const DERP_PROTOCOL_VERSION: u32 = 2;
 const MAX_HTTP_REQUEST_SIZE: usize = 8 * 1024;
 
-/// sHA-256 fingerprint of the certificate (hex-encoded)
+/// tls assets used by the embedded derp listener.
 pub struct DerpTlsAssets {
     /// the rustls server configuration with loaded certificates.
     pub tls_config: Arc<ServerConfig>,
@@ -139,14 +139,14 @@ fn generate_new_cert(
 
     // serialize to pem and write to files
     let cert_pem = certified_key.cert.pem();
-    let key_pem = certified_key.key_pair.serialize_pem();
+    let key_pem = certified_key.signing_key.serialize_pem();
     fs::write(cert_path, &cert_pem).wrap_err("failed to write DERP certificate")?;
     fs::write(key_path, &key_pem).wrap_err("failed to write DERP key")?;
 
     // get der bytes for fingerprint calculation
     let der_bytes = certified_key.cert.der().to_vec();
     let cert_der = CertificateDer::from(der_bytes.clone());
-    let key_der = PrivateKeyDer::try_from(certified_key.key_pair.serialized_der().to_vec())
+    let key_der = PrivateKeyDer::try_from(certified_key.signing_key.serialized_der().to_vec())
         .map_err(|_| eyre!("failed to convert key to DER"))?;
 
     Ok((vec![cert_der], key_der, der_bytes))
@@ -158,11 +158,11 @@ fn compute_fingerprint(der: &[u8]) -> String {
     hasher.finalize().encode_hex()
 }
 
-/// tLS configuration for the listener
+/// options for running the embedded derp listener.
 pub struct DerpListenerConfig {
-    /// spawn the embedded derp listener in a background task
+    /// the address to bind the derp listener to.
     pub listen_addr: SocketAddr,
-    /// returns a join handle for the listener task
+    /// tls configuration for the listener.
     pub tls_config: Arc<ServerConfig>,
     /// the derp server instance to handle connections.
     pub server: EmbeddedDerpServer,
@@ -356,7 +356,7 @@ where
     stream.flush().await
 }
 
-/// tailscale clients when direct connections are not possible
+/// embedded derp relay server.
 ///
 /// handles derp protocol connections for relaying encrypted traffic between
 /// tailscale clients when direct connections are not possible.
@@ -623,7 +623,7 @@ struct ServerFrame {
     payload: Vec<u8>,
 }
 
-/// cryptographic operation failed
+/// errors that can occur in the derp server.
 #[derive(Debug, Error)]
 pub enum DerpServerError {
     /// i/o error during connection handling.

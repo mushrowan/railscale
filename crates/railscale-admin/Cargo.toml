@@ -9,8 +9,9 @@ license.workspace = true
 railscale-grants = { workspace = true }
 railscale-db = { workspace = true }
 railscale-types = { workspace = true }
-tonic = "0.12"
-prost = "0.13"
+tonic = "0.14"
+tonic-prost = "0.14"
+prost = "0.14"
 tokio = { workspace = true }
 tokio-stream = { version = "0.1", features = ["net"] }
 tower = "0.5"
@@ -26,4 +27,5 @@ hex = "0.4"
 hyper-util = { version = "0.1", features = ["tokio"] }
 
 [build-dependencies]
-tonic-build = "0.12"
+tonic-build = "0.14"
+tonic-prost-build = "0.14"

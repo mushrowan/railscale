@@ -28,11 +28,12 @@ axum = { version = "0.8", features = ["ws"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
-toml = "0.8"
+toml = "0.9"
 chrono = { workspace = true }
 ipnet = { workspace = true }
-reqwest = { version = "0.12", default-features = false, features = [
-  "rustls-tls",
+reqwest = { version = "0.13", default-features = false, features = [
+  "rustls",
+  "webpki-roots",
   "json",
 ] }
 
@@ -44,7 +45,7 @@ expand-tilde = "0.6"
 # OIDC
 openidconnect = { workspace = true }
 moka = { workspace = true }
-axum-extra = { version = "0.10", features = ["cookie"] }
+axum-extra = { version = "0.12", features = ["cookie"] }
 rand = "0.9"
 
 # Streaming
@@ -55,13 +56,13 @@ hyper = "1.8"
 # TS2021
 base64 = { workspace = true }
 hex = "0.4"
-tokio-tungstenite = "0.26"
+tokio-tungstenite = "0.28"
 snow = "0.10"
 tower = "0.5"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 crypto_box = "0.9"
-httparse = "1.9"
-rcgen = "0.13"
+httparse = "1.10"
+rcgen = "0.14"
 rustls = { version = "0.23", default-features = false, features = [
   "std",
   "ring",
@@ -74,7 +75,7 @@ tokio-rustls = "0.26"
 zstd = "0.13"
 
 # Admin gRPC
-tonic = "0.12"
+tonic = "0.14"
 tokio-stream = { version = "0.1", features = ["net"] }
 
 [dev-dependencies]
@@ -82,14 +83,14 @@ tower = "0.5"
 hyper = "1.8"
 chrono = { workspace = true }
 wiremock = "0.6"
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 bytes = { workspace = true }
 http-body-util = "0.1"
-reqwest = { version = "0.12", features = ["stream"] }
+reqwest = { version = "0.13", features = ["stream"] }
 futures-util = "0.3"
 tempfile = "3.24.0"
 base64 = { workspace = true }
-tokio-tungstenite = "0.26"
+tokio-tungstenite = "0.28"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 http = "1"
 anyhow = { workspace = true }
