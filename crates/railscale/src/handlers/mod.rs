@@ -1,5 +1,6 @@
 //! http handlers for railscale api endpoints.
 
+mod api_auth;
 mod bootstrap_dns;
 mod error;
 mod health;
@@ -12,6 +13,7 @@ mod ts2021;
 mod verify;
 mod version;
 
+pub use api_auth::{ApiAuthError, ApiKeyContext, AuthMethod};
 pub use bootstrap_dns::bootstrap_dns;
 pub use error::{ApiError, OptionExt, ResultExt};
 pub use health::health;
