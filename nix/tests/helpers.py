@@ -78,6 +78,9 @@ def wait_for_server():
     server.wait_for_unit("railscale.service")
     server.wait_for_open_port(8080)
     server.wait_for_open_port(3340)
+    # Wait for STUN server (UDP 3478)
+    # We can't use wait_for_open_port for UDP, so just give it time
+    time.sleep(1)
 
 
 def wait_for_network():

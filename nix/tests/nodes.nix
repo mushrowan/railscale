@@ -65,6 +65,7 @@ in
       environment.variables.RAILSCALE_DATABASE_URL = "sqlite:///var/lib/railscale/db.sqlite";
       systemd.services.railscale.environment.RAILSCALE_LOG_LEVEL = "debug";
       networking.firewall.allowedTCPPorts = [ 8080 ];
+      networking.firewall.allowedUDPPorts = [ 3478 ]; # STUN
     };
 
   client1 =
@@ -79,7 +80,10 @@ in
         TS_NO_LOGS_NO_SUPPORT = "1";
       };
 
-      environment.systemPackages = [ pkgs.tailscale ];
+      environment.systemPackages = [
+        pkgs.tailscale
+        pkgs.python3 # For STUN test
+      ];
     };
 
   client2 =
@@ -94,6 +98,9 @@ in
         TS_NO_LOGS_NO_SUPPORT = "1";
       };
 
-      environment.systemPackages = [ pkgs.tailscale ];
+      environment.systemPackages = [
+        pkgs.tailscale
+        pkgs.python3 # For STUN test
+      ];
     };
 }
