@@ -88,8 +88,9 @@ def wait_for_network():
     server.wait_for_unit("dhcpcd.service")
     client1.wait_for_unit("dhcpcd.service")
     client2.wait_for_unit("dhcpcd.service")
-    client1.wait_for_unit("tailscaled.service")
-    client2.wait_for_unit("tailscaled.service")
+    # Add timeout - tailscaled may hang on DNS bootstrap without proper DERP config
+    client1.wait_for_unit("tailscaled.service", timeout=10)
+    client2.wait_for_unit("tailscaled.service", timeout=10)
     time.sleep(3)  # Give network time to fully stabilize
 
 

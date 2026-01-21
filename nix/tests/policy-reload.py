@@ -67,7 +67,7 @@ with subtest("Update policy file"):
         ],
     }
     
-    server.succeed(f"echo '{json.dumps(new_policy)}' > /etc/railscale/policy.json")
+    server.succeed(f"echo '{json.dumps(new_policy)}' > /var/lib/railscale/policy.json")
     print("Updated policy file with new group and grant")
 
 with subtest("Reload policy via SIGHUP (systemctl reload)"):
@@ -129,7 +129,7 @@ with subtest("Update policy file again"):
         ],
     }
     
-    server.succeed(f"echo '{json.dumps(new_policy)}' > /etc/railscale/policy.json")
+    server.succeed(f"echo '{json.dumps(new_policy)}' > /var/lib/railscale/policy.json")
     print("Updated policy file with security group")
 
 with subtest("Reload policy via CLI"):
@@ -211,7 +211,7 @@ with subtest("Restore original policy"):
         ],
     }
     
-    server.succeed(f"echo '{json.dumps(original_policy)}' > /etc/railscale/policy.json")
+    server.succeed(f"echo '{json.dumps(original_policy)}' > /var/lib/railscale/policy.json")
     railscale("policy reload")
     
     output = railscale("policy get")

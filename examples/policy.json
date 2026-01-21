@@ -1,0 +1,18 @@
+{
+  "groups": {
+    "group:engineering": ["alice@example.com"],
+    "group:admins": ["admin@example.com"]
+  },
+  "grants": [
+    {
+      "src": ["autogroup:member"],
+      "dst": ["autogroup:member"],
+      "ip": ["*"]
+    },
+    {
+      "src": ["group:engineering"],
+      "dst": ["tag:server"],
+      "ip": ["*"]
+    }
+  ]
+}

@@ -7,14 +7,13 @@
   railscale,
 }:
 let
-  commonClientFlags = [ "--verbose=5" ];
-  railscaleModule = import ../module.nix;
+  common = import ./common.nix { inherit pkgs railscale; };
 in
 {
   server =
     { config, pkgs, ... }:
     {
-      imports = [ railscaleModule ];
+      imports = [ common.railscaleModule ];
 
       environment.systemPackages = [
         pkgs.sqlite
@@ -51,56 +50,18 @@ in
 
         settings = {
           server_url = "http://server:8080";
-
-          derp.embedded_derp = {
-            enabled = true;
-            advertise_host = "192.168.1.3";
-            advertise_port = 3340;
-          };
-        };
+        }
+        // common.embeddedDerpSettings;
 
         policyFile = "/etc/railscale/policy.json";
       };
 
       environment.variables.RAILSCALE_DATABASE_URL = "sqlite:///var/lib/railscale/db.sqlite";
       systemd.services.railscale.environment.RAILSCALE_LOG_LEVEL = "debug";
-      networking.firewall.allowedTCPPorts = [ 8080 ];
-      networking.firewall.allowedUDPPorts = [ 3478 ]; # STUN
+      networking.firewall = common.serverFirewall;
     };
 
-  client1 =
-    { config, pkgs, ... }:
-    {
-      services.tailscale = {
-        enable = true;
-        extraDaemonFlags = commonClientFlags;
-      };
-
-      systemd.services.tailscaled.environment = {
-        TS_NO_LOGS_NO_SUPPORT = "1";
-      };
-
-      environment.systemPackages = [
-        pkgs.tailscale
-        pkgs.python3 # For STUN test
-      ];
-    };
-
-  client2 =
-    { config, pkgs, ... }:
-    {
-      services.tailscale = {
-        enable = true;
-        extraDaemonFlags = commonClientFlags;
-      };
-
-      systemd.services.tailscaled.environment = {
-        TS_NO_LOGS_NO_SUPPORT = "1";
-      };
-
-      environment.systemPackages = [
-        pkgs.tailscale
-        pkgs.python3 # For STUN test
-      ];
-    };
+  # Clients use shared configuration with python3 for STUN tests
+  client1 = common.mkClient { extraPackages = [ pkgs.python3 ]; };
+  client2 = common.mkClient { extraPackages = [ pkgs.python3 ]; };
 }

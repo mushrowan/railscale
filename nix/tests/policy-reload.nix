@@ -9,10 +9,32 @@
   railscale,
 }:
 let
-  # Use a minimal node setup (just server, no clients needed)
-  railscaleModule = import ../module.nix;
+  common = import ./common.nix { inherit pkgs railscale; };
   helpers = ./helpers.py;
   testScript = ./policy-reload.py;
+
+  # Initial policy - copied to writable location at startup
+  initialPolicy = builtins.toJSON {
+    groups = {
+      "group:engineering" = [ "alice@example.com" ];
+      "group:admins" = [ "admin@example.com" ];
+    };
+    grants = [
+      {
+        src = [ "autogroup:member" ];
+        dst = [ "autogroup:member" ];
+        ip = [ "*" ];
+      }
+      {
+        src = [ "group:engineering" ];
+        dst = [ "tag:server" ];
+        ip = [ "*" ];
+      }
+    ];
+  };
+
+  # Writable policy path (not in /etc which is managed by NixOS)
+  policyPath = "/var/lib/railscale/policy.json";
 in
 pkgs.testers.runNixOSTest {
   name = "railscale-policy-reload";
@@ -21,29 +43,9 @@ pkgs.testers.runNixOSTest {
     server =
       { config, pkgs, ... }:
       {
-        imports = [ railscaleModule ];
+        imports = [ common.railscaleModule ];
 
         environment.systemPackages = [ pkgs.jq ];
-
-        # Initial policy
-        environment.etc."railscale/policy.json".text = builtins.toJSON {
-          groups = {
-            "group:engineering" = [ "alice@example.com" ];
-            "group:admins" = [ "admin@example.com" ];
-          };
-          grants = [
-            {
-              src = [ "autogroup:member" ];
-              dst = [ "autogroup:member" ];
-              ip = [ "*" ];
-            }
-            {
-              src = [ "group:engineering" ];
-              dst = [ "tag:server" ];
-              ip = [ "*" ];
-            }
-          ];
-        };
 
         services.railscale = {
           enable = true;
@@ -53,29 +55,28 @@ pkgs.testers.runNixOSTest {
 
           settings = {
             server_url = "http://server:8080";
-          };
+          }
+          // common.embeddedDerpSettings;
 
-          policyFile = "/etc/railscale/policy.json";
+          # Use writable path for policy (not environment.etc)
+          policyFile = policyPath;
         };
 
+        # Write initial policy before railscale starts
+        systemd.services.railscale.preStart = ''
+          mkdir -p $(dirname ${policyPath})
+          cat > ${policyPath} << 'EOF'
+          ${initialPolicy}
+          EOF
+        '';
+
         systemd.services.railscale.environment.RAILSCALE_LOG_LEVEL = "debug";
-        networking.firewall.allowedTCPPorts = [ 8080 ];
+        networking.firewall = common.serverFirewall;
       };
 
-    # Dummy clients for wait_for_network helper
-    client1 =
-      { config, pkgs, ... }:
-      {
-        services.tailscale.enable = true;
-        environment.systemPackages = [ pkgs.tailscale ];
-      };
-
-    client2 =
-      { config, pkgs, ... }:
-      {
-        services.tailscale.enable = true;
-        environment.systemPackages = [ pkgs.tailscale ];
-      };
+    # Use shared client configuration (needed for future policy effect tests)
+    client1 = common.mkClient { };
+    client2 = common.mkClient { };
   };
 
   testScript = ''
