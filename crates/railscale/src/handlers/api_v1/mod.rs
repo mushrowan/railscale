@@ -1,19 +1,23 @@
-//! headscale-compatible REST api v1 handlers
+//! headscale-compatible rest api v1 handlers.
 //!
 //! these endpoints match headscale's api paths for compatibility with
-//! existing tools and cli clients
+//! existing tools and CLI clients.
 
+mod nodes;
 mod users;
 
+pub use nodes::router as nodes_router;
 pub use users::router as users_router;
 
 use axum::Router;
 
 use crate::AppState;
 
-/// create the api v1 router with all endpoints
+/// create the api v1 router with all endpoints.
 pub fn router() -> Router<AppState> {
-    Router::new().nest("/user", users_router())
+    Router::new()
+        .nest("/user", users_router())
+        .nest("/node", nodes_router())
 }
 
 #[cfg(test)]
