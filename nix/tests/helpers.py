@@ -127,3 +127,57 @@ def get_node_by_name(name):
     """Get a node by its given_name"""
     nodes = railscale_json("nodes list")
     return next((n for n in nodes if n["given_name"] == name), None)
+
+
+# ============================================================================
+# REST API Helpers
+# ============================================================================
+
+def api_get(path, api_key):
+    """Make a GET request to the REST API"""
+    cmd = f"curl -s -H 'Authorization: Bearer {api_key}' '{SERVER_URL}{path}'"
+    output = server.succeed(cmd)
+    return json.loads(output) if output.strip() else {}
+
+
+def api_post(path, api_key, data=None):
+    """Make a POST request to the REST API"""
+    if data:
+        data_json = json.dumps(data)
+        cmd = f"curl -s -X POST -H 'Authorization: Bearer {api_key}' -H 'Content-Type: application/json' -d '{data_json}' '{SERVER_URL}{path}'"
+    else:
+        cmd = f"curl -s -X POST -H 'Authorization: Bearer {api_key}' '{SERVER_URL}{path}'"
+    output = server.succeed(cmd)
+    return json.loads(output) if output.strip() else {}
+
+
+def api_put(path, api_key, data):
+    """Make a PUT request to the REST API"""
+    data_json = json.dumps(data)
+    cmd = f"curl -s -X PUT -H 'Authorization: Bearer {api_key}' -H 'Content-Type: application/json' -d '{data_json}' '{SERVER_URL}{path}'"
+    output = server.succeed(cmd)
+    return json.loads(output) if output.strip() else {}
+
+
+def api_delete(path, api_key, data=None):
+    """Make a DELETE request to the REST API"""
+    if data:
+        data_json = json.dumps(data)
+        cmd = f"curl -s -X DELETE -H 'Authorization: Bearer {api_key}' -H 'Content-Type: application/json' -d '{data_json}' '{SERVER_URL}{path}'"
+    else:
+        cmd = f"curl -s -X DELETE -H 'Authorization: Bearer {api_key}' '{SERVER_URL}{path}'"
+    output = server.succeed(cmd)
+    return json.loads(output) if output.strip() else {}
+
+
+def api_request_status(path, method="GET", api_key=None):
+    """Get the HTTP status code for a request"""
+    auth = f"-H 'Authorization: Bearer {api_key}'" if api_key else ""
+    cmd = f"curl -s -o /dev/null -w '%{{http_code}}' -X {method} {auth} '{SERVER_URL}{path}'"
+    return int(server.succeed(cmd).strip())
+
+
+def create_api_key_for_user(user_id):
+    """Create an API key via CLI and return the full key"""
+    output = railscale(f"apikeys create -u {user_id}")
+    return extract_key(output)

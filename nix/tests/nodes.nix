@@ -18,6 +18,7 @@ in
       environment.systemPackages = [
         pkgs.sqlite
         pkgs.jq
+        pkgs.curl  # For REST API tests
       ];
 
       # Policy with groups for testing access control
@@ -50,6 +51,11 @@ in
 
         settings = {
           server_url = "http://server:8080";
+          api = {
+            enabled = true;
+            rate_limit_enabled = true;
+            rate_limit_per_minute = 100;
+          };
         }
         // common.embeddedDerpSettings;
 
