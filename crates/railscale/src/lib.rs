@@ -281,9 +281,12 @@ pub async fn create_app_with_policy_handle(
                 1000 // Default to 1 request/second if somehow 0
             };
 
+            // allow burst of ~10 seconds worth of requests, capped at 50
+            let burst_size = (requests_per_minute / 6).clamp(5, 50);
+
             let governor_conf = GovernorConfigBuilder::default()
                 .per_millisecond(replenish_interval_ms)
-                .burst_size(requests_per_minute.min(10)) // Allow small burst, max 10
+                .burst_size(burst_size)
                 .use_headers() // Add x-ratelimit-* headers
                 .finish()
                 .expect("valid governor config");

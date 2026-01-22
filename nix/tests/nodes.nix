@@ -53,8 +53,9 @@ in
           server_url = "http://server:8080";
           api = {
             enabled = true;
+            # Higher rate limit for testing (many requests in quick succession)
             rate_limit_enabled = true;
-            rate_limit_per_minute = 100;
+            rate_limit_per_minute = 1000;
           };
         }
         // common.embeddedDerpSettings;
