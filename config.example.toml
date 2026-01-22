@@ -263,6 +263,21 @@ global = [
 # method = "S256"  # or "Plain"
 
 # -----------------------------------------------------------------------------
+# REST API Configuration
+# -----------------------------------------------------------------------------
+#
+# The REST API provides Headscale-compatible endpoints for remote administration.
+# When enabled, API endpoints are available at /api/v1/* on the main HTTP server.
+#
+# SECURITY: The API is disabled by default. Enable only if you need remote access.
+# Always use HTTPS in production and rotate API keys regularly.
+
+[api]
+# Enable the REST API.
+# When false, /api/v1/* endpoints return 404.
+enabled = false
+
+# -----------------------------------------------------------------------------
 # Feature Flags
 # -----------------------------------------------------------------------------
 

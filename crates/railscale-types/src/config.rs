@@ -39,8 +39,11 @@ pub struct Config {
     /// oidc configuration (optional).
     pub oidc: Option<OidcConfig>,
 
-    /// performance tuning options.
+    /// rEST api configuration
     pub tuning: TuningConfig,
+
+    /// rest api configuration.
+    pub api: ApiConfig,
 
     /// enable taildrop file sharing.
     pub taildrop_enabled: bool,
@@ -63,6 +66,7 @@ impl Default for Config {
             dns: DnsConfig::default(),
             oidc: None,
             tuning: TuningConfig::default(),
+            api: ApiConfig::default(),
             taildrop_enabled: true,
             randomize_client_port: false,
         }
@@ -290,10 +294,10 @@ pub struct OidcConfig {
     /// oidc issuer url.
     pub issuer: String,
 
-    /// client secret (set directly or loaded from `client_secret_path`)
+    /// client id.
     pub client_id: String,
 
-    /// if set, the secret is loaded from this file at startup
+    /// client secret (set directly or loaded from `client_secret_path`).
     #[serde(default)]
     pub client_secret: String,
 
@@ -406,6 +410,24 @@ impl Default for TuningConfig {
     }
 }
 
+/// it is disabled by default and must be explicitly enabled
+///
+/// the rest api provides headscale-compatible endpoints for remote administration.
+/// it is disabled by default and must be explicitly enabled.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ApiConfig {
+    /// whether the rest api is enabled.
+    /// disabled by default for security.
+    pub enabled: bool,
+}
+
+impl Default for ApiConfig {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,6 +438,26 @@ mod tests {
         assert_eq!(config.database.db_type, "sqlite");
         assert!(config.prefix_v4.is_some());
         assert!(config.prefix_v6.is_some());
+        // api is disabled by default
+        assert!(!config.api.enabled);
+    }
+
+    #[test]
+    fn test_api_config_default_disabled() {
+        let api = ApiConfig::default();
+        assert!(!api.enabled, "API should be disabled by default");
+    }
+
+    #[test]
+    fn test_api_config_serde() {
+        let json = r#"{"enabled": true}"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert!(api.enabled);
+
+        // test with missing fields (should use default)
+        let json = r#"{}"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert!(!api.enabled);
     }
 
     #[test]
