@@ -16,6 +16,8 @@ pub enum ApiError {
     NotFound(String),
     /// bad request error (400).
     BadRequest(String),
+    /// conflict error (409).
+    Conflict(String),
 }
 
 impl ApiError {
@@ -38,6 +40,11 @@ impl ApiError {
     pub fn bad_request(msg: impl Into<String>) -> Self {
         Self::BadRequest(msg.into())
     }
+
+    /// create a conflict error (e.g., resource already exists).
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        Self::Conflict(msg.into())
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -47,6 +54,7 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
+            ApiError::Conflict(msg) => (StatusCode::CONFLICT, msg),
         };
         (status, message).into_response()
     }

@@ -1,6 +1,7 @@
 //! http handlers for railscale api endpoints.
 
 mod api_auth;
+pub mod api_v1;
 mod bootstrap_dns;
 mod error;
 mod health;

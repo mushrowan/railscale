@@ -248,7 +248,7 @@ pub async fn create_app_with_policy_handle(
         derp_map,
     };
 
-    let router = Router::new()
+    let mut router = Router::new()
         .route("/health", get(handlers::health))
         .route("/version", get(handlers::version))
         .route("/verify", post(handlers::verify))
@@ -264,8 +264,14 @@ pub async fn create_app_with_policy_handle(
             "/register/{registration_id}",
             get(handlers::oidc::register_redirect),
         )
-        .route("/oidc/callback", get(handlers::oidc::oidc_callback))
-        .with_state(state);
+        .route("/oidc/callback", get(handlers::oidc::oidc_callback));
+
+    // add rest api v1 routes if enabled
+    if state.config.api.enabled {
+        router = router.nest("/api/v1", handlers::api_v1::router());
+    }
+
+    let router = router.with_state(state);
 
     (router, handle)
 }
