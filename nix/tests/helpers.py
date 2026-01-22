@@ -137,7 +137,14 @@ def api_get(path, api_key):
     """Make a GET request to the REST API"""
     cmd = f"curl -s -H 'Authorization: Bearer {api_key}' '{SERVER_URL}{path}'"
     output = server.succeed(cmd)
-    return json.loads(output) if output.strip() else {}
+    if not output.strip():
+        return {}
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON from {path}: {e}")
+        print(f"Response was: {output[:500]}")
+        raise
 
 
 def api_post(path, api_key, data=None):
@@ -148,7 +155,14 @@ def api_post(path, api_key, data=None):
     else:
         cmd = f"curl -s -X POST -H 'Authorization: Bearer {api_key}' '{SERVER_URL}{path}'"
     output = server.succeed(cmd)
-    return json.loads(output) if output.strip() else {}
+    if not output.strip():
+        return {}
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON from POST {path}: {e}")
+        print(f"Response was: {output[:500]}")
+        raise
 
 
 def api_put(path, api_key, data):
@@ -156,7 +170,14 @@ def api_put(path, api_key, data):
     data_json = json.dumps(data)
     cmd = f"curl -s -X PUT -H 'Authorization: Bearer {api_key}' -H 'Content-Type: application/json' -d '{data_json}' '{SERVER_URL}{path}'"
     output = server.succeed(cmd)
-    return json.loads(output) if output.strip() else {}
+    if not output.strip():
+        return {}
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON from PUT {path}: {e}")
+        print(f"Response was: {output[:500]}")
+        raise
 
 
 def api_delete(path, api_key, data=None):
@@ -167,7 +188,14 @@ def api_delete(path, api_key, data=None):
     else:
         cmd = f"curl -s -X DELETE -H 'Authorization: Bearer {api_key}' '{SERVER_URL}{path}'"
     output = server.succeed(cmd)
-    return json.loads(output) if output.strip() else {}
+    if not output.strip():
+        return {}
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse JSON from DELETE {path}: {e}")
+        print(f"Response was: {output[:500]}")
+        raise
 
 
 def api_request_status(path, method="GET", api_key=None):
