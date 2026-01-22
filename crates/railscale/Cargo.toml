@@ -79,7 +79,9 @@ tonic = "0.14"
 tokio-stream = { version = "0.1", features = ["net"] }
 
 # REST API
-tower_governor = { version = "0.8", default-features = false, features = ["axum"] }
+tower_governor = { version = "0.8", default-features = false, features = [
+  "axum",
+] }
 
 [dev-dependencies]
 tower = "0.5"

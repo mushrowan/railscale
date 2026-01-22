@@ -177,7 +177,7 @@ def api_request_status(path, method="GET", api_key=None):
     return int(server.succeed(cmd).strip())
 
 
-def create_api_key_for_user(user_id):
+def create_api_key_for_user(user_id, name="test-api-key"):
     """Create an API key via CLI and return the full key"""
-    output = railscale(f"apikeys create -u {user_id}")
+    output = railscale(f"apikeys create -u {user_id} --name '{name}'")
     return extract_key(output)

@@ -18,7 +18,7 @@ in
       environment.systemPackages = [
         pkgs.sqlite
         pkgs.jq
-        pkgs.curl  # For REST API tests
+        pkgs.curl # For REST API tests
       ];
 
       # Policy with groups for testing access control
