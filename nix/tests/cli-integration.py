@@ -715,6 +715,26 @@ with subtest("REST API - Rate limit headers present"):
     print(f"Rate limit headers present: {has_ratelimit}")
     print(f"Headers: {headers[:500]}...")
 
+with subtest("REST API - Rate limiting blocks excessive requests"):
+    # Make rapid requests until we hit the rate limit (429)
+    # With 1000 req/min and burst ~166, we should hit it within ~200 requests
+    got_rate_limited = False
+    request_count = 0
+    max_requests = 300  # Should be enough to exhaust the burst
+    
+    for i in range(max_requests):
+        status = api_request_status("/api/v1/user", "GET", api_key)
+        request_count += 1
+        if status == 429:
+            got_rate_limited = True
+            print(f"Rate limited after {request_count} requests (429 Too Many Requests)")
+            break
+        elif status != 200:
+            print(f"Unexpected status {status} on request {request_count}")
+    
+    assert got_rate_limited, f"Should have been rate limited within {max_requests} requests"
+    print("Rate limiting is working correctly")
+
 print("\n" + "=" * 70)
 print("ALL TESTS PASSED!")
 print("=" * 70)
