@@ -277,6 +277,14 @@ global = [
 # When false, /api/v1/* endpoints return 404.
 enabled = false
 
+# Enable per-IP rate limiting for API requests.
+# Protects against abuse and brute-force attacks.
+rate_limit_enabled = true
+
+# Maximum requests per minute per IP address.
+# Only applies when rate_limit_enabled is true.
+rate_limit_per_minute = 100
+
 # -----------------------------------------------------------------------------
 # Feature Flags
 # -----------------------------------------------------------------------------

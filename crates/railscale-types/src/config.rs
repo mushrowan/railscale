@@ -39,7 +39,7 @@ pub struct Config {
     /// oidc configuration (optional).
     pub oidc: Option<OidcConfig>,
 
-    /// rEST api configuration
+    /// performance tuning options.
     pub tuning: TuningConfig,
 
     /// rest api configuration.
@@ -410,7 +410,7 @@ impl Default for TuningConfig {
     }
 }
 
-/// it is disabled by default and must be explicitly enabled
+/// rest api configuration.
 ///
 /// the rest api provides headscale-compatible endpoints for remote administration.
 /// it is disabled by default and must be explicitly enabled.
@@ -418,13 +418,31 @@ impl Default for TuningConfig {
 #[serde(default)]
 pub struct ApiConfig {
     /// whether the rest api is enabled.
-    /// disabled by default for security.
+    /// whether rate limiting is enabled for api requests
     pub enabled: bool,
+
+    /// whether rate limiting is enabled for api requests.
+    /// enabled by default to protect against abuse.
+    #[serde(default = "default_true")]
+    pub rate_limit_enabled: bool,
+
+    /// maximum requests per minute per ip address.
+    /// only applies when `rate_limit_enabled` is true.
+    #[serde(default = "default_rate_limit_per_minute")]
+    pub rate_limit_per_minute: u32,
+}
+
+fn default_rate_limit_per_minute() -> u32 {
+    100
 }
 
 impl Default for ApiConfig {
     fn default() -> Self {
-        Self { enabled: false }
+        Self {
+            enabled: false,
+            rate_limit_enabled: true,
+            rate_limit_per_minute: 100,
+        }
     }
 }
 
@@ -458,6 +476,36 @@ mod tests {
         let json = r#"{}"#;
         let api: ApiConfig = serde_json::from_str(json).unwrap();
         assert!(!api.enabled);
+    }
+
+    #[test]
+    fn test_api_config_rate_limiting_defaults() {
+        let api = ApiConfig::default();
+        // rate limiting should be enabled by default
+        assert!(
+            api.rate_limit_enabled,
+            "rate limiting should be enabled by default"
+        );
+        // default to 100 requests per minute
+        assert_eq!(api.rate_limit_per_minute, 100);
+    }
+
+    #[test]
+    fn test_api_config_rate_limiting_serde() {
+        // when not specified, rate_limit_enabled should default to true
+        let json = r#"{"enabled": true}"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert!(
+            api.rate_limit_enabled,
+            "rate_limit_enabled should default to true"
+        );
+        assert_eq!(api.rate_limit_per_minute, 100);
+
+        // can be explicitly disabled
+        let json = r#"{"enabled": true, "rate_limit_enabled": false, "rate_limit_per_minute": 50}"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert!(!api.rate_limit_enabled);
+        assert_eq!(api.rate_limit_per_minute, 50);
     }
 
     #[test]
