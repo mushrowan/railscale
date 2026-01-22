@@ -5,11 +5,13 @@
 
 mod api_keys;
 mod nodes;
+mod policy;
 mod preauth_keys;
 mod users;
 
 pub use api_keys::router as api_keys_router;
 pub use nodes::router as nodes_router;
+pub use policy::router as policy_router;
 pub use preauth_keys::router as preauth_keys_router;
 pub use users::router as users_router;
 
@@ -24,6 +26,7 @@ pub fn router() -> Router<AppState> {
         .nest("/node", nodes_router())
         .nest("/preauthkey", preauth_keys_router())
         .nest("/apikey", api_keys_router())
+        .nest("/policy", policy_router())
 }
 
 #[cfg(test)]
