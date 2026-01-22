@@ -605,8 +605,15 @@ impl ServeCommand {
         info!("Starting HTTP server on {}", addr);
 
         // start server
+        // use into_make_service_with_connect_info to provide socket address
+        // for rate limiting (tower_governor PeerIpKeyExtractor)
         let listener = TcpListener::bind(addr).await?;
-        axum::serve(listener, app).await.context("server error")?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .context("server error")?;
 
         Ok(())
     }
