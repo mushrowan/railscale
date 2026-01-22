@@ -43,6 +43,7 @@ use axum::{
     routing::{get, post},
 };
 use std::time::Duration;
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 
 use moka::sync::Cache;
 use railscale_db::{Database, IpAllocator, RailscaleDb};
@@ -268,7 +269,42 @@ pub async fn create_app_with_policy_handle(
 
     // add rest api v1 routes if enabled
     if state.config.api.enabled {
-        router = router.nest("/api/v1", handlers::api_v1::router());
+        let api_router = handlers::api_v1::router();
+
+        // apply rate limiting if enabled
+        if state.config.api.rate_limit_enabled {
+            // convert per-minute rate to per-second (gcra algorithm works in seconds)
+            let requests_per_minute = state.config.api.rate_limit_per_minute;
+            let replenish_interval_ms = if requests_per_minute > 0 {
+                60_000 / requests_per_minute as u64
+            } else {
+                1000 // Default to 1 request/second if somehow 0
+            };
+
+            let governor_conf = GovernorConfigBuilder::default()
+                .per_millisecond(replenish_interval_ms)
+                .burst_size(requests_per_minute.min(10)) // Allow small burst, max 10
+                .use_headers() // Add x-ratelimit-* headers
+                .finish()
+                .expect("valid governor config");
+
+            // start background task to clean up rate limiter storage
+            let governor_limiter = governor_conf.limiter().clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    governor_limiter.retain_recent();
+                }
+            });
+
+            router = router.nest(
+                "/api/v1",
+                api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
+            );
+        } else {
+            router = router.nest("/api/v1", api_router);
+        }
     }
 
     let router = router.with_state(state);
