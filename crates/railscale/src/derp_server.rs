@@ -388,6 +388,10 @@ pub struct EmbeddedDerpServer {
     crypto: DerpKeyMaterial,
     state: Arc<DerpServerState>,
     idle_timeout: Option<Duration>,
+    /// message rate limit in bytes per second (sent to clients in serverinfo).
+    bytes_per_second: u32,
+    /// message burst size in bytes (sent to clients in serverinfo).
+    bytes_burst: u32,
 }
 
 impl EmbeddedDerpServer {
@@ -402,6 +406,8 @@ impl EmbeddedDerpServer {
             crypto: DerpKeyMaterial::new(options.keypair),
             state: Arc::new(DerpServerState::default()),
             idle_timeout,
+            bytes_per_second: options.bytes_per_second,
+            bytes_burst: options.bytes_burst,
         }
     }
 
@@ -597,7 +603,17 @@ impl EmbeddedDerpServer {
         let client_public = PublicKey::from(*client_key);
         let cipher = SalsaBox::new(&client_public, &self.crypto.secret);
         let nonce = SalsaBox::generate_nonce(&mut OsRng);
-        let plaintext = serde_json::to_vec(&json!({ "Version": DERP_PROTOCOL_VERSION }))
+
+        // build serverinfo json with rate limiting parameters.
+        // tokenbucketbytespersecond/bytesburst are sent to clients who will
+        // self-enforce rate limiting (this is the native DERP protocol approach).
+        let server_info = json!({
+            "Version": DERP_PROTOCOL_VERSION,
+            "TokenBucketBytesPerSecond": self.bytes_per_second,
+            "TokenBucketBytesBurst": self.bytes_burst
+        });
+
+        let plaintext = serde_json::to_vec(&server_info)
             .map_err(|err| DerpServerError::Protocol(format!("invalid server info json: {err}")))?;
         let ciphertext = cipher
             .encrypt(&nonce, plaintext.as_ref())
@@ -617,20 +633,33 @@ pub struct EmbeddedDerpOptions {
     pub keypair: Keypair,
     /// idle timeout for connections in seconds. 0 to disable.
     pub idle_timeout_secs: u64,
+    /// message rate limit in bytes per second (sent to clients in serverinfo).
+    pub bytes_per_second: u32,
+    /// message burst size in bytes (sent to clients in serverinfo).
+    pub bytes_burst: u32,
 }
 
 impl EmbeddedDerpOptions {
-    /// set the idle timeout (0 to disable)
+    /// create new derp options with the given keypair.
     pub fn new(keypair: Keypair) -> Self {
         Self {
             keypair,
             idle_timeout_secs: railscale_types::DEFAULT_DERP_IDLE_TIMEOUT_SECS,
+            bytes_per_second: railscale_types::DEFAULT_DERP_BYTES_PER_SECOND,
+            bytes_burst: railscale_types::DEFAULT_DERP_BYTES_BURST,
         }
     }
 
     /// set the idle timeout (0 to disable).
     pub fn with_idle_timeout(mut self, secs: u64) -> Self {
         self.idle_timeout_secs = secs;
+        self
+    }
+
+    /// set the message rate limit parameters (sent to clients in serverinfo).
+    pub fn with_rate_limit(mut self, bytes_per_second: u32, bytes_burst: u32) -> Self {
+        self.bytes_per_second = bytes_per_second;
+        self.bytes_burst = bytes_burst;
         self
     }
 }

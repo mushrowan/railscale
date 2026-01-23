@@ -440,7 +440,11 @@ impl ServeCommand {
 
             let derp_server = derp_server::EmbeddedDerpServer::new(
                 EmbeddedDerpOptions::new(derp_keypair)
-                    .with_idle_timeout(config.derp.embedded_derp.idle_timeout_secs),
+                    .with_idle_timeout(config.derp.embedded_derp.idle_timeout_secs)
+                    .with_rate_limit(
+                        config.derp.embedded_derp.bytes_per_second,
+                        config.derp.embedded_derp.bytes_burst,
+                    ),
             );
             derp_server::spawn_derp_listener(DerpListenerConfig {
                 listen_addr: derp_listen_addr,
