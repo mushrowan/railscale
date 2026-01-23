@@ -237,8 +237,10 @@ pub async fn create_app_with_policy_handle(
         engine: Arc::clone(&grants),
     };
 
-    // create pending registrations cache with 15 minute ttl
+    // create pending registrations cache with 15 minute ttl and bounded size
+    // max 10,000 pending registrations to prevent memory exhaustion
     let pending_registrations = Cache::builder()
+        .max_capacity(10_000)
         .time_to_live(Duration::from_secs(900))
         .build();
 

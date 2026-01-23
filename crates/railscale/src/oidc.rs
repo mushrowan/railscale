@@ -128,8 +128,10 @@ impl AuthProviderOidc {
             .await
             .map_err(|e| format!("OIDC discovery failed: {}", e))?;
 
-        // create registration cache with 15 minute TTL
+        // create registration cache with 15 minute TTL and bounded size
+        // max 10,000 pending oidc registrations to prevent memory exhaustion
         let registration_cache = Cache::builder()
+            .max_capacity(10_000)
             .time_to_live(Duration::from_secs(900))
             .build();
 
