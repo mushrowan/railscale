@@ -1,58 +1,95 @@
-//! minimal stun server for nat traversal
+//! minimal stun server for nat traversal.
 //!
-//! implements RFC 8489 stun Binding Request/Response, which is all that
-//! tailscale clients need for endpoint discovery
+//! implements rfc 8489 stun binding request/response, which is all that
+//! tailscale clients need for endpoint discovery.
 //!
 //! # Fallback Strategy
 //!
-//! if this minimal implementation proves insufficient (e.g., needs FINGERPRINT,
-//! mESSAGE-INTEGRITY, or TURN extensions), switch to the `stun` crate from
-//! webrtc-rs rather than expanding this code
+//! if this minimal implementation proves insufficient (e.g., needs fingerprint,
+//! message-integrity, or turn extensions), switch to the `stun` crate from
+//! webrtc-rs rather than expanding this code.
 
-/// sTUN magic cookie (RFC 8489)
+/// stun magic cookie (rfc 8489).
 const MAGIC_COOKIE: [u8; 4] = [0x21, 0x12, 0xA4, 0x42];
 
-/// sTUN Binding Request message type
+/// stun binding request message type.
 const BINDING_REQUEST: u16 = 0x0001;
 
-/// sTUN Binding Success Response message type
+/// stun binding success response message type.
 const BINDING_SUCCESS: u16 = 0x0101;
 
-/// xor-mapped-address attribute type
+/// xor-mapped-address attribute type.
 const ATTR_XOR_MAPPED_ADDRESS: u16 = 0x0020;
 
-/// address family: ipv4
+/// address family: ipv4.
 const FAMILY_IPV4: u8 = 0x01;
 
-/// address family: ipv6
+/// address family: ipv6.
 const FAMILY_IPV6: u8 = 0x02;
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::num::NonZeroU32;
+use std::sync::Arc;
 
+use governor::{Quota, RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
 
-/// a running stun server handle
+/// type alias for the per-ip stun rate limiter.
+type IpRateLimiter = RateLimiter<IpAddr, DefaultKeyedStateStore<IpAddr>, DefaultClock>;
+
+/// a running stun server handle.
 pub struct StunServer {
-    /// the address the server is listening on
+    /// the address the server is listening on.
     pub local_addr: SocketAddr,
-    /// handle to the background task
+    /// handle to the background task.
     pub handle: JoinHandle<()>,
 }
 
-/// spawn a stun server listening on the given address
+/// configuration for the stun server.
+pub struct StunServerConfig {
+    /// address to bind to.
+    pub listen_addr: SocketAddr,
+    /// rate limit per ip (requests per minute). 0 to disable.
+    pub rate_per_minute: u32,
+}
+
+/// spawn a stun server listening on the given address.
 ///
-/// the server responds to stun Binding Requests with the client's
-/// reflexive transport address (their public IP:port as seen by this server)
+/// the server responds to stun binding requests with the client's
+/// reflexive transport address (their public IP:port as seen by this server).
 ///
 /// use `0.0.0.0:0` or `127.0.0.1:0` to bind to a random available port,
-/// then check `StunServer::local_addr` for the actual bound address
+/// then check `StunServer::local_addr` for the actual bound address.
 pub async fn spawn_stun_server(listen_addr: SocketAddr) -> std::io::Result<StunServer> {
-    let socket = UdpSocket::bind(listen_addr).await?;
+    spawn_stun_server_with_config(StunServerConfig {
+        listen_addr,
+        rate_per_minute: 0, // No rate limiting for backwards compatibility
+    })
+    .await
+}
+
+/// spawn a stun server with custom configuration.
+pub async fn spawn_stun_server_with_config(
+    config: StunServerConfig,
+) -> std::io::Result<StunServer> {
+    let socket = UdpSocket::bind(config.listen_addr).await?;
     let local_addr = socket.local_addr()?;
 
-    info!(%local_addr, "STUN server listening");
+    // create per-ip rate limiter if enabled
+    let rate_limiter: Option<Arc<IpRateLimiter>> = if config.rate_per_minute > 0 {
+        let quota = Quota::per_minute(NonZeroU32::new(config.rate_per_minute).expect("rate > 0"));
+        Some(Arc::new(RateLimiter::keyed(quota)))
+    } else {
+        None
+    };
+
+    info!(
+        %local_addr,
+        rate_per_minute = config.rate_per_minute,
+        "STUN server listening"
+    );
 
     let handle = tokio::spawn(async move {
         let mut buf = [0u8; 1024];
@@ -61,7 +98,7 @@ pub async fn spawn_stun_server(listen_addr: SocketAddr) -> std::io::Result<StunS
             let (len, peer_addr) = match socket.recv_from(&mut buf).await {
                 Ok(result) => result,
                 Err(e) => {
-                    error!("stun recv error: {}", e);
+                    error!("STUN recv error: {}", e);
                     continue;
                 }
             };
@@ -69,21 +106,29 @@ pub async fn spawn_stun_server(listen_addr: SocketAddr) -> std::io::Result<StunS
             let packet = &buf[..len];
 
             if !is_stun_binding_request(packet) {
-                debug!("Ignoring non-stun packet from {}", peer_addr);
+                debug!("Ignoring non-STUN packet from {}", peer_addr);
                 continue;
             }
 
+            // check rate limit per ip
+            if let Some(ref limiter) = rate_limiter {
+                if limiter.check_key(&peer_addr.ip()).is_err() {
+                    debug!("STUN request rate limited from {}", peer_addr);
+                    continue; // Silently drop - UDP, no response
+                }
+            }
+
             let Some(txid) = extract_transaction_id(packet) else {
-                debug!("Invalid stun packet from {}", peer_addr);
+                debug!("Invalid STUN packet from {}", peer_addr);
                 continue;
             };
 
             let response = build_binding_response(txid, peer_addr);
 
             if let Err(e) = socket.send_to(&response, peer_addr).await {
-                error!("stun send error to {}: {}", peer_addr, e);
+                error!("STUN send error to {}: {}", peer_addr, e);
             } else {
-                debug!("stun response sent to {}", peer_addr);
+                debug!("STUN response sent to {}", peer_addr);
             }
         }
     });
@@ -91,9 +136,9 @@ pub async fn spawn_stun_server(listen_addr: SocketAddr) -> std::io::Result<StunS
     Ok(StunServer { local_addr, handle })
 }
 
-/// extract the 12-byte transaction id from a stun request
+/// extract the 12-byte transaction id from a stun request.
 ///
-/// returns `None` if the packet is too short
+/// returns `none` if the packet is too short.
 pub fn extract_transaction_id(packet: &[u8]) -> Option<[u8; 12]> {
     if packet.len() < 20 {
         return None;
@@ -103,10 +148,10 @@ pub fn extract_transaction_id(packet: &[u8]) -> Option<[u8; 12]> {
     Some(txid)
 }
 
-/// build a stun Binding Success Response with XOR-MAPPED-ADDRESS
+/// build a stun binding success response with xor-mapped-address.
 ///
 /// the response tells the client their reflexive transport address
-/// (their public IP:port as seen by this server)
+/// (their public IP:port as seen by this server).
 pub fn build_binding_response(transaction_id: [u8; 12], addr: SocketAddr) -> Vec<u8> {
     let (family, xor_addr_bytes) = match addr {
         SocketAddr::V4(v4) => {
@@ -157,7 +202,7 @@ pub fn build_binding_response(transaction_id: [u8; 12], addr: SocketAddr) -> Vec
     response
 }
 
-/// check if a packet is a stun Binding Request
+/// check if a packet is a stun binding request.
 ///
 /// validates:
 /// - length >= 20 bytes (stun header size)
@@ -189,7 +234,7 @@ pub fn is_stun_binding_request(packet: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    /// build a valid stun Binding Request for testing
+    /// build a valid stun binding request for testing.
     fn make_binding_request(transaction_id: [u8; 12]) -> Vec<u8> {
         let mut packet = vec![
             0x00, 0x01, // Binding Request

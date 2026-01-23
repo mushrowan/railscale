@@ -468,9 +468,12 @@ impl ServeCommand {
                 let stun_listen_addr: SocketAddr =
                     stun_addr.parse().context("invalid STUN listen address")?;
 
-                crate::stun::spawn_stun_server(stun_listen_addr)
-                    .await
-                    .context("failed to spawn STUN server")?;
+                crate::stun::spawn_stun_server_with_config(crate::stun::StunServerConfig {
+                    listen_addr: stun_listen_addr,
+                    rate_per_minute: config.derp.embedded_derp.stun_rate_per_minute,
+                })
+                .await
+                .context("failed to spawn STUN server")?;
             }
         }
 
