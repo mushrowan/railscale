@@ -23,7 +23,8 @@ mod username;
 
 pub use api_key::{ApiKey, ApiKeySecret};
 pub use config::{
-    ApiConfig, Config, DatabaseConfig, EmbeddedDerpRuntime, OidcConfig, PkceConfig, PkceMethod,
+    ApiConfig, Config, DEFAULT_DERP_MAX_CONNECTIONS, DatabaseConfig, EmbeddedDerpConfig,
+    EmbeddedDerpRuntime, OidcConfig, PkceConfig, PkceMethod,
 };
 pub use error::Error;
 pub use keys::{DiscoKey, MachineKey, NodeKey};

@@ -444,6 +444,7 @@ impl ServeCommand {
                 listen_addr: derp_listen_addr,
                 tls_config: tls_assets.tls_config,
                 server: derp_server,
+                max_connections: config.derp.embedded_derp.max_connections,
             })
             .await
             .context("failed to spawn DERP listener")?;
@@ -641,10 +642,10 @@ fn extract_port(addr: &str) -> Option<u16> {
     addr.rsplit(':').next()?.parse().ok()
 }
 
-//try to parse as url
+/// redact password from a database connection string for safe logging.
 /// handles postgresql urls like: postgres://user:password@host/db
 fn redact_db_password(conn_str: &str) -> String {
-    // replace password with [REDACTED]
+    // try to parse as url
     if let Ok(mut url) = url::Url::parse(conn_str) {
         if url.password().is_some() {
             // replace password with [redacted]
@@ -732,6 +733,7 @@ cert_path = "/etc/railscale/derp_cert.pem"
 tls_key_path = "/etc/railscale/derp_tls_key.pem"
 private_key_path = "/etc/railscale/derp_private.key"
 stun_listen_addr = "0.0.0.0:3478"
+max_connections = 500
 
 [dns]
 magic_dns = true
@@ -774,6 +776,7 @@ map_keepalive_interval_secs = 30
         );
         assert!(config.derp.embedded_derp.enabled);
         assert_eq!(config.derp.embedded_derp.region_id, 900);
+        assert_eq!(config.derp.embedded_derp.max_connections, 500);
         assert_eq!(config.tuning.node_store_batch_size, 50);
     }
 
@@ -896,6 +899,11 @@ map_keepalive_interval_secs = 60
         assert_eq!(config.server_url, "http://127.0.0.1:8080");
         assert_eq!(config.listen_addr, "0.0.0.0:8080");
         assert_eq!(config.base_domain, "railscale.net");
+        // derp max_connections should use the default value
+        assert_eq!(
+            config.derp.embedded_derp.max_connections,
+            railscale_types::DEFAULT_DERP_MAX_CONNECTIONS
+        );
     }
 
     #[test]

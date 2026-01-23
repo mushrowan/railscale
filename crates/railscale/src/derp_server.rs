@@ -25,7 +25,7 @@ use tokio::io::{
     self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter, ReadBuf,
 };
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex, Semaphore, mpsc};
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
@@ -168,6 +168,8 @@ pub struct DerpListenerConfig {
     pub tls_config: Arc<ServerConfig>,
     /// the derp server instance to handle connections.
     pub server: EmbeddedDerpServer,
+    /// maximum concurrent connections. prevents resource exhaustion from too many clients.
+    pub max_connections: usize,
 }
 
 /// spawn the embedded derp listener in a background task.
@@ -177,18 +179,36 @@ pub async fn spawn_derp_listener(config: DerpListenerConfig) -> eyre::Result<Joi
     let listener = TcpListener::bind(config.listen_addr)
         .await
         .wrap_err("failed to bind DERP listener")?;
-    info!(addr = %config.listen_addr, "embedded DERP listening");
+    info!(
+        addr = %config.listen_addr,
+        max_connections = config.max_connections,
+        "embedded DERP listening"
+    );
 
     let acceptor = TlsAcceptor::from(config.tls_config);
     let derp_server = config.server.clone();
+    let connection_semaphore = Arc::new(Semaphore::new(config.max_connections));
 
     let handle = tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
+                    // permit is held for the duration of the connection
+                    let permit = match connection_semaphore.clone().try_acquire_owned() {
+                        Ok(permit) => permit,
+                        Err(_) => {
+                            debug!(peer = %addr, "DERP connection rejected: at capacity");
+                            // drop the stream to close the connection
+                            drop(stream);
+                            continue;
+                        }
+                    };
+
                     let acceptor = acceptor.clone();
                     let server = derp_server.clone();
                     tokio::spawn(async move {
+                        // permit is held for the duration of the connection
+                        let _permit = permit;
                         if let Err(err) = handle_derp_stream(stream, acceptor, server, addr).await {
                             debug!(?err, peer = %addr, "DERP connection ended with error");
                         }

@@ -121,6 +121,9 @@ impl Default for DerpConfig {
     }
 }
 
+/// default maximum concurrent derp connections.
+pub const DEFAULT_DERP_MAX_CONNECTIONS: usize = 1000;
+
 /// embedded derp server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -158,8 +161,12 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_derp_private_key_path")]
     pub private_key_path: PathBuf,
 
-    /// stun listen address.
+    /// maximum concurrent connections. Prevents resource exhaustion
     pub stun_listen_addr: Option<String>,
+
+    /// maximum concurrent connections. prevents resource exhaustion.
+    #[serde(default = "default_derp_max_connections")]
+    pub max_connections: usize,
 
     /// runtime details populated when the derp server starts.
     #[serde(skip)]
@@ -179,6 +186,7 @@ impl Default for EmbeddedDerpConfig {
             tls_key_path: default_derp_tls_key_path(),
             private_key_path: default_derp_private_key_path(),
             stun_listen_addr: Some("0.0.0.0:3478".to_string()),
+            max_connections: default_derp_max_connections(),
             runtime: None,
         }
     }
@@ -198,6 +206,10 @@ fn default_derp_tls_key_path() -> PathBuf {
 
 fn default_derp_private_key_path() -> PathBuf {
     PathBuf::from("/var/lib/railscale/derp_private.key")
+}
+
+fn default_derp_max_connections() -> usize {
+    DEFAULT_DERP_MAX_CONNECTIONS
 }
 
 /// runtime information for the embedded derp server populated at startup.
@@ -418,7 +430,7 @@ impl Default for TuningConfig {
 #[serde(default)]
 pub struct ApiConfig {
     /// whether the rest api is enabled.
-    /// whether rate limiting is enabled for api requests
+    /// disabled by default for security.
     pub enabled: bool,
 
     /// whether rate limiting is enabled for api requests.
