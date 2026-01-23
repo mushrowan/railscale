@@ -373,7 +373,7 @@ pub struct PkceConfig {
 impl Default for PkceConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             method: PkceMethod::S256,
         }
     }
@@ -596,7 +596,7 @@ mod tests {
     #[test]
     fn test_pkce_method_default() {
         let pkce = PkceConfig::default();
-        assert!(!pkce.enabled);
+        assert!(pkce.enabled); // PKCE enabled by default for security
         assert_eq!(pkce.method, PkceMethod::S256);
     }
 
