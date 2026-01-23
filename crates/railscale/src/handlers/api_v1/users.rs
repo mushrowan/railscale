@@ -107,6 +107,9 @@ async fn list_users(
     Ok(Json(ListUsersResponse { users }))
 }
 
+/// maximum length for display name (characters).
+const MAX_DISPLAY_NAME_LEN: usize = 255;
+
 /// create a new user.
 ///
 /// `POST /api/v1/user`
@@ -115,6 +118,16 @@ async fn create_user(
     State(state): State<AppState>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<CreateUserResponse>), ApiError> {
+    // validate display name length if provided
+    if let Some(ref display_name) = req.display_name {
+        if display_name.chars().count() > MAX_DISPLAY_NAME_LEN {
+            return Err(ApiError::bad_request(format!(
+                "display_name exceeds maximum length of {} characters",
+                MAX_DISPLAY_NAME_LEN
+            )));
+        }
+    }
+
     // username is already validated by serde deserialization
     let name = req.name.into_inner();
 
