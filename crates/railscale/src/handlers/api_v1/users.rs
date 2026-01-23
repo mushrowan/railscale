@@ -1,4 +1,4 @@
-//! user endpoints for api v1 (headscale-compatible)
+//! user endpoints for api v1 (headscale-compatible).
 //!
 //! endpoints:
 //! - `GET /api/v1/user` - list all users
@@ -19,14 +19,14 @@ use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
 use railscale_types::{User, UserId};
 
-/// response wrapper for list users endpoint
+/// response wrapper for list users endpoint.
 #[derive(Debug, Serialize)]
 pub struct ListUsersResponse {
     pub users: Vec<UserResponse>,
 }
 
-/// user representation in api responses
-/// uses snake_case to match headscale's json format
+/// user representation in api responses.
+/// uses snake_case to match headscale's json format.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserResponse {
     pub id: String,
@@ -56,7 +56,7 @@ impl From<User> for UserResponse {
     }
 }
 
-/// request body for creating a user
+/// request body for creating a user.
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
     pub name: String,
@@ -66,23 +66,23 @@ pub struct CreateUserRequest {
     pub email: Option<String>,
 }
 
-/// response for create user endpoint
+/// response for create user endpoint.
 #[derive(Debug, Serialize)]
 pub struct CreateUserResponse {
     pub user: UserResponse,
 }
 
-/// response for delete user endpoint
+/// response for delete user endpoint.
 #[derive(Debug, Serialize)]
 pub struct DeleteUserResponse {}
 
-/// response for rename user endpoint
+/// response for rename user endpoint.
 #[derive(Debug, Serialize)]
 pub struct RenameUserResponse {
     pub user: UserResponse,
 }
 
-/// create the users router
+/// create the users router.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_users).post(create_user))
@@ -90,7 +90,7 @@ pub fn router() -> Router<AppState> {
         .route("/{old_id}/rename/{new_name}", post(rename_user))
 }
 
-/// list all users
+/// list all users.
 ///
 /// `GET /api/v1/user`
 async fn list_users(
@@ -104,7 +104,7 @@ async fn list_users(
     Ok(Json(ListUsersResponse { users }))
 }
 
-/// create a new user
+/// create a new user.
 ///
 /// `POST /api/v1/user`
 async fn create_user(
@@ -112,6 +112,9 @@ async fn create_user(
     State(state): State<AppState>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<CreateUserResponse>), ApiError> {
+    // validate username
+    super::validation::validate_username(&req.name)?;
+
     // check if user already exists
     if state
         .db
@@ -144,7 +147,7 @@ async fn create_user(
     ))
 }
 
-/// delete a user
+/// delete a user.
 ///
 /// `DELETE /api/v1/user/{id}`
 async fn delete_user(
@@ -174,7 +177,7 @@ async fn delete_user(
     Ok(Json(DeleteUserResponse {}))
 }
 
-/// rename a user
+/// rename a user.
 ///
 /// `POST /api/v1/user/{old_id}/rename/{new_name}`
 async fn rename_user(
@@ -182,6 +185,9 @@ async fn rename_user(
     State(state): State<AppState>,
     Path((old_id, new_name)): Path<(u64, String)>,
 ) -> Result<Json<RenameUserResponse>, ApiError> {
+    // validate new username
+    super::validation::validate_username(&new_name)?;
+
     let user_id = UserId(old_id);
 
     // get existing user

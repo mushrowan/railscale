@@ -324,8 +324,8 @@ pub async fn register(
     body: Bytes,
 ) -> Result<Json<RegisterResponse>, ApiError> {
     // parse json manually since tailscale client doesn't send content-type header
-    let req: RegisterRequest =
-        serde_json::from_slice(&body).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let req: RegisterRequest = serde_json::from_slice(&body)
+        .map_err(|_| ApiError::bad_request("invalid JSON request body"))?;
 
     // machine key must come from noise context for ts2021
     let machine_key = match machine_key_ctx {

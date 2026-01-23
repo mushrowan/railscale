@@ -4,11 +4,12 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use tracing::error;
 
 /// api error type for handler responses.
 #[derive(Debug)]
 pub enum ApiError {
-    /// internal server error (500).
+    /// internal server error (500). The string is logged but NOT exposed to clients.
     Internal(String),
     /// unauthorized error (401).
     Unauthorized(String),
@@ -22,7 +23,9 @@ pub enum ApiError {
 
 impl ApiError {
     /// create an internal server error from any error type.
+    /// the error is logged but a generic message is returned to clients.
     pub fn internal(e: impl std::fmt::Display) -> Self {
+        error!(error = %e, "Internal server error");
         Self::Internal(e.to_string())
     }
 
@@ -50,7 +53,11 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let (status, message) = match self {
-            ApiError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            // don't expose internal error details to clients
+            ApiError::Internal(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal server error".to_string(),
+            ),
             ApiError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),

@@ -44,6 +44,8 @@ const FRAME_PONG: u8 = 0x13;
 const DERP_MAGIC: &[u8; 8] = b"DERP\xF0\x9F\x94\x91";
 const DERP_PROTOCOL_VERSION: u32 = 2;
 const MAX_HTTP_REQUEST_SIZE: usize = 8 * 1024;
+/// maximum derp frame payload size (64kb). prevents memory exhaustion from malicious frames.
+const MAX_FRAME_PAYLOAD_SIZE: usize = 64 * 1024;
 
 /// tls assets used by the embedded derp listener.
 pub struct DerpTlsAssets {
@@ -650,6 +652,18 @@ where
     let mut header = [0u8; 5];
     reader.read_exact(&mut header).await?;
     let len = u32::from_be_bytes([header[1], header[2], header[3], header[4]]) as usize;
+
+    // reject frames larger than max_frame_payload_size to prevent memory exhaustion
+    if len > MAX_FRAME_PAYLOAD_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "DERP frame too large: {} bytes (max {})",
+                len, MAX_FRAME_PAYLOAD_SIZE
+            ),
+        ));
+    }
+
     let mut payload = vec![0u8; len];
     reader.read_exact(&mut payload).await?;
     Ok((header[0], payload))

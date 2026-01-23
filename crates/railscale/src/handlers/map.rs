@@ -54,8 +54,8 @@ pub async fn map(
     body: Bytes,
 ) -> Result<impl IntoResponse, super::ApiError> {
     // parse json manually since tailscale client doesn't send content-type header
-    let req: MapRequest =
-        serde_json::from_slice(&body).map_err(|e| super::ApiError::bad_request(e.to_string()))?;
+    let req: MapRequest = serde_json::from_slice(&body)
+        .map_err(|_| super::ApiError::bad_request("invalid JSON request body"))?;
     // validate the node exists
     let mut node = state
         .db

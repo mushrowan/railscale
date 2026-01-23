@@ -152,7 +152,7 @@ async fn create_api_key(
     let expiration = if let Some(exp_str) = req.expiration {
         Some(
             chrono::DateTime::parse_from_rfc3339(&exp_str)
-                .map_err(|e| ApiError::bad_request(format!("invalid expiration format: {}", e)))?
+                .map_err(|_| ApiError::bad_request("invalid expiration format, expected RFC3339"))?
                 .with_timezone(&Utc),
         )
     } else {

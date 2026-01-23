@@ -1,4 +1,4 @@
-//! node endpoints for api v1 (headscale-compatible)
+//! node endpoints for api v1 (headscale-compatible).
 //!
 //! endpoints:
 //! - `GET /api/v1/node` - list all nodes
@@ -23,19 +23,19 @@ use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
 use railscale_types::{Node, NodeId};
 
-/// response wrapper for list nodes endpoint
+/// response wrapper for list nodes endpoint.
 #[derive(Debug, Serialize)]
 pub struct ListNodesResponse {
     pub nodes: Vec<NodeResponse>,
 }
 
-/// response wrapper for single node endpoint
+/// response wrapper for single node endpoint.
 #[derive(Debug, Serialize)]
 pub struct GetNodeResponse {
     pub node: NodeResponse,
 }
 
-/// node representation in api responses
+/// node representation in api responses.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeResponse {
     pub id: String,
@@ -89,49 +89,49 @@ impl From<Node> for NodeResponse {
     }
 }
 
-/// response for delete/expire operations
+/// response for delete/expire operations.
 #[derive(Debug, Serialize)]
 pub struct EmptyResponse {}
 
-/// request for expire endpoint
+/// request for expire endpoint.
 #[derive(Debug, Deserialize)]
 pub struct ExpireNodeRequest {
-    /// optional expiry time; if not provided, expires immediately
+    /// optional expiry time; if not provided, expires immediately.
     #[serde(default)]
     pub expiry: Option<String>,
 }
 
-/// request for setting tags
+/// request for setting tags.
 #[derive(Debug, Deserialize)]
 pub struct SetTagsRequest {
     pub tags: Vec<String>,
 }
 
-/// response for set tags endpoint
+/// response for set tags endpoint.
 #[derive(Debug, Serialize)]
 pub struct SetTagsResponse {
     pub node: NodeResponse,
 }
 
-/// request for setting approved routes
+/// request for setting approved routes.
 #[derive(Debug, Deserialize)]
 pub struct SetRoutesRequest {
     pub routes: Vec<String>,
 }
 
-/// response for set routes endpoint
+/// response for set routes endpoint.
 #[derive(Debug, Serialize)]
 pub struct SetRoutesResponse {
     pub node: NodeResponse,
 }
 
-/// response for rename endpoint
+/// response for rename endpoint.
 #[derive(Debug, Serialize)]
 pub struct RenameNodeResponse {
     pub node: NodeResponse,
 }
 
-/// create the nodes router
+/// create the nodes router.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_nodes))
@@ -142,7 +142,7 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/routes", post(set_routes))
 }
 
-/// list all nodes
+/// list all nodes.
 ///
 /// `GET /api/v1/node`
 async fn list_nodes(
@@ -156,7 +156,7 @@ async fn list_nodes(
     Ok(Json(ListNodesResponse { nodes }))
 }
 
-/// get a specific node
+/// get a specific node.
 ///
 /// `GET /api/v1/node/{id}`
 async fn get_node(
@@ -178,7 +178,7 @@ async fn get_node(
     }))
 }
 
-/// delete a node
+/// delete a node.
 ///
 /// `DELETE /api/v1/node/{id}`
 async fn delete_node(
@@ -211,7 +211,7 @@ async fn delete_node(
     Ok(Json(EmptyResponse {}))
 }
 
-/// expire a node
+/// expire a node.
 ///
 /// `POST /api/v1/node/{id}/expire`
 async fn expire_node(
@@ -253,7 +253,7 @@ async fn expire_node(
     }))
 }
 
-/// rename a node
+/// rename a node.
 ///
 /// `POST /api/v1/node/{id}/rename/{new_name}`
 async fn rename_node(
@@ -261,6 +261,9 @@ async fn rename_node(
     State(state): State<AppState>,
     Path((id, new_name)): Path<(u64, String)>,
 ) -> Result<Json<RenameNodeResponse>, ApiError> {
+    // validate new node name
+    super::validation::validate_node_name(&new_name)?;
+
     let node_id = NodeId(id);
 
     let mut node = state
@@ -285,12 +288,12 @@ async fn rename_node(
     }))
 }
 
-/// set node tags
+/// set node tags.
 ///
 /// `POST /api/v1/node/{id}/tags`
 ///
 /// NOTE: once a node has tags, it becomes a "tagged node" and tags
-/// cannot be completely removed (tags-as-identity model)
+/// cannot be completely removed (tags-as-identity model).
 async fn set_tags(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
@@ -306,21 +309,8 @@ async fn set_tags(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    // validate tags
-    for tag in &req.tags {
-        if !tag.starts_with("tag:") {
-            return Err(ApiError::bad_request(format!(
-                "tag '{}' must start with 'tag:'",
-                tag
-            )));
-        }
-        if tag.to_lowercase() != *tag {
-            return Err(ApiError::bad_request(format!(
-                "tag '{}' must be lowercase",
-                tag
-            )));
-        }
-    }
+    // validate tags (format, length, character set, count)
+    super::validation::validate_tags(&req.tags)?;
 
     // once tagged, cannot remove all tags (tags-as-identity)
     if !node.tags.is_empty() && req.tags.is_empty() {
@@ -344,7 +334,7 @@ async fn set_tags(
     }))
 }
 
-/// set approved routes for a node
+/// set approved routes for a node.
 ///
 /// `POST /api/v1/node/{id}/routes`
 async fn set_routes(

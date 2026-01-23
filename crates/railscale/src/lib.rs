@@ -40,6 +40,7 @@ use std::sync::Arc;
 
 use axum::{
     Router,
+    extract::DefaultBodyLimit,
     routing::{get, post},
 };
 use std::time::Duration;
@@ -159,6 +160,13 @@ pub async fn load_or_generate_noise_keypair(path: &Path) -> std::io::Result<Keyp
         file.write_all(&keypair.public).await?;
         file.sync_all().await?;
 
+        // set restrictive permissions on unix (owner read/write only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+        }
+
         Ok(keypair)
     }
 }
@@ -269,7 +277,8 @@ pub async fn create_app_with_policy_handle(
 
     // add rest api v1 routes if enabled
     if state.config.api.enabled {
-        let api_router = handlers::api_v1::router();
+        // apply body size limit (64kb) to prevent memory exhaustion
+        let api_router = handlers::api_v1::router().layer(DefaultBodyLimit::max(64 * 1024));
 
         // apply rate limiting if enabled
         if state.config.api.rate_limit_enabled {

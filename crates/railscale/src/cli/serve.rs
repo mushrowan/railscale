@@ -334,7 +334,10 @@ impl ServeCommand {
 
         // load configuration
         let config = self.into_config()?;
-        info!("Database: {}", config.database.connection_string);
+        info!(
+            "Database: {}",
+            redact_db_password(&config.database.connection_string)
+        );
         info!("Listen address: {}", config.listen_addr);
         info!("Server URL: {}", config.server_url);
 
@@ -638,10 +641,25 @@ fn extract_port(addr: &str) -> Option<u16> {
     addr.rsplit(':').next()?.parse().ok()
 }
 
+//try to parse as url
+/// handles postgresql urls like: postgres://user:password@host/db
+fn redact_db_password(conn_str: &str) -> String {
+    // replace password with [REDACTED]
+    if let Ok(mut url) = url::Url::parse(conn_str) {
+        if url.password().is_some() {
+            // replace password with [redacted]
+            let _ = url.set_password(Some("[REDACTED]"));
+            return url.to_string();
+        }
+    }
+    // if not a url or no password, return as-is (e.g., sqlite paths)
+    conn_str.to_string()
+}
+
 /// parse a database url into databaseconfig.
 fn parse_database_url(db_url: &str) -> Result<railscale_types::DatabaseConfig> {
-    let parsed =
-        url::Url::parse(db_url).with_context(|| format!("invalid database URL: {}", db_url))?;
+    let parsed = url::Url::parse(db_url)
+        .with_context(|| format!("invalid database URL: {}", redact_db_password(db_url)))?;
 
     match parsed.scheme() {
         "postgres" | "postgresql" => Ok(railscale_types::DatabaseConfig {

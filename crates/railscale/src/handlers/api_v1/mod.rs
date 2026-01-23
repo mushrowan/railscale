@@ -8,6 +8,7 @@ mod nodes;
 mod policy;
 mod preauth_keys;
 mod users;
+mod validation;
 
 pub use api_keys::router as api_keys_router;
 pub use nodes::router as nodes_router;

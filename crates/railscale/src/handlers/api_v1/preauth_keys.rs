@@ -1,4 +1,4 @@
-//! preAuth key endpoints for api v1 (headscale-compatible)
+//! preauth key endpoints for api v1 (headscale-compatible).
 //!
 //! endpoints:
 //! - `GET /api/v1/preauthkey` - list all preauth keys
@@ -20,14 +20,14 @@ use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
 use railscale_types::{PreAuthKey, UserId};
 
-/// response wrapper for list preauth keys endpoint
+/// response wrapper for list preauth keys endpoint.
 #[derive(Debug, Serialize)]
 pub struct ListPreAuthKeysResponse {
     #[serde(rename = "preAuthKeys")]
     pub preauth_keys: Vec<PreAuthKeyResponse>,
 }
 
-/// preauthkey representation in api responses
+/// preauthkey representation in api responses.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PreAuthKeyResponse {
     pub id: String,
@@ -58,55 +58,55 @@ impl From<PreAuthKey> for PreAuthKeyResponse {
     }
 }
 
-/// request for creating a preauth key
+/// request for creating a preauth key.
 #[derive(Debug, Deserialize)]
 pub struct CreatePreAuthKeyRequest {
-    /// user id to associate the key with
+    /// user id to associate the key with.
     pub user: u64,
-    /// whether the key can be used multiple times
+    /// whether the key can be used multiple times.
     #[serde(default)]
     pub reusable: bool,
-    /// whether nodes registered with this key are ephemeral
+    /// whether nodes registered with this key are ephemeral.
     #[serde(default)]
     pub ephemeral: bool,
-    /// expiration time in RFC3339 format
+    /// expiration time in rfc3339 format.
     #[serde(default)]
     pub expiration: Option<String>,
-    /// tags to apply to nodes registered with this key
+    /// tags to apply to nodes registered with this key.
     #[serde(default, rename = "aclTags")]
     pub acl_tags: Vec<String>,
 }
 
-/// response for create preauth key endpoint
+/// response for create preauth key endpoint.
 #[derive(Debug, Serialize)]
 pub struct CreatePreAuthKeyResponse {
     #[serde(rename = "preAuthKey")]
     pub preauth_key: PreAuthKeyResponse,
 }
 
-/// request for expire preauth key endpoint
+/// request for expire preauth key endpoint.
 #[derive(Debug, Deserialize)]
 pub struct ExpirePreAuthKeyRequest {
-    /// iD of the key to expire
+    /// id of the key to expire.
     pub id: u64,
 }
 
-/// response for expire preauth key endpoint
+/// response for expire preauth key endpoint.
 #[derive(Debug, Serialize)]
 pub struct ExpirePreAuthKeyResponse {}
 
-/// request for delete preauth key endpoint
+/// request for delete preauth key endpoint.
 #[derive(Debug, Deserialize)]
 pub struct DeletePreAuthKeyRequest {
-    /// iD of the key to delete
+    /// id of the key to delete.
     pub id: u64,
 }
 
-/// response for delete preauth key endpoint
+/// response for delete preauth key endpoint.
 #[derive(Debug, Serialize)]
 pub struct DeletePreAuthKeyResponse {}
 
-/// create the preauth keys router
+/// create the preauth keys router.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
@@ -118,7 +118,7 @@ pub fn router() -> Router<AppState> {
         .route("/expire", post(expire_preauth_key))
 }
 
-/// list all preauth keys
+/// list all preauth keys.
 ///
 /// `GET /api/v1/preauthkey`
 async fn list_preauth_keys(
@@ -137,7 +137,7 @@ async fn list_preauth_keys(
     Ok(Json(ListPreAuthKeysResponse { preauth_keys }))
 }
 
-/// create a new preauth key
+/// create a new preauth key.
 ///
 /// `POST /api/v1/preauthkey`
 async fn create_preauth_key(
@@ -177,7 +177,7 @@ async fn create_preauth_key(
     let expiration = if let Some(exp_str) = req.expiration {
         Some(
             chrono::DateTime::parse_from_rfc3339(&exp_str)
-                .map_err(|e| ApiError::bad_request(format!("invalid expiration format: {}", e)))?
+                .map_err(|_| ApiError::bad_request("invalid expiration format, expected RFC3339"))?
                 .with_timezone(&Utc),
         )
     } else {
@@ -207,7 +207,7 @@ async fn create_preauth_key(
     ))
 }
 
-/// expire a preauth key
+/// expire a preauth key.
 ///
 /// `POST /api/v1/preauthkey/expire`
 async fn expire_preauth_key(
@@ -224,7 +224,7 @@ async fn expire_preauth_key(
     Ok(Json(ExpirePreAuthKeyResponse {}))
 }
 
-/// delete a preauth key
+/// delete a preauth key.
 ///
 /// `DELETE /api/v1/preauthkey`
 async fn delete_preauth_key(
@@ -241,7 +241,7 @@ async fn delete_preauth_key(
     Ok(Json(DeletePreAuthKeyResponse {}))
 }
 
-/// generate a random preauth key string
+/// generate a random preauth key string.
 fn generate_preauth_key() -> String {
     use rand::Rng;
     let mut rng = rand::rng();
