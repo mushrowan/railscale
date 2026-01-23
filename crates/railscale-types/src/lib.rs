@@ -10,6 +10,7 @@
 
 mod api_key;
 mod config;
+mod email;
 mod error;
 mod keys;
 mod node;
@@ -27,6 +28,7 @@ pub use config::{
     ApiConfig, Config, DEFAULT_DERP_MAX_CONNECTIONS, DatabaseConfig, EmbeddedDerpConfig,
     EmbeddedDerpRuntime, OidcConfig, PkceConfig, PkceMethod,
 };
+pub use email::{Email, EmailError};
 pub use error::Error;
 pub use keys::{DiscoKey, MachineKey, NodeKey};
 pub use node::{HostInfo, NetInfo, Node, NodeId, NodeView, RegisterMethod};

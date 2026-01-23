@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
-use railscale_types::{User, UserId, Username};
+use railscale_types::{Email, User, UserId, Username};
 
 /// response wrapper for list users endpoint.
 #[derive(Debug, Serialize)]
@@ -56,7 +56,7 @@ impl From<User> for UserResponse {
     }
 }
 
-/// username must be 1-63 lowercase alphanumeric chars with hyphens
+/// request body for creating a user.
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
     /// username must be 1-63 lowercase alphanumeric chars with hyphens.
@@ -64,8 +64,9 @@ pub struct CreateUserRequest {
     pub name: Username,
     #[serde(default)]
     pub display_name: Option<String>,
+    /// email address (validated automatically via serde deserialization).
     #[serde(default)]
-    pub email: Option<String>,
+    pub email: Option<Email>,
 }
 
 /// response for create user endpoint.
@@ -133,7 +134,7 @@ async fn create_user(
 
     let mut user = User::new(UserId(0), name);
     user.display_name = req.display_name;
-    user.email = req.email;
+    user.email = req.email.map(|e| e.into_inner());
 
     let user = state
         .db
@@ -298,6 +299,18 @@ mod tests {
         let req: CreateUserRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.name, "bob");
         assert_eq!(req.display_name.as_deref(), Some("Bob Smith"));
-        assert_eq!(req.email.as_deref(), Some("bob@example.com"));
+        assert_eq!(
+            req.email.as_ref().map(|e| e.as_str()),
+            Some("bob@example.com")
+        );
+    }
+
+    #[test]
+    fn test_create_user_request_rejects_invalid_email() {
+        let json = r#"{"name": "bob", "email": "not-an-email"}"#;
+        let result: Result<CreateUserRequest, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid email format"));
     }
 }
