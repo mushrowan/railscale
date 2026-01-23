@@ -121,11 +121,23 @@ impl Default for DerpConfig {
     }
 }
 
-/// default idle timeout for derp connections (5 minutes)
+/// default maximum concurrent derp connections.
 pub const DEFAULT_DERP_MAX_CONNECTIONS: usize = 1000;
 
-/// default idle timeout for derp connections (5 minutes).
+/// default derp message rate limit (bytes per second). 100KB/s sustained
 pub const DEFAULT_DERP_IDLE_TIMEOUT_SECS: u64 = 300;
+
+/// default derp message burst size (bytes). 200KB burst
+pub const DEFAULT_DERP_BYTES_PER_SECOND: u32 = 102400;
+
+/// default derp connection rate limit (connections per minute per IP)
+pub const DEFAULT_DERP_BYTES_BURST: u32 = 204800;
+
+/// default stun rate limit (requests per minute per IP)
+pub const DEFAULT_DERP_CONNECTION_RATE_PER_MINUTE: u32 = 10;
+
+/// default stun rate limit (requests per minute per ip).
+pub const DEFAULT_STUN_RATE_PER_MINUTE: u32 = 60;
 
 /// embedded derp server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,12 +183,38 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_derp_max_connections")]
     pub max_connections: usize,
 
-    /// default: 300 seconds (5 minutes)
+    /// idle connection timeout in seconds.
     /// connections with no activity for this long are closed.
     /// set to 0 to disable (not recommended).
     /// default: 300 seconds (5 minutes).
     #[serde(default = "default_derp_idle_timeout")]
     pub idle_timeout_secs: u64,
+
+    /// message rate limit in bytes per second (client-enforced via serverinfo).
+    /// sent to clients in the derp handshake; clients self-rate-limit.
+    /// default: 102400 (100kb/s sustained).
+    #[serde(default = "default_derp_bytes_per_second")]
+    pub bytes_per_second: u32,
+
+    /// message burst size in bytes (client-enforced via serverinfo).
+    /// maximum bytes a client can send in a burst before rate limiting kicks in.
+    /// default: 204800 (200kb burst).
+    #[serde(default = "default_derp_bytes_burst")]
+    pub bytes_burst: u32,
+
+    /// default: 10 connections/minute per IP
+    /// server-enforced to prevent connection floods from a single ip.
+    /// set to 0 to disable.
+    /// default: 10 connections/minute per ip.
+    #[serde(default = "default_derp_connection_rate_per_minute")]
+    pub connection_rate_per_minute: u32,
+
+    /// default: 60 requests/minute per IP
+    /// server-enforced to prevent stun abuse from a single ip.
+    /// set to 0 to disable.
+    /// default: 60 requests/minute per ip.
+    #[serde(default = "default_stun_rate_per_minute")]
+    pub stun_rate_per_minute: u32,
 
     /// runtime details populated when the derp server starts.
     #[serde(skip)]
@@ -198,6 +236,10 @@ impl Default for EmbeddedDerpConfig {
             stun_listen_addr: Some("0.0.0.0:3478".to_string()),
             max_connections: default_derp_max_connections(),
             idle_timeout_secs: default_derp_idle_timeout(),
+            bytes_per_second: default_derp_bytes_per_second(),
+            bytes_burst: default_derp_bytes_burst(),
+            connection_rate_per_minute: default_derp_connection_rate_per_minute(),
+            stun_rate_per_minute: default_stun_rate_per_minute(),
             runtime: None,
         }
     }
@@ -225,6 +267,22 @@ fn default_derp_max_connections() -> usize {
 
 fn default_derp_idle_timeout() -> u64 {
     DEFAULT_DERP_IDLE_TIMEOUT_SECS
+}
+
+fn default_derp_bytes_per_second() -> u32 {
+    DEFAULT_DERP_BYTES_PER_SECOND
+}
+
+fn default_derp_bytes_burst() -> u32 {
+    DEFAULT_DERP_BYTES_BURST
+}
+
+fn default_derp_connection_rate_per_minute() -> u32 {
+    DEFAULT_DERP_CONNECTION_RATE_PER_MINUTE
+}
+
+fn default_stun_rate_per_minute() -> u32 {
+    DEFAULT_STUN_RATE_PER_MINUTE
 }
 
 /// runtime information for the embedded derp server populated at startup.
@@ -585,6 +643,34 @@ mod tests {
         assert!(api.trusted_proxies.contains(&"127.0.0.1".to_string()));
         assert!(api.trusted_proxies.contains(&"10.0.0.0/8".to_string()));
         assert!(api.trusted_proxies.contains(&"::1".to_string()));
+    }
+
+    #[test]
+    fn test_derp_rate_limit_defaults() {
+        let derp = EmbeddedDerpConfig::default();
+        // connection rate limiting (server-enforced)
+        assert_eq!(derp.bytes_per_second, 102400); // 100KB/s
+        assert_eq!(derp.bytes_burst, 204800); // 200KB
+        // connection rate limiting (server-enforced)
+        assert_eq!(derp.connection_rate_per_minute, 10);
+        // stun rate limiting
+        assert_eq!(derp.stun_rate_per_minute, 60);
+    }
+
+    #[test]
+    fn test_derp_rate_limit_serde() {
+        let json = r#"{
+            "enabled": true,
+            "bytes_per_second": 51200,
+            "bytes_burst": 102400,
+            "connection_rate_per_minute": 5,
+            "stun_rate_per_minute": 30
+        }"#;
+        let derp: EmbeddedDerpConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(derp.bytes_per_second, 51200);
+        assert_eq!(derp.bytes_burst, 102400);
+        assert_eq!(derp.connection_rate_per_minute, 5);
+        assert_eq!(derp.stun_rate_per_minute, 30);
     }
 
     #[test]
