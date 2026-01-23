@@ -124,16 +124,16 @@ impl Default for DerpConfig {
 /// default maximum concurrent derp connections.
 pub const DEFAULT_DERP_MAX_CONNECTIONS: usize = 1000;
 
-/// default derp message rate limit (bytes per second). 100KB/s sustained
+/// default idle timeout for derp connections (5 minutes).
 pub const DEFAULT_DERP_IDLE_TIMEOUT_SECS: u64 = 300;
 
-/// default derp message burst size (bytes). 200KB burst
+/// default derp message rate limit (bytes per second). 100kb/s sustained.
 pub const DEFAULT_DERP_BYTES_PER_SECOND: u32 = 102400;
 
-/// default derp connection rate limit (connections per minute per IP)
+/// default derp message burst size (bytes). 200kb burst.
 pub const DEFAULT_DERP_BYTES_BURST: u32 = 204800;
 
-/// default stun rate limit (requests per minute per IP)
+/// default derp connection rate limit (connections per minute per ip).
 pub const DEFAULT_DERP_CONNECTION_RATE_PER_MINUTE: u32 = 10;
 
 /// default stun rate limit (requests per minute per ip).
@@ -202,14 +202,14 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_derp_bytes_burst")]
     pub bytes_burst: u32,
 
-    /// default: 10 connections/minute per IP
+    /// connection rate limit per ip (connections per minute).
     /// server-enforced to prevent connection floods from a single ip.
     /// set to 0 to disable.
     /// default: 10 connections/minute per ip.
     #[serde(default = "default_derp_connection_rate_per_minute")]
     pub connection_rate_per_minute: u32,
 
-    /// default: 60 requests/minute per IP
+    /// stun rate limit per ip (requests per minute).
     /// server-enforced to prevent stun abuse from a single ip.
     /// set to 0 to disable.
     /// default: 60 requests/minute per ip.
@@ -374,7 +374,7 @@ pub struct DnsRecord {
 }
 
 /// oidc configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct OidcConfig {
     /// oidc issuer url.
     pub issuer: String,
@@ -431,6 +431,27 @@ pub struct OidcConfig {
     /// default: 30 requests/minute (more restrictive than api).
     #[serde(default = "default_oidc_rate_limit")]
     pub rate_limit_per_minute: u32,
+}
+
+impl std::fmt::Debug for OidcConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OidcConfig")
+            .field("issuer", &self.issuer)
+            .field("client_id", &self.client_id)
+            .field("client_secret", &"[REDACTED]")
+            .field("client_secret_path", &self.client_secret_path)
+            .field("scope", &self.scope)
+            .field("email_verified_required", &self.email_verified_required)
+            .field("pkce", &self.pkce)
+            .field("allowed_domains", &self.allowed_domains)
+            .field("allowed_users", &self.allowed_users)
+            .field("allowed_groups", &self.allowed_groups)
+            .field("expiry_secs", &self.expiry_secs)
+            .field("use_expiry_from_token", &self.use_expiry_from_token)
+            .field("extra_params", &self.extra_params)
+            .field("rate_limit_per_minute", &self.rate_limit_per_minute)
+            .finish()
+    }
 }
 
 fn default_oidc_rate_limit() -> u32 {
@@ -648,7 +669,7 @@ mod tests {
     #[test]
     fn test_derp_rate_limit_defaults() {
         let derp = EmbeddedDerpConfig::default();
-        // connection rate limiting (server-enforced)
+        // message rate limiting (client-enforced via serverinfo)
         assert_eq!(derp.bytes_per_second, 102400); // 100KB/s
         assert_eq!(derp.bytes_burst, 204800); // 200KB
         // connection rate limiting (server-enforced)
