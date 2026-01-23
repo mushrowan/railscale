@@ -53,9 +53,10 @@ in
           server_url = "http://server:8080";
           api = {
             enabled = true;
-            # Higher rate limit for testing (many requests in quick succession)
             rate_limit_enabled = true;
-            rate_limit_per_minute = 1000;
+            # 200/min gives burst=33 (capped at 50), enough for tests
+            # Rate limit test can still trigger 429 with rapid requests
+            rate_limit_per_minute = 200;
           };
         }
         // common.embeddedDerpSettings;

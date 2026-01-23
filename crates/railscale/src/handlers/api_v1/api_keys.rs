@@ -1,4 +1,4 @@
-//! api key endpoints for api v1 (headscale-compatible)
+//! api key endpoints for api v1 (headscale-compatible).
 //!
 //! endpoints:
 //! - `get /api/v1/apikey` - list all api keys
@@ -20,19 +20,19 @@ use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
 use railscale_types::{ApiKey, ApiKeySecret, UserId};
 
-/// response wrapper for list api keys endpoint
+/// response wrapper for list api keys endpoint.
 #[derive(Debug, Serialize)]
 pub struct ListApiKeysResponse {
     #[serde(rename = "apiKeys")]
     pub api_keys: Vec<ApiKeyResponse>,
 }
 
-/// api key representation in api responses
-/// note: The actual secret is never returned after creation
+/// api key representation in api responses.
+/// NOTE: the actual secret is never returned after creation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiKeyResponse {
     pub id: String,
-    /// the key prefix for identification (e.g., "rsapi_abc12345")
+    /// the key prefix for identification (e.g., "rsapi_abc12345").
     pub prefix: String,
     pub name: String,
     pub user_id: String,
@@ -57,50 +57,50 @@ impl From<ApiKey> for ApiKeyResponse {
     }
 }
 
-/// request for creating an api key
+/// request for creating an api key.
 #[derive(Debug, Deserialize)]
 pub struct CreateApiKeyRequest {
-    /// user id to associate the key with
+    /// user id to associate the key with.
     pub user: u64,
-    /// human-readable name for the key
+    /// human-readable name for the key.
     #[serde(default)]
     pub name: Option<String>,
-    /// expiration time in RFC3339 format
+    /// expiration time in rfc3339 format.
     #[serde(default)]
     pub expiration: Option<String>,
 }
 
-/// response for create api key endpoint
-/// includes the full key (only shown once)
+/// response for create api key endpoint.
+/// includes the full key (only shown once).
 #[derive(Debug, Serialize)]
 pub struct CreateApiKeyResponse {
-    /// the full api key - ONLY returned on creation, never again
+    /// the full api key - only returned on creation, never again.
     #[serde(rename = "apiKey")]
     pub api_key: String,
-    /// metadata about the created key
+    /// metadata about the created key.
     pub key: ApiKeyResponse,
 }
 
-/// request for expire api key endpoint
+/// request for expire api key endpoint.
 #[derive(Debug, Deserialize)]
 pub struct ExpireApiKeyRequest {
-    /// iD of the key to expire
+    /// id of the key to expire.
     #[serde(default)]
     pub id: Option<u64>,
-    /// prefix of the key to expire (alternative to id)
+    /// prefix of the key to expire (alternative to id).
     #[serde(default)]
     pub prefix: Option<String>,
 }
 
-/// response for expire api key endpoint
+/// response for expire api key endpoint.
 #[derive(Debug, Serialize)]
 pub struct ExpireApiKeyResponse {}
 
-/// response for delete api key endpoint
+/// response for delete api key endpoint.
 #[derive(Debug, Serialize)]
 pub struct DeleteApiKeyResponse {}
 
-/// create the api keys router
+/// create the api keys router.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_api_keys).post(create_api_key))
@@ -108,7 +108,7 @@ pub fn router() -> Router<AppState> {
         .route("/{prefix}", axum::routing::delete(delete_api_key))
 }
 
-/// list all api keys
+/// list all api keys.
 ///
 /// `GET /api/v1/apikey`
 async fn list_api_keys(
@@ -126,11 +126,11 @@ async fn list_api_keys(
     Ok(Json(ListApiKeysResponse { api_keys }))
 }
 
-/// create a new api key
+/// create a new api key.
 ///
 /// `POST /api/v1/apikey`
 ///
-/// returns the full key only once - it cannot be retrieved later
+/// returns the full key only once - it cannot be retrieved later.
 async fn create_api_key(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
@@ -183,7 +183,7 @@ async fn create_api_key(
     ))
 }
 
-/// expire an api key
+/// expire an api key.
 ///
 /// `POST /api/v1/apikey/expire`
 async fn expire_api_key(
@@ -194,11 +194,11 @@ async fn expire_api_key(
     let key_id = match (req.id, req.prefix) {
         (Some(id), _) => id,
         (None, Some(prefix)) => {
-            // look up by prefix (selector)
-            let selector = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
+            // look up by prefix (selector prefix, first 8 chars)
+            let selector_prefix = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
             let key = state
                 .db
-                .get_api_key_by_selector(selector)
+                .get_api_key_by_selector_prefix(selector_prefix)
                 .await
                 .map_err(ApiError::internal)?
                 .ok_or_else(|| {
@@ -220,7 +220,7 @@ async fn expire_api_key(
     Ok(Json(ExpireApiKeyResponse {}))
 }
 
-/// delete an api key by prefix
+/// delete an api key by prefix.
 ///
 /// `DELETE /api/v1/apikey/{prefix}`
 async fn delete_api_key(
@@ -228,11 +228,11 @@ async fn delete_api_key(
     State(state): State<AppState>,
     Path(prefix): Path<String>,
 ) -> Result<Json<DeleteApiKeyResponse>, ApiError> {
-    // look up by prefix (selector)
-    let selector = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
+    // look up by prefix (selector prefix, first 8 chars)
+    let selector_prefix = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
     let key = state
         .db
-        .get_api_key_by_selector(selector)
+        .get_api_key_by_selector_prefix(selector_prefix)
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| {

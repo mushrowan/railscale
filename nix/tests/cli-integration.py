@@ -717,10 +717,11 @@ with subtest("REST API - Rate limit headers present"):
 
 with subtest("REST API - Rate limiting blocks excessive requests"):
     # Make rapid requests until we hit the rate limit (429)
-    # With 1000 req/min and burst ~166, we should hit it within ~200 requests
+    # With 200 req/min (300ms replenish) and burst 33, we should hit 429
+    # after ~40-50 requests since VM latency (~50ms) < replenish time
     got_rate_limited = False
     request_count = 0
-    max_requests = 300  # Should be enough to exhaust the burst
+    max_requests = 100  # Should be enough to exhaust burst + some replenish
     
     for i in range(max_requests):
         status = api_request_status("/api/v1/user", "GET", api_key)

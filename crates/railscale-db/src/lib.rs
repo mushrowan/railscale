@@ -133,13 +133,20 @@ pub trait Database: Send + Sync {
 
     // ─── ApiKey Operations ───────────────────────────────────────────────────
 
-    /// get an api key by its selector (for split-token lookup)
+    /// create a new api key. Returns the key with its assigned ID.
     fn create_api_key(&self, key: &ApiKey) -> impl Future<Output = Result<ApiKey>> + Send;
 
     /// get an api key by its selector (for split-token lookup).
     fn get_api_key_by_selector(
         &self,
         selector: &str,
+    ) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+
+    /// get an api key by a prefix of its selector (first 8 chars).
+    /// used for user-facing lookups where only the prefix is shown.
+    fn get_api_key_by_selector_prefix(
+        &self,
+        prefix: &str,
     ) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
 
     /// get an api key by its numeric id.
@@ -462,6 +469,15 @@ impl Database for RailscaleDb {
         Ok(result.map(Into::into))
     }
 
+    async fn get_api_key_by_selector_prefix(&self, prefix: &str) -> Result<Option<ApiKey>> {
+        let result = entity::api_key::Entity::find()
+            .filter(entity::api_key::Column::Selector.starts_with(prefix))
+            .filter(entity::api_key::Column::DeletedAt.is_null())
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(Into::into))
+    }
+
     async fn get_api_key_by_id(&self, id: u64) -> Result<Option<ApiKey>> {
         let result = entity::api_key::Entity::find_by_id(id as i64)
             .filter(entity::api_key::Column::DeletedAt.is_null())
@@ -649,7 +665,7 @@ mod tests {
         let user = User::new(UserId(0), "apikeyowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        // verify the full token works
+        // generate api key secret (split-token pattern)
         let secret = ApiKeySecret::generate();
 
         // create key
@@ -700,6 +716,30 @@ mod tests {
         db.delete_api_key(created.id).await.unwrap();
         let deleted = db.get_api_key_by_selector(&secret.selector).await.unwrap();
         assert!(deleted.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_api_key_lookup_by_selector_prefix() {
+        use railscale_types::ApiKeySecret;
+        let db = setup_test_db().await;
+
+        // create user
+        let user = User::new(UserId(0), "apiuser".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        // generate api key
+        let secret = ApiKeySecret::generate();
+        let key = ApiKey::new(0, &secret, "Prefix Test Key".to_string(), user.id);
+        let created = db.create_api_key(&key).await.unwrap();
+
+        // the full selector is 32 hex chars, but prefix() returns first 8
+        assert_eq!(secret.selector.len(), 32);
+        let prefix_8 = &secret.selector[..8];
+
+        // look up by 8-char prefix (this is what the api does)
+        let found = db.get_api_key_by_selector_prefix(prefix_8).await.unwrap();
+        assert!(found.is_some(), "Should find key by 8-char prefix");
+        assert_eq!(found.unwrap().id, created.id);
     }
 
     #[tokio::test]
