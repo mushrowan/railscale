@@ -361,9 +361,10 @@ async fn set_routes(
     // parse routes
     let mut routes = Vec::new();
     for route_str in &req.routes {
-        let route: IpNet = route_str
-            .parse()
-            .map_err(|e| ApiError::bad_request(format!("invalid route '{}': {}", route_str, e)))?;
+        let route: IpNet = route_str.parse().map_err(|e| {
+            tracing::warn!("Invalid route submitted: '{}': {}", route_str, e);
+            ApiError::bad_request("invalid CIDR route format")
+        })?;
         routes.push(route);
     }
 

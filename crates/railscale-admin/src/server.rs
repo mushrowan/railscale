@@ -441,8 +441,10 @@ impl AdminService for AdminServiceImpl {
             .routes
             .iter()
             .map(|r| {
-                r.parse()
-                    .map_err(|_| Status::invalid_argument(format!("Invalid CIDR: {}", r)))
+                r.parse().map_err(|e| {
+                    info!("Invalid route submitted via gRPC: '{}': {}", r, e);
+                    Status::invalid_argument("invalid CIDR route format")
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
