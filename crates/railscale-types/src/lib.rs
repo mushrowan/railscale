@@ -15,6 +15,7 @@ mod keys;
 mod node;
 mod oidc;
 mod preauth_key;
+mod tag;
 pub mod test_utils;
 mod user;
 
@@ -27,6 +28,7 @@ pub use keys::{DiscoKey, MachineKey, NodeKey};
 pub use node::{HostInfo, NetInfo, Node, NodeId, NodeView, RegisterMethod};
 pub use oidc::{OidcClaims, RegistrationId};
 pub use preauth_key::PreAuthKey;
+pub use tag::{MAX_TAG_NAME_LEN, MAX_TAGS, Tag, TagError};
 pub use user::{User, UserId};
 
 /// result type alias using the crate's error type.

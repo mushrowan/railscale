@@ -8,7 +8,7 @@ use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue::NotSet, Set};
 
 use railscale_types::{
-    DiscoKey, HostInfo, MachineKey, Node, NodeId, NodeKey, RegisterMethod, UserId,
+    DiscoKey, HostInfo, MachineKey, Node, NodeId, NodeKey, RegisterMethod, Tag, UserId,
 };
 
 /// node database model.
@@ -107,7 +107,12 @@ impl From<Model> for Node {
             .hostinfo
             .as_ref()
             .and_then(|s| serde_json::from_str(s).ok());
-        let tags: Vec<String> = serde_json::from_str(&model.tags).unwrap_or_default();
+        // parse tags - invalid tags from legacy data are filtered out
+        let tags: Vec<Tag> = serde_json::from_str::<Vec<String>>(&model.tags)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
         let approved_routes: Vec<IpNet> =
             serde_json::from_str(&model.approved_routes).unwrap_or_default();
 

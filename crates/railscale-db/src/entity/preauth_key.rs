@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue::NotSet, Set};
 
-use railscale_types::{PreAuthKey, UserId};
+use railscale_types::{PreAuthKey, Tag, UserId};
 
 /// preauthkey database model.
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
@@ -53,7 +53,12 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for PreAuthKey {
     fn from(model: Model) -> Self {
-        let tags: Vec<String> = serde_json::from_str(&model.tags).unwrap_or_default();
+        // parse tags - invalid tags from legacy data are filtered out
+        let tags: Vec<Tag> = serde_json::from_str::<Vec<String>>(&model.tags)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
 
         PreAuthKey {
             id: model.id as u64,

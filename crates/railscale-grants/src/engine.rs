@@ -316,7 +316,8 @@ mod tests {
         }
     }
 
-    fn test_node(id: u64, tags: Vec<String>) -> Node {
+    fn test_node(id: u64, tags: Vec<&str>) -> Node {
+        let tags = tags.into_iter().filter_map(|t| t.parse().ok()).collect();
         TestNodeBuilder::new(id).with_tags(tags).build()
     }
 
@@ -366,8 +367,8 @@ mod tests {
 
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
-        let web_node = test_node(1, vec!["tag:web".to_string()]);
-        let db_node = test_node(2, vec!["tag:database".to_string()]);
+        let web_node = test_node(1, vec!["tag:web"]);
+        let db_node = test_node(2, vec!["tag:database"]);
         let other_node = test_node(3, vec![]);
 
         // web can see database
@@ -394,7 +395,7 @@ mod tests {
 
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
-        let tagged_node = test_node(1, vec!["tag:server".to_string()]);
+        let tagged_node = test_node(1, vec!["tag:server"]);
         let user_node = test_node(2, vec![]);
 
         // user node can see tagged node
@@ -474,9 +475,9 @@ mod tests {
 
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
-        let web_node = test_node(1, vec!["tag:web".to_string()]);
-        let db_node = test_node(2, vec!["tag:database".to_string()]);
-        let other_node = test_node(3, vec!["tag:other".to_string()]);
+        let web_node = test_node(1, vec!["tag:web"]);
+        let db_node = test_node(2, vec!["tag:database"]);
+        let other_node = test_node(3, vec!["tag:other"]);
 
         let all_nodes = vec![web_node.clone(), db_node.clone(), other_node.clone()];
         let visible = engine.get_visible_peers(&web_node, &all_nodes, &resolver);
@@ -568,8 +569,8 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
         let user_node = test_node(1, vec![]);
-        let tagged_node = test_node(2, vec!["tag:server".to_string()]);
-        let other_tagged_node = test_node(3, vec!["tag:client".to_string()]);
+        let tagged_node = test_node(2, vec!["tag:server"]);
+        let other_tagged_node = test_node(3, vec!["tag:client"]);
 
         // user node (member) can see tagged server
         assert!(engine.can_see(&user_node, &tagged_node, &resolver));
@@ -618,7 +619,7 @@ mod tests {
         let node1 = test_node(1, vec![]);
         let node2 = test_node(2, vec![]);
 
-        // update to allow-all policy
+        // initially denied
         assert!(!engine.can_see(&node1, &node2, &resolver));
 
         // update to allow-all policy
@@ -633,10 +634,10 @@ mod tests {
         });
         engine.update_policy(new_policy);
 
-        // update back to empty policy
+        // now allowed
         assert!(engine.can_see(&node1, &node2, &resolver));
 
-        // denied again
+        // update back to empty policy
         engine.update_policy(Policy::empty());
 
         // denied again

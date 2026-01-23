@@ -79,7 +79,7 @@ impl From<Node> for NodeResponse {
             given_name: node.given_name,
             user_id: node.user_id.map(|id| id.0.to_string()),
             register_method: format!("{:?}", node.register_method).to_lowercase(),
-            tags: node.tags,
+            tags: node.tags.iter().map(|t| t.to_string()).collect(),
             expiry: node.expiry.map(|dt| dt.to_rfc3339()),
             last_seen: node.last_seen.map(|dt| dt.to_rfc3339()),
             approved_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
@@ -101,10 +101,11 @@ pub struct ExpireNodeRequest {
     pub expiry: Option<String>,
 }
 
-/// request for setting tags.
+/// tags are validated during deserialization via the Tag type
 #[derive(Debug, Deserialize)]
 pub struct SetTagsRequest {
-    pub tags: Vec<String>,
+    /// tags are validated during deserialization via the tag type.
+    pub tags: Vec<railscale_types::Tag>,
 }
 
 /// response for set tags endpoint.
@@ -302,15 +303,20 @@ async fn set_tags(
 ) -> Result<Json<SetTagsResponse>, ApiError> {
     let node_id = NodeId(id);
 
+    // check tag count limit (individual tags validated by tag type during deserialization)
+    if req.tags.len() > railscale_types::MAX_TAGS {
+        return Err(ApiError::bad_request(format!(
+            "too many tags (max {})",
+            railscale_types::MAX_TAGS
+        )));
+    }
+
     let mut node = state
         .db
         .get_node(node_id)
         .await
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
-
-    // validate tags (format, length, character set, count)
-    super::validation::validate_tags(&req.tags)?;
 
     // once tagged, cannot remove all tags (tags-as-identity)
     if !node.tags.is_empty() && req.tags.is_empty() {
@@ -395,7 +401,7 @@ mod tests {
     fn test_node_response_serialization() {
         let node = TestNodeBuilder::new(1)
             .with_hostname("mynode")
-            .with_tags(vec!["tag:server".to_string()])
+            .with_tags(vec!["tag:server".parse().unwrap()])
             .build();
         let response = NodeResponse::from(node);
 

@@ -305,7 +305,10 @@ impl AdminService for AdminServiceImpl {
 
         // filter by tag if specified
         let nodes: Vec<_> = if let Some(ref tag) = req.tag {
-            nodes.into_iter().filter(|n| n.tags.contains(tag)).collect()
+            nodes
+                .into_iter()
+                .filter(|n| n.tags.iter().any(|t| t == tag.as_str()))
+                .collect()
         } else {
             nodes
         };
@@ -385,6 +388,14 @@ impl AdminService for AdminServiceImpl {
         let req = request.into_inner();
         let id = railscale_types::NodeId(req.id);
 
+        // parse tags from request
+        let tags: Vec<railscale_types::Tag> = req
+            .tags
+            .into_iter()
+            .map(|s| s.parse())
+            .collect::<Result<_, _>>()
+            .map_err(|e| Status::invalid_argument(format!("Invalid tag: {}", e)))?;
+
         let mut node = self
             .db
             .get_node(id)
@@ -392,7 +403,7 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
             .ok_or_else(|| Status::not_found("Node not found"))?;
 
-        node.tags = req.tags;
+        node.tags = tags;
 
         let updated = self
             .db
@@ -446,6 +457,14 @@ impl AdminService for AdminServiceImpl {
     ) -> Result<Response<pb::PreauthKey>, Status> {
         let req = request.into_inner();
 
+        // parse tags from request
+        let tags: Vec<railscale_types::Tag> = req
+            .tags
+            .into_iter()
+            .map(|s| s.parse())
+            .collect::<Result<_, _>>()
+            .map_err(|e| Status::invalid_argument(format!("Invalid tag: {}", e)))?;
+
         let expiration = req
             .expiration_days
             .map(|days| chrono::Utc::now() + chrono::Duration::days(days));
@@ -460,7 +479,7 @@ impl AdminService for AdminServiceImpl {
         );
         key.reusable = req.reusable;
         key.ephemeral = req.ephemeral;
-        key.tags = req.tags;
+        key.tags = tags;
         key.expiration = expiration;
 
         let created = self
@@ -649,7 +668,7 @@ fn node_to_pb(node: &railscale_types::Node) -> pb::Node {
         ipv4: node.ipv4.map(|ip| ip.to_string()),
         ipv6: node.ipv6.map(|ip| ip.to_string()),
         user_id: node.user_id.map(|id| id.0),
-        tags: node.tags.clone(),
+        tags: node.tags.iter().map(|t| t.to_string()).collect(),
         last_seen: node.last_seen.map(|t| t.to_rfc3339()),
         expiry: node.expiry.map(|t| t.to_rfc3339()),
         approved_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
@@ -665,7 +684,7 @@ fn preauth_key_to_pb(key: &railscale_types::PreAuthKey) -> pb::PreauthKey {
         user_id: key.user_id.0,
         reusable: key.reusable,
         ephemeral: key.ephemeral,
-        tags: key.tags.clone(),
+        tags: key.tags.iter().map(|t| t.to_string()).collect(),
         expiration: key.expiration.map(|e| e.to_rfc3339()),
         created_at: key.created_at.to_rfc3339(),
         use_count: if key.used { 1 } else { 0 },

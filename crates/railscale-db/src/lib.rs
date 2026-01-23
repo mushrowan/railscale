@@ -766,7 +766,7 @@ mod tests {
             given_name: "test-node".to_string(),
             user_id: Some(user.id),
             register_method: RegisterMethod::AuthKey,
-            tags: vec!["tag:server".to_string()],
+            tags: vec!["tag:server".parse().unwrap()],
             auth_key_id: None,
             expiry: None,
             last_seen: None,
@@ -782,7 +782,8 @@ mod tests {
         // get
         let fetched = db.get_node(created.id).await.unwrap().unwrap();
         assert_eq!(fetched.hostname, "test-node");
-        assert_eq!(fetched.tags, vec!["tag:server".to_string()]);
+        assert_eq!(fetched.tags.len(), 1);
+        assert!(fetched.tags[0] == "tag:server");
         assert_eq!(fetched.endpoints.len(), 1);
 
         // list

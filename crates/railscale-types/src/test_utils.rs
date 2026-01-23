@@ -1,27 +1,27 @@
-//! test utilities for creating test nodes and other fixtures
+//! test utilities for creating test nodes and other fixtures.
 //!
 //! this module provides builder patterns for creating test instances
-//! of railscale types without needing to specify all fields
+//! of railscale types without needing to specify all fields.
 
 use chrono::Utc;
 
-use crate::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, UserId};
+use crate::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, Tag, UserId};
 
-/// builder for creating test [`Node`] instances
+/// builder for creating test [`node`] instances.
 ///
 /// # Example
 /// ```
 /// use railscale_types::test_utils::TestNodeBuilder;
-///
+///.with_tags(vec!["tag:server".parse().unwrap()])
 /// let node = TestNodeBuilder::new(1).build();
 /// let tagged = TestNodeBuilder::new(2)
-/// .with_tags(vec!["tag:server".to_string()])
-/// .build();
+///     .with_tags(vec!["tag:server".parse().unwrap()])
+///     .build();
 /// ```
 #[derive(Debug, Clone)]
 pub struct TestNodeBuilder {
     id: u64,
-    tags: Vec<String>,
+    tags: Vec<Tag>,
     user_id: Option<UserId>,
     hostname: Option<String>,
     ipv4: Option<std::net::IpAddr>,
@@ -32,7 +32,7 @@ pub struct TestNodeBuilder {
 }
 
 impl TestNodeBuilder {
-    /// create a new builder with the given node id
+    /// create a new builder with the given node id.
     pub fn new(id: u64) -> Self {
         Self {
             id,
@@ -47,59 +47,59 @@ impl TestNodeBuilder {
         }
     }
 
-    /// set tags for the node
+    /// set tags for the node.
     ///
-    /// if tags are set, the node will be tagged (not user-owned)
-    pub fn with_tags(mut self, tags: Vec<String>) -> Self {
+    /// if tags are set, the node will be tagged (not user-owned).
+    pub fn with_tags(mut self, tags: Vec<Tag>) -> Self {
         self.tags = tags;
         self
     }
 
-    /// set the user id for the node
+    /// set the user id for the node.
     ///
-    /// only applies to non-tagged nodes
+    /// only applies to non-tagged nodes.
     pub fn with_user_id(mut self, user_id: UserId) -> Self {
         self.user_id = Some(user_id);
         self
     }
 
-    /// set a custom hostname
+    /// set a custom hostname.
     pub fn with_hostname(mut self, hostname: impl Into<String>) -> Self {
         self.hostname = Some(hostname.into());
         self
     }
 
-    /// set ipv4 address
+    /// set ipv4 address.
     pub fn with_ipv4(mut self, ip: std::net::IpAddr) -> Self {
         self.ipv4 = Some(ip);
         self
     }
 
-    /// set ipv6 address
+    /// set ipv6 address.
     pub fn with_ipv6(mut self, ip: std::net::IpAddr) -> Self {
         self.ipv6 = Some(ip);
         self
     }
 
-    /// set machine key
+    /// set machine key.
     pub fn with_machine_key(mut self, key: MachineKey) -> Self {
         self.machine_key = Some(key);
         self
     }
 
-    /// set node key
+    /// set node key.
     pub fn with_node_key(mut self, key: NodeKey) -> Self {
         self.node_key = Some(key);
         self
     }
 
-    /// set disco key
+    /// set disco key.
     pub fn with_disco_key(mut self, key: DiscoKey) -> Self {
         self.disco_key = Some(key);
         self
     }
 
-    /// build the [`Node`]
+    /// build the [`node`].
     pub fn build(self) -> Node {
         let hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
 
@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn test_builder_with_tags() {
         let node = TestNodeBuilder::new(2)
-            .with_tags(vec!["tag:server".to_string()])
+            .with_tags(vec!["tag:server".parse().unwrap()])
             .build();
         assert!(node.is_tagged());
         assert!(node.has_tag("tag:server"));

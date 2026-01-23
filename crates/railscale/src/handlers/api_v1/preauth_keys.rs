@@ -51,7 +51,7 @@ impl From<PreAuthKey> for PreAuthKeyResponse {
             reusable: key.reusable,
             ephemeral: key.ephemeral,
             used: key.used,
-            tags: key.tags,
+            tags: key.tags.iter().map(|t| t.to_string()).collect(),
             expiration: key.expiration.map(|dt| dt.to_rfc3339()),
             created_at: key.created_at.to_rfc3339(),
         }
@@ -73,8 +73,9 @@ pub struct CreatePreAuthKeyRequest {
     #[serde(default)]
     pub expiration: Option<String>,
     /// tags to apply to nodes registered with this key.
+    /// validated during deserialization via the tag type.
     #[serde(default, rename = "aclTags")]
-    pub acl_tags: Vec<String>,
+    pub acl_tags: Vec<railscale_types::Tag>,
 }
 
 /// response for create preauth key endpoint.
@@ -157,20 +158,13 @@ async fn create_preauth_key(
         return Err(ApiError::not_found(format!("user {} not found", req.user)));
     }
 
-    // validate tags
-    for tag in &req.acl_tags {
-        if !tag.starts_with("tag:") {
-            return Err(ApiError::bad_request(format!(
-                "tag '{}' must start with 'tag:'",
-                tag
-            )));
-        }
-        if tag.to_lowercase() != *tag {
-            return Err(ApiError::bad_request(format!(
-                "tag '{}' must be lowercase",
-                tag
-            )));
-        }
+    // tags are validated during deserialization via the tag type
+    // just check the count limit
+    if req.acl_tags.len() > railscale_types::MAX_TAGS {
+        return Err(ApiError::bad_request(format!(
+            "too many tags (max {})",
+            railscale_types::MAX_TAGS
+        )));
     }
 
     // parse expiration or default to 90 days
@@ -268,7 +262,7 @@ mod tests {
     #[test]
     fn test_preauth_key_response_serialization() {
         let mut key = PreAuthKey::new(1, "test-key".to_string(), UserId(42));
-        key.tags = vec!["tag:server".to_string()];
+        key.tags = vec!["tag:server".parse().unwrap()];
         let response = PreAuthKeyResponse::from(key);
 
         let json = serde_json::to_string(&response).unwrap();

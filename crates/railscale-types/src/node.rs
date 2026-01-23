@@ -10,6 +10,7 @@ use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
 use crate::keys::{DiscoKey, MachineKey, NodeKey};
+use crate::tag::Tag;
 use crate::user::UserId;
 
 /// unique identifier for a node.
@@ -90,7 +91,7 @@ pub struct Node {
     /// when non-empty, the node is "tagged" and tags define its identity.
     /// empty for user-owned nodes.
     /// tags cannot be removed once set (one-way transition).
-    pub tags: Vec<String>,
+    pub tags: Vec<Tag>,
 
     /// preauthkey id used to register this node.
     pub auth_key_id: Option<u64>,
@@ -449,7 +450,7 @@ mod tests {
         assert!(!node.is_tagged());
         assert!(node.is_user_owned());
 
-        node.tags = vec!["tag:server".to_string()];
+        node.tags = vec!["tag:server".parse().unwrap()];
         assert!(node.is_tagged());
         assert!(!node.is_user_owned());
     }
@@ -457,7 +458,7 @@ mod tests {
     #[test]
     fn test_node_has_tag() {
         let mut node = test_node();
-        node.tags = vec!["tag:server".to_string(), "tag:web".to_string()];
+        node.tags = vec!["tag:server".parse().unwrap(), "tag:web".parse().unwrap()];
 
         assert!(node.has_tag("tag:server"));
         assert!(node.has_tag("tag:web"));

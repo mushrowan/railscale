@@ -359,7 +359,7 @@ fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
         // crashes in Tailscale client when accessing Hostinfo.Hostname() on peers
         hostinfo: Some(node.hostinfo.clone().unwrap_or_default()),
         online: node.is_online,
-        tags: node.tags.clone(),
+        tags: node.tags.iter().map(|t| t.to_string()).collect(),
         primary_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
         key_expiry: node.expiry.as_ref().map(|e| e.to_rfc3339()),
         expired: node.is_expired(),
