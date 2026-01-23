@@ -95,9 +95,10 @@ pub async fn oidc_callback(
         .as_ref()
         .ok_or_else(|| ApiError::internal("OIDC not configured"))?;
 
-    // retrieve registration info from cache
+    // retrieve and remove registration info from cache (one-time use)
+    // this prevents replay attacks by invalidating the state after use
     let reg_info = oidc
-        .get_registration_info(&params.state)
+        .remove_registration_info(&params.state)
         .ok_or_else(|| ApiError::bad_request("invalid or expired state"))?;
 
     // exchange authorization code for tokens
@@ -276,7 +277,7 @@ mod tests {
             .await
             .unwrap();
 
-        // check the response body contains the registration instructions
+        // should return 200 with html page showing manual registration instructions
         assert_eq!(response.status(), StatusCode::OK);
 
         // check the response body contains the registration instructions

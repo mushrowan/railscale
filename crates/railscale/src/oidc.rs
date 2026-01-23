@@ -211,6 +211,13 @@ impl AuthProviderOidc {
         self.registration_cache.get(state)
     }
 
+    /// remove and return registration info from the cache (one-time use).
+    ///
+    /// this invalidates the state token after use, preventing replay attacks.
+    pub fn remove_registration_info(&self, state: &str) -> Option<RegistrationInfo> {
+        self.registration_cache.remove(state)
+    }
+
     /// exchange the authorization code for tokens.
     pub async fn exchange_code(
         &self,
