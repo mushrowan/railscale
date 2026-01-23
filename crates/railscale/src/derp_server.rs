@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::BufReader as StdBufReader;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::num::NonZeroU32;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use crypto_box::{
     PublicKey, SalsaBox, SecretKey,
     aead::{Aead, AeadCore, OsRng},
 };
+use governor::{Quota, RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
 use hex::ToHex;
 use httparse;
 use rcgen::generate_simple_self_signed;
@@ -33,6 +35,9 @@ use tokio_rustls::server::TlsStream;
 use tracing::{debug, error, info};
 
 use railscale_proto::Keypair;
+
+/// type alias for the per-ip connection rate limiter.
+type IpRateLimiter = RateLimiter<IpAddr, DefaultKeyedStateStore<IpAddr>, DefaultClock>;
 
 const FRAME_SERVER_KEY: u8 = 0x01;
 const FRAME_CLIENT_INFO: u8 = 0x02;
@@ -171,6 +176,8 @@ pub struct DerpListenerConfig {
     pub server: EmbeddedDerpServer,
     /// maximum concurrent connections. prevents resource exhaustion from too many clients.
     pub max_connections: usize,
+    /// connection rate limit per ip (connections per minute). 0 to disable.
+    pub connection_rate_per_minute: u32,
 }
 
 /// spawn the embedded derp listener in a background task.
@@ -183,6 +190,7 @@ pub async fn spawn_derp_listener(config: DerpListenerConfig) -> eyre::Result<Joi
     info!(
         addr = %config.listen_addr,
         max_connections = config.max_connections,
+        connection_rate_per_minute = config.connection_rate_per_minute,
         "embedded DERP listening"
     );
 
@@ -190,10 +198,33 @@ pub async fn spawn_derp_listener(config: DerpListenerConfig) -> eyre::Result<Joi
     let derp_server = config.server.clone();
     let connection_semaphore = Arc::new(Semaphore::new(config.max_connections));
 
+    // create per-ip connection rate limiter if enabled
+    let connection_rate_limiter: Option<Arc<IpRateLimiter>> =
+        if config.connection_rate_per_minute > 0 {
+            let quota = Quota::per_minute(
+                NonZeroU32::new(config.connection_rate_per_minute)
+                    .expect("connection_rate_per_minute > 0"),
+            );
+            Some(Arc::new(RateLimiter::keyed(quota)))
+        } else {
+            None
+        };
+
     let handle = tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
+                    let peer_ip = addr.ip();
+
+                    // check connection rate limit per ip
+                    if let Some(ref limiter) = connection_rate_limiter {
+                        if limiter.check_key(&peer_ip).is_err() {
+                            debug!(peer = %addr, "DERP connection rejected: rate limited");
+                            drop(stream);
+                            continue;
+                        }
+                    }
+
                     // try to acquire a permit - if at capacity, reject the connection
                     let permit = match connection_semaphore.clone().try_acquire_owned() {
                         Ok(permit) => permit,

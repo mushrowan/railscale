@@ -451,6 +451,7 @@ impl ServeCommand {
                 tls_config: tls_assets.tls_config,
                 server: derp_server,
                 max_connections: config.derp.embedded_derp.max_connections,
+                connection_rate_per_minute: config.derp.embedded_derp.connection_rate_per_minute,
             })
             .await
             .context("failed to spawn DERP listener")?;
