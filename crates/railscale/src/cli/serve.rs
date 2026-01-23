@@ -438,8 +438,10 @@ impl ServeCommand {
                 .parse()
                 .context("invalid DERP listen address")?;
 
-            let derp_server =
-                derp_server::EmbeddedDerpServer::new(EmbeddedDerpOptions::new(derp_keypair));
+            let derp_server = derp_server::EmbeddedDerpServer::new(
+                EmbeddedDerpOptions::new(derp_keypair)
+                    .with_idle_timeout(config.derp.embedded_derp.idle_timeout_secs),
+            );
             derp_server::spawn_derp_listener(DerpListenerConfig {
                 listen_addr: derp_listen_addr,
                 tls_config: tls_assets.tls_config,

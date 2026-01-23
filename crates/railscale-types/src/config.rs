@@ -121,8 +121,11 @@ impl Default for DerpConfig {
     }
 }
 
-/// default maximum concurrent derp connections.
+/// default idle timeout for derp connections (5 minutes)
 pub const DEFAULT_DERP_MAX_CONNECTIONS: usize = 1000;
+
+/// default idle timeout for derp connections (5 minutes).
+pub const DEFAULT_DERP_IDLE_TIMEOUT_SECS: u64 = 300;
 
 /// embedded derp server configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +171,13 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_derp_max_connections")]
     pub max_connections: usize,
 
+    /// default: 300 seconds (5 minutes)
+    /// connections with no activity for this long are closed.
+    /// set to 0 to disable (not recommended).
+    /// default: 300 seconds (5 minutes).
+    #[serde(default = "default_derp_idle_timeout")]
+    pub idle_timeout_secs: u64,
+
     /// runtime details populated when the derp server starts.
     #[serde(skip)]
     pub runtime: Option<EmbeddedDerpRuntime>,
@@ -187,6 +197,7 @@ impl Default for EmbeddedDerpConfig {
             private_key_path: default_derp_private_key_path(),
             stun_listen_addr: Some("0.0.0.0:3478".to_string()),
             max_connections: default_derp_max_connections(),
+            idle_timeout_secs: default_derp_idle_timeout(),
             runtime: None,
         }
     }
@@ -210,6 +221,10 @@ fn default_derp_private_key_path() -> PathBuf {
 
 fn default_derp_max_connections() -> usize {
     DEFAULT_DERP_MAX_CONNECTIONS
+}
+
+fn default_derp_idle_timeout() -> u64 {
+    DEFAULT_DERP_IDLE_TIMEOUT_SECS
 }
 
 /// runtime information for the embedded derp server populated at startup.

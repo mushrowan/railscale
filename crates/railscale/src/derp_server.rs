@@ -6,6 +6,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use color_eyre::eyre::{self, Context as EyreContext, eyre};
 use crypto_box::{
@@ -193,7 +194,7 @@ pub async fn spawn_derp_listener(config: DerpListenerConfig) -> eyre::Result<Joi
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
-                    // permit is held for the duration of the connection
+                    // try to acquire a permit - if at capacity, reject the connection
                     let permit = match connection_semaphore.clone().try_acquire_owned() {
                         Ok(permit) => permit,
                         Err(_) => {
@@ -386,14 +387,21 @@ where
 pub struct EmbeddedDerpServer {
     crypto: DerpKeyMaterial,
     state: Arc<DerpServerState>,
+    idle_timeout: Option<Duration>,
 }
 
 impl EmbeddedDerpServer {
     /// create a new derp server with the given options.
     pub fn new(options: EmbeddedDerpOptions) -> Self {
+        let idle_timeout = if options.idle_timeout_secs > 0 {
+            Some(Duration::from_secs(options.idle_timeout_secs))
+        } else {
+            None
+        };
         Self {
             crypto: DerpKeyMaterial::new(options.keypair),
             state: Arc::new(DerpServerState::default()),
+            idle_timeout,
         }
     }
 
@@ -459,7 +467,20 @@ impl EmbeddedDerpServer {
         R: AsyncRead + Unpin + Send,
     {
         loop {
-            let (frame_type, payload) = match read_frame(reader).await {
+            // read frame with optional idle timeout
+            let frame_result = if let Some(timeout) = self.idle_timeout {
+                match tokio::time::timeout(timeout, read_frame(reader)).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        debug!(client = %short_key(&client_key), "DERP connection idle timeout");
+                        break;
+                    }
+                }
+            } else {
+                read_frame(reader).await
+            };
+
+            let (frame_type, payload) = match frame_result {
                 Ok(frame) => frame,
                 Err(err)
                     if matches!(
@@ -594,12 +615,23 @@ impl EmbeddedDerpServer {
 pub struct EmbeddedDerpOptions {
     /// the noise keypair for derp protocol encryption.
     pub keypair: Keypair,
+    /// idle timeout for connections in seconds. 0 to disable.
+    pub idle_timeout_secs: u64,
 }
 
 impl EmbeddedDerpOptions {
-    /// create new derp options with the given keypair.
+    /// set the idle timeout (0 to disable)
     pub fn new(keypair: Keypair) -> Self {
-        Self { keypair }
+        Self {
+            keypair,
+            idle_timeout_secs: railscale_types::DEFAULT_DERP_IDLE_TIMEOUT_SECS,
+        }
+    }
+
+    /// set the idle timeout (0 to disable).
+    pub fn with_idle_timeout(mut self, secs: u64) -> Self {
+        self.idle_timeout_secs = secs;
+        self
     }
 }
 

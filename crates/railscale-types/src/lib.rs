@@ -25,8 +25,8 @@ mod username;
 
 pub use api_key::{ApiKey, ApiKeySecret};
 pub use config::{
-    ApiConfig, Config, DEFAULT_DERP_MAX_CONNECTIONS, DatabaseConfig, EmbeddedDerpConfig,
-    EmbeddedDerpRuntime, OidcConfig, PkceConfig, PkceMethod,
+    ApiConfig, Config, DEFAULT_DERP_IDLE_TIMEOUT_SECS, DEFAULT_DERP_MAX_CONNECTIONS,
+    DatabaseConfig, EmbeddedDerpConfig, EmbeddedDerpRuntime, OidcConfig, PkceConfig, PkceMethod,
 };
 pub use email::{Email, EmailError};
 pub use error::Error;
