@@ -151,6 +151,14 @@ fn generate_new_cert(
     fs::write(cert_path, &cert_pem).wrap_err("failed to write DERP certificate")?;
     fs::write(key_path, &key_pem).wrap_err("failed to write DERP key")?;
 
+    // set restrictive permissions on the private key file (unix only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(key_path, fs::Permissions::from_mode(0o600))
+            .wrap_err("failed to set DERP key permissions")?;
+    }
+
     // get der bytes for fingerprint calculation
     let der_bytes = certified_key.cert.der().to_vec();
     let cert_der = CertificateDer::from(der_bytes.clone());
