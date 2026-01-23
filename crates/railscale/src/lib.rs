@@ -269,12 +269,36 @@ pub async fn create_app_with_policy_handle(
             get(handlers::ts2021).post(handlers::ts2021_http_upgrade),
         )
         .route("/machine/register", post(handlers::register))
-        .route("/machine/map", post(handlers::map))
+        .route("/machine/map", post(handlers::map));
+
+    // add oidc routes (rate limited if configured)
+    let oidc_router = Router::new()
         .route(
             "/register/{registration_id}",
             get(handlers::oidc::register_redirect),
         )
         .route("/oidc/callback", get(handlers::oidc::oidc_callback));
+
+    // apply rate limiting to oidc routes if configured
+    if let Some(oidc_config) = &state.config.oidc {
+        if oidc_config.rate_limit_per_minute > 0 {
+            let replenish_interval_ms = 60_000 / oidc_config.rate_limit_per_minute as u64;
+            let burst_size = (oidc_config.rate_limit_per_minute / 6).clamp(3, 20) as u32;
+
+            let governor_conf = GovernorConfigBuilder::default()
+                .per_millisecond(replenish_interval_ms)
+                .burst_size(burst_size)
+                .use_headers()
+                .finish()
+                .expect("valid OIDC rate limit config");
+
+            router = router.merge(oidc_router.layer(GovernorLayer::new(Arc::new(governor_conf))));
+        } else {
+            router = router.merge(oidc_router);
+        }
+    } else {
+        router = router.merge(oidc_router);
+    }
 
     // add rest api v1 routes if enabled
     if state.config.api.enabled {
@@ -291,7 +315,7 @@ pub async fn create_app_with_policy_handle(
                 1000 // Default to 1 request/second if somehow 0
             };
 
-            // use proxy-aware key extractor if behind a reverse proxy
+            // allow burst of ~10 seconds worth of requests, capped at 50
             let burst_size = (requests_per_minute / 6).clamp(5, 50);
 
             // use proxy-aware key extractor if behind a reverse proxy

@@ -352,6 +352,16 @@ pub struct OidcConfig {
     /// extra oauth2 parameters.
     #[serde(default)]
     pub extra_params: std::collections::HashMap<String, String>,
+
+    /// rate limit for oidc endpoints (requests per minute per ip).
+    /// set to 0 to disable rate limiting.
+    /// default: 30 requests/minute (more restrictive than api).
+    #[serde(default = "default_oidc_rate_limit")]
+    pub rate_limit_per_minute: u32,
+}
+
+fn default_oidc_rate_limit() -> u32 {
+    30
 }
 
 fn default_expiry_secs() -> u64 {
@@ -585,6 +595,7 @@ mod tests {
             expiry_secs: 180 * 24 * 3600, // 180 days in seconds
             use_expiry_from_token: false,
             extra_params: std::collections::HashMap::new(),
+            rate_limit_per_minute: 30,
         };
 
         assert!(oidc.pkce.enabled);

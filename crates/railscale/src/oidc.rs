@@ -438,6 +438,7 @@ mod tests {
             expiry_secs: 180 * 24 * 3600,
             use_expiry_from_token: false,
             extra_params: std::collections::HashMap::new(),
+            rate_limit_per_minute: 30,
         }
     }
 
