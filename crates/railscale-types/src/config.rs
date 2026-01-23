@@ -161,7 +161,7 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_derp_private_key_path")]
     pub private_key_path: PathBuf,
 
-    /// maximum concurrent connections. Prevents resource exhaustion
+    /// stun listen address.
     pub stun_listen_addr: Option<String>,
 
     /// maximum concurrent connections. prevents resource exhaustion.
@@ -442,6 +442,18 @@ pub struct ApiConfig {
     /// only applies when `rate_limit_enabled` is true.
     #[serde(default = "default_rate_limit_per_minute")]
     pub rate_limit_per_minute: u32,
+
+    /// whether the server is behind a reverse proxy.
+    /// when true, client ips are extracted from x-forwarded-for headers
+    /// but ONLY from requests originating from `trusted_proxies`.
+    #[serde(default)]
+    pub behind_proxy: bool,
+
+    /// list of trusted proxy ip addresses or cidr ranges.
+    /// only requests from these ips will have x-forwarded-for headers trusted.
+    /// examples: ["127.0.0.1", "10.0.0.0/8", "::1", "fd00::/8"]
+    #[serde(default)]
+    pub trusted_proxies: Vec<String>,
 }
 
 fn default_rate_limit_per_minute() -> u32 {
@@ -454,6 +466,8 @@ impl Default for ApiConfig {
             enabled: false,
             rate_limit_enabled: true,
             rate_limit_per_minute: 100,
+            behind_proxy: false,
+            trusted_proxies: Vec::new(),
         }
     }
 }
@@ -518,6 +532,34 @@ mod tests {
         let api: ApiConfig = serde_json::from_str(json).unwrap();
         assert!(!api.rate_limit_enabled);
         assert_eq!(api.rate_limit_per_minute, 50);
+    }
+
+    #[test]
+    fn test_api_config_proxy_defaults() {
+        let api = ApiConfig::default();
+        // behind proxy should be disabled by default
+        assert!(!api.behind_proxy, "behind_proxy should be false by default");
+        // trusted proxies should be empty by default
+        assert!(
+            api.trusted_proxies.is_empty(),
+            "trusted_proxies should be empty by default"
+        );
+    }
+
+    #[test]
+    fn test_api_config_proxy_serde() {
+        // configure for reverse proxy setup
+        let json = r#"{
+            "enabled": true,
+            "behind_proxy": true,
+            "trusted_proxies": ["127.0.0.1", "10.0.0.0/8", "::1"]
+        }"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert!(api.behind_proxy);
+        assert_eq!(api.trusted_proxies.len(), 3);
+        assert!(api.trusted_proxies.contains(&"127.0.0.1".to_string()));
+        assert!(api.trusted_proxies.contains(&"10.0.0.0/8".to_string()));
+        assert!(api.trusted_proxies.contains(&"::1".to_string()));
     }
 
     #[test]

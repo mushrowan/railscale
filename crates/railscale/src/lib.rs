@@ -23,6 +23,7 @@ mod noise_stream;
 mod notifier;
 /// openid connect authentication provider.
 pub mod oidc;
+mod rate_limit;
 /// grants-based access control resolver.
 pub mod resolver;
 /// minimal stun server for nat traversal.
@@ -290,30 +291,60 @@ pub async fn create_app_with_policy_handle(
                 1000 // Default to 1 request/second if somehow 0
             };
 
-            // allow burst of ~10 seconds worth of requests, capped at 50
+            // use proxy-aware key extractor if behind a reverse proxy
             let burst_size = (requests_per_minute / 6).clamp(5, 50);
 
-            let governor_conf = GovernorConfigBuilder::default()
-                .per_millisecond(replenish_interval_ms)
-                .burst_size(burst_size)
-                .use_headers() // Add x-ratelimit-* headers
-                .finish()
-                .expect("valid governor config");
+            // use proxy-aware key extractor if behind a reverse proxy
+            if state.config.api.behind_proxy {
+                let key_extractor =
+                    rate_limit::TrustedProxyKeyExtractor::new(&state.config.api.trusted_proxies);
 
-            // start background task to clean up rate limiter storage
-            let governor_limiter = governor_conf.limiter().clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(60));
-                loop {
-                    interval.tick().await;
-                    governor_limiter.retain_recent();
-                }
-            });
+                let governor_conf = GovernorConfigBuilder::default()
+                    .per_millisecond(replenish_interval_ms)
+                    .burst_size(burst_size)
+                    .key_extractor(key_extractor)
+                    .use_headers()
+                    .finish()
+                    .expect("valid governor config");
 
-            router = router.nest(
-                "/api/v1",
-                api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
-            );
+                // start background task to clean up rate limiter storage
+                let governor_limiter = governor_conf.limiter().clone();
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(60));
+                    loop {
+                        interval.tick().await;
+                        governor_limiter.retain_recent();
+                    }
+                });
+
+                router = router.nest(
+                    "/api/v1",
+                    api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
+                );
+            } else {
+                // direct connection mode - use peer ip directly
+                let governor_conf = GovernorConfigBuilder::default()
+                    .per_millisecond(replenish_interval_ms)
+                    .burst_size(burst_size)
+                    .use_headers()
+                    .finish()
+                    .expect("valid governor config");
+
+                // start background task to clean up rate limiter storage
+                let governor_limiter = governor_conf.limiter().clone();
+                tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(Duration::from_secs(60));
+                    loop {
+                        interval.tick().await;
+                        governor_limiter.retain_recent();
+                    }
+                });
+
+                router = router.nest(
+                    "/api/v1",
+                    api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
+                );
+            }
         } else {
             router = router.nest("/api/v1", api_router);
         }
