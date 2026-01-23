@@ -590,7 +590,7 @@ impl AdminService for AdminServiceImpl {
 
         Ok(Response::new(pb::ApiKeyWithSecret {
             id: created.id,
-            key: secret.full_key, // Full key shown only on create
+            key: secret.full_key.clone(), // Full key shown only on create (cloned for zeroize)
             name: created.name,
             user_id: created.user_id.0,
             expiration: created.expiration.map(|e| e.to_rfc3339()),

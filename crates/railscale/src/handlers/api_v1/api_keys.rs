@@ -177,7 +177,7 @@ async fn create_api_key(
     Ok((
         StatusCode::CREATED,
         Json(CreateApiKeyResponse {
-            api_key: secret.full_key,
+            api_key: secret.full_key.clone(), // Cloned because ApiKeySecret zeroizes on drop
             key: ApiKeyResponse::from(key),
         }),
     ))

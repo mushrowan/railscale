@@ -11,15 +11,17 @@
 //! - **Verifier hash** (stored in DB): SHA-256 hash for verification
 //!
 //! this design ensures:
-//! - Database lookups are timing-safe (lookup by selector, not by comparing hashes)
+//! - Sensitive key material is zeroed from memory when dropped
 //! - Keys cannot be recovered from database breach (only hash is stored)
 //! - Verification uses constant-time comparison
+//! - Sensitive key material is zeroed from memory when dropped
 
 use chrono::{DateTime, Utc};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::user::UserId;
 
@@ -35,9 +37,12 @@ const VERIFIER_BYTES: usize = 16;
 /// a generated api key secret with its components for storage.
 ///
 /// this struct is returned when generating a new api key. the `full_key` should
-/// be shown to the user exactly once, while `selector` and `verifier_hash` are
-/// stored in the database.
-#[derive(Debug, Clone)]
+/// the `full_key` field is automatically zeroed from memory when this struct
+/// is dropped to prevent secrets from lingering in memory
+///
+/// the `full_key` field is automatically zeroed from memory when this struct
+/// is dropped to prevent secrets from lingering in memory.
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
 pub struct ApiKeySecret {
     /// the full api key to give to the user (only shown once).
     /// format: `rsapi_{selector}_{verifier}`
@@ -59,21 +64,21 @@ impl ApiKeySecret {
     pub fn generate() -> Self {
         let mut rng = rand::rng();
 
-        // generate random bytes
-        let mut selector_bytes = [0u8; SELECTOR_BYTES];
-        let mut verifier_bytes = [0u8; VERIFIER_BYTES];
-        rng.fill_bytes(&mut selector_bytes);
-        rng.fill_bytes(&mut verifier_bytes);
+        // generate random bytes - wrapped in Zeroizing for automatic cleanup
+        let mut selector_bytes = Zeroizing::new([0u8; SELECTOR_BYTES]);
+        let mut verifier_bytes = Zeroizing::new([0u8; VERIFIER_BYTES]);
+        rng.fill_bytes(&mut *selector_bytes);
+        rng.fill_bytes(&mut *verifier_bytes);
 
         // encode as hex (deterministic length, no separator conflicts)
-        let selector = hex::encode(selector_bytes);
-        let verifier = hex::encode(verifier_bytes);
+        let selector = hex::encode(&*selector_bytes);
+        let verifier = Zeroizing::new(hex::encode(&*verifier_bytes));
 
         // hash the verifier for storage (hash the hex string, not raw bytes)
         let verifier_hash = hex::encode(Sha256::digest(verifier.as_bytes()));
 
         // build the full key
-        let full_key = format!("{API_KEY_PREFIX}{selector}_{verifier}");
+        let full_key = format!("{API_KEY_PREFIX}{selector}_{}", &*verifier);
 
         Self {
             full_key,
@@ -116,14 +121,14 @@ impl ApiKeySecret {
 ///
 /// api keys are used for:
 /// - CLI automation
-/// this struct represents the stored form of an api key. The actual secret
-/// is only available at creation time via [`ApiKeySecret`]
-///selector portion for database lookup (hex-encoded)
-/// this is safe to show in listings
+/// - External integrations
+/// - Programmatic control plane access
+///
+/// this struct represents the stored form of an api key. the actual secret
 /// is only available at creation time via [`ApiKeySecret`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {
-    /// used for verification, never shown to users
+    /// unique identifier.
     pub id: u64,
 
     /// selector portion for database lookup (hex-encoded).
