@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
-use railscale_types::{User, UserId};
+use railscale_types::{User, UserId, Username};
 
 /// response wrapper for list users endpoint.
 #[derive(Debug, Serialize)]
@@ -56,10 +56,12 @@ impl From<User> for UserResponse {
     }
 }
 
-/// request body for creating a user.
+/// username must be 1-63 lowercase alphanumeric chars with hyphens
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
-    pub name: String,
+    /// username must be 1-63 lowercase alphanumeric chars with hyphens.
+    /// validated automatically via serde deserialization.
+    pub name: Username,
     #[serde(default)]
     pub display_name: Option<String>,
     #[serde(default)]
@@ -112,24 +114,24 @@ async fn create_user(
     State(state): State<AppState>,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<CreateUserResponse>), ApiError> {
-    // validate username
-    super::validation::validate_username(&req.name)?;
+    // username is already validated by serde deserialization
+    let name = req.name.into_inner();
 
     // check if user already exists
     if state
         .db
-        .get_user_by_name(&req.name)
+        .get_user_by_name(&name)
         .await
         .map_err(ApiError::internal)?
         .is_some()
     {
         return Err(ApiError::conflict(format!(
             "user '{}' already exists",
-            req.name
+            name
         )));
     }
 
-    let mut user = User::new(UserId(0), req.name);
+    let mut user = User::new(UserId(0), name);
     user.display_name = req.display_name;
     user.email = req.email;
 
@@ -186,7 +188,7 @@ async fn rename_user(
     Path((old_id, new_name)): Path<(u64, String)>,
 ) -> Result<Json<RenameUserResponse>, ApiError> {
     // validate new username
-    super::validation::validate_username(&new_name)?;
+    let new_name = Username::new(&new_name).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let user_id = UserId(old_id);
 
@@ -201,7 +203,7 @@ async fn rename_user(
     // check new name doesn't conflict
     if let Some(existing) = state
         .db
-        .get_user_by_name(&new_name)
+        .get_user_by_name(new_name.as_str())
         .await
         .map_err(ApiError::internal)?
     {
@@ -214,7 +216,7 @@ async fn rename_user(
     }
 
     // update name
-    user.name = new_name;
+    user.name = new_name.into_inner();
     let user = state
         .db
         .update_user(&user)

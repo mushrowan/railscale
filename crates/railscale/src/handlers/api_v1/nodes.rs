@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
-use railscale_types::{Node, NodeId};
+use railscale_types::{Node, NodeId, NodeName};
 
 /// response wrapper for list nodes endpoint.
 #[derive(Debug, Serialize)]
@@ -101,7 +101,7 @@ pub struct ExpireNodeRequest {
     pub expiry: Option<String>,
 }
 
-/// tags are validated during deserialization via the Tag type
+/// request for setting tags.
 #[derive(Debug, Deserialize)]
 pub struct SetTagsRequest {
     /// tags are validated during deserialization via the tag type.
@@ -263,7 +263,7 @@ async fn rename_node(
     Path((id, new_name)): Path<(u64, String)>,
 ) -> Result<Json<RenameNodeResponse>, ApiError> {
     // validate new node name
-    super::validation::validate_node_name(&new_name)?;
+    let new_name = NodeName::new(&new_name).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let node_id = NodeId(id);
 
@@ -274,7 +274,7 @@ async fn rename_node(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    node.given_name = new_name;
+    node.given_name = new_name.into_inner();
     let node = state
         .db
         .update_node(&node)

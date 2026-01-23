@@ -13,11 +13,13 @@ mod config;
 mod error;
 mod keys;
 mod node;
+mod node_name;
 mod oidc;
 mod preauth_key;
 mod tag;
 pub mod test_utils;
 mod user;
+mod username;
 
 pub use api_key::{ApiKey, ApiKeySecret};
 pub use config::{
@@ -26,10 +28,12 @@ pub use config::{
 pub use error::Error;
 pub use keys::{DiscoKey, MachineKey, NodeKey};
 pub use node::{HostInfo, NetInfo, Node, NodeId, NodeView, RegisterMethod};
+pub use node_name::{MAX_NODE_NAME_LEN, NodeName, NodeNameError};
 pub use oidc::{OidcClaims, RegistrationId};
 pub use preauth_key::PreAuthKey;
 pub use tag::{MAX_TAG_NAME_LEN, MAX_TAGS, Tag, TagError};
 pub use user::{User, UserId};
+pub use username::{MAX_USERNAME_LEN, Username, UsernameError};
 
 /// result type alias using the crate's error type.
 pub type Result<T> = std::result::Result<T, Error>;
