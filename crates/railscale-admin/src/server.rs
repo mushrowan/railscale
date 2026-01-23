@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::Policy;
+use railscale_types::MAX_POLICY_SIZE;
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::info;
@@ -107,8 +108,15 @@ impl AdminService for AdminServiceImpl {
     ) -> Result<Response<pb::SetPolicyResponse>, Status> {
         let policy_json = request.into_inner().policy_json;
 
-        let policy: Policy = serde_json::from_str(&policy_json)
-            .map_err(|e| Status::invalid_argument(format!("Failed to parse policy: {}", e)))?;
+        // check size limit
+        if policy_json.len() > MAX_POLICY_SIZE {
+            return Err(Status::invalid_argument("policy exceeds maximum size"));
+        }
+
+        let policy: Policy = serde_json::from_str(&policy_json).map_err(|e| {
+            info!("Invalid policy submitted via gRPC: {}", e);
+            Status::invalid_argument("invalid policy format")
+        })?;
 
         let grants_loaded = policy.grants.len() as u32;
         self.policy_handle.reload(policy).await;
