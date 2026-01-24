@@ -233,7 +233,7 @@ async fn expire_node(
     // parse expiry or use now
     let expiry = if let Some(expiry_str) = req.expiry {
         chrono::DateTime::parse_from_rfc3339(&expiry_str)
-            .map_err(|e| ApiError::bad_request(format!("invalid expiry format: {}", e)))?
+            .map_err(|_| ApiError::bad_request("invalid expiration format, expected RFC3339"))?
             .with_timezone(&Utc)
     } else {
         Utc::now()

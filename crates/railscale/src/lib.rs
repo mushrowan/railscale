@@ -111,7 +111,7 @@ pub struct AppState {
     pub notifier: StateNotifier,
     /// ip address allocator for new nodes.
     pub ip_allocator: Arc<Mutex<IpAllocator>>,
-    /// wrapped in Zeroizing for secure memory clearing on drop
+    /// server's noise public key for ts2021 protocol.
     pub noise_public_key: Vec<u8>,
     /// server's noise private key for ts2021 protocol handshakes.
     /// wrapped in zeroizing for secure memory clearing on drop.
@@ -262,18 +262,23 @@ pub async fn create_app_with_policy_handle(
         derp_map,
     };
 
-    let mut router = Router::new()
-        .route("/health", get(handlers::health))
-        .route("/version", get(handlers::version))
+    // protocol routes with body size limits (64kb) to prevent memory exhaustion
+    let protocol_router = Router::new()
         .route("/verify", post(handlers::verify))
-        .route("/bootstrap-dns", get(handlers::bootstrap_dns))
-        .route("/key", get(handlers::key))
         .route(
             "/ts2021",
             get(handlers::ts2021).post(handlers::ts2021_http_upgrade),
         )
         .route("/machine/register", post(handlers::register))
-        .route("/machine/map", post(handlers::map));
+        .route("/machine/map", post(handlers::map))
+        .layer(DefaultBodyLimit::max(64 * 1024));
+
+    let mut router = Router::new()
+        .route("/health", get(handlers::health))
+        .route("/version", get(handlers::version))
+        .route("/bootstrap-dns", get(handlers::bootstrap_dns))
+        .route("/key", get(handlers::key))
+        .merge(protocol_router);
 
     // add oidc routes (rate limited if configured)
     let oidc_router = Router::new()
