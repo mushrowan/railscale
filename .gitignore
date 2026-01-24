@@ -8,4 +8,4 @@
 result
 *.sqlite
 *.sqlite-shm
-*.sqlite-wal
+*.sqlite-walAUDIT2.md

@@ -18,6 +18,7 @@ mod node_name;
 mod oidc;
 mod policy_json;
 mod preauth_key;
+mod preauth_key_token;
 mod tag;
 pub mod test_utils;
 mod user;
@@ -38,6 +39,9 @@ pub use node_name::{MAX_NODE_NAME_LEN, NodeName, NodeNameError};
 pub use oidc::{OidcClaims, RegistrationId};
 pub use policy_json::{MAX_POLICY_SIZE, PolicyJson, PolicyJsonError};
 pub use preauth_key::PreAuthKey;
+pub use preauth_key_token::{
+    PREAUTH_KEY_HEX_LEN, PREAUTH_KEY_PREFIX, PreAuthKeyToken, PreAuthKeyTokenError,
+};
 pub use tag::{MAX_TAG_NAME_LEN, MAX_TAGS, Tag, TagError};
 pub use user::{User, UserId};
 pub use username::{MAX_USERNAME_LEN, Username, UsernameError};

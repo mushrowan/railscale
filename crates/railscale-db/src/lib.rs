@@ -415,6 +415,7 @@ impl Database for RailscaleDb {
                 sea_orm::sea_query::Expr::value(true),
             )
             .filter(entity::preauth_key::Column::Id.eq(id as i64))
+            .filter(entity::preauth_key::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
         Ok(())
@@ -447,6 +448,7 @@ impl Database for RailscaleDb {
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
             .filter(entity::preauth_key::Column::Id.eq(id as i64))
+            .filter(entity::preauth_key::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
         Ok(())
@@ -522,6 +524,7 @@ impl Database for RailscaleDb {
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
             .filter(entity::api_key::Column::Id.eq(id as i64))
+            .filter(entity::api_key::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
         Ok(())
@@ -534,6 +537,7 @@ impl Database for RailscaleDb {
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
             .filter(entity::api_key::Column::Id.eq(id as i64))
+            .filter(entity::api_key::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
         Ok(())

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use ipnet::IpNet;
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 /// main configuration for railscale.
@@ -74,7 +75,7 @@ impl Default for Config {
 }
 
 /// database configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
     /// database type: "sqlite" or "postgres".
@@ -82,6 +83,43 @@ pub struct DatabaseConfig {
 
     /// database connection string or file path.
     pub connection_string: String,
+}
+
+impl std::fmt::Debug for DatabaseConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseConfig")
+            .field("db_type", &self.db_type)
+            .field(
+                "connection_string",
+                &redact_connection_string(&self.connection_string),
+            )
+            .finish()
+    }
+}
+
+/// returns the original string for non-url formats (like SQLite file paths)
+///
+//check if it looks like a url with credentials
+/// returns the original string for non-url formats (like sqlite file paths).
+fn redact_connection_string(s: &str) -> String {
+    // check if it looks like a url with credentials
+    if let Some(at_pos) = s.find('@') {
+        if let Some(scheme_end) = s.find("://") {
+            let credentials_start = scheme_end + 3;
+            let credentials = &s[credentials_start..at_pos];
+
+            // check if credentials contain a password (colon-separated)
+            if let Some(colon_pos) = credentials.find(':') {
+                let user = &credentials[..colon_pos];
+                let scheme = &s[..scheme_end + 3];
+                let rest = &s[at_pos..];
+                return format!("{}{}:[REDACTED]{}", scheme, user, rest);
+            }
+        }
+    }
+
+    // no password found, return as-is
+    s.to_string()
 }
 
 impl Default for DatabaseConfig {
@@ -383,8 +421,9 @@ pub struct OidcConfig {
     pub client_id: String,
 
     /// client secret (set directly or loaded from `client_secret_path`).
-    #[serde(default)]
-    pub client_secret: String,
+    /// wrapped in secretstring to prevent accidental logging/serialisation.
+    #[serde(default, skip_serializing)]
+    pub client_secret: SecretString,
 
     /// path to file containing client secret.
     /// if set, the secret is loaded from this file at startup.
@@ -438,6 +477,8 @@ impl std::fmt::Debug for OidcConfig {
         f.debug_struct("OidcConfig")
             .field("issuer", &self.issuer)
             .field("client_id", &self.client_id)
+            // secretstring's debug already redacts, but we explicitly show [redacted]
+            // to make it clear in logs that a secret exists but is hidden
             .field("client_secret", &"[REDACTED]")
             .field("client_secret_path", &self.client_secret_path)
             .field("scope", &self.scope)
@@ -579,6 +620,40 @@ impl Default for ApiConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use secrecy::ExposeSecret;
+
+    #[test]
+    fn test_database_config_debug_redacts_password() {
+        let config = DatabaseConfig {
+            db_type: "postgres".to_string(),
+            connection_string: "postgres://admin:supersecretpassword@localhost:5432/railscale"
+                .to_string(),
+        };
+
+        let debug_output = format!("{:?}", config);
+        // password must not appear in debug output
+        assert!(
+            !debug_output.contains("supersecretpassword"),
+            "connection_string password should be redacted in Debug output"
+        );
+        // but host and database should be visible for debugging
+        assert!(
+            debug_output.contains("localhost"),
+            "host should be visible in Debug output"
+        );
+    }
+
+    #[test]
+    fn test_database_config_debug_sqlite_unchanged() {
+        let config = DatabaseConfig {
+            db_type: "sqlite".to_string(),
+            connection_string: "/var/lib/railscale/db.sqlite".to_string(),
+        };
+
+        let debug_output = format!("{:?}", config);
+        // sqlite paths have no password to redact
+        assert!(debug_output.contains("/var/lib/railscale/db.sqlite"));
+    }
 
     #[test]
     fn test_default_config() {
@@ -696,10 +771,12 @@ mod tests {
 
     #[test]
     fn test_oidc_config_full() {
+        use secrecy::SecretString;
+
         let oidc = OidcConfig {
             issuer: "https://sso.example.com".to_string(),
             client_id: "railscale".to_string(),
-            client_secret: "secret".to_string(),
+            client_secret: SecretString::from("secret"),
             client_secret_path: None,
             scope: vec![
                 "openid".to_string(),
@@ -776,12 +853,70 @@ mod tests {
         let oidc: OidcConfig = serde_json::from_str(json).unwrap();
         assert_eq!(oidc.issuer, "https://sso.example.com");
         assert!(
-            oidc.client_secret.is_empty(),
+            oidc.client_secret.expose_secret().is_empty(),
             "client_secret should default to empty"
         );
         assert_eq!(
             oidc.client_secret_path,
             Some(std::path::PathBuf::from("/run/secrets/oidc-secret"))
+        );
+    }
+
+    #[test]
+    fn test_oidc_client_secret_debug_redacted() {
+        use secrecy::SecretString;
+
+        let oidc = OidcConfig {
+            issuer: "https://sso.example.com".to_string(),
+            client_id: "railscale".to_string(),
+            client_secret: SecretString::from("super-secret-value"),
+            client_secret_path: None,
+            scope: vec!["openid".to_string()],
+            email_verified_required: true,
+            pkce: PkceConfig::default(),
+            allowed_domains: vec![],
+            allowed_users: vec![],
+            allowed_groups: vec![],
+            expiry_secs: default_expiry_secs(),
+            use_expiry_from_token: false,
+            extra_params: std::collections::HashMap::new(),
+            rate_limit_per_minute: 30,
+        };
+
+        let debug_output = format!("{:?}", oidc);
+        // secret must not appear in debug output
+        assert!(
+            !debug_output.contains("super-secret-value"),
+            "client_secret should be redacted in Debug output"
+        );
+    }
+
+    #[test]
+    fn test_oidc_client_secret_not_serialized() {
+        use secrecy::SecretString;
+
+        let oidc = OidcConfig {
+            issuer: "https://sso.example.com".to_string(),
+            client_id: "railscale".to_string(),
+            client_secret: SecretString::from("super-secret-value"),
+            client_secret_path: None,
+            scope: vec!["openid".to_string()],
+            email_verified_required: true,
+            pkce: PkceConfig::default(),
+            allowed_domains: vec![],
+            allowed_users: vec![],
+            allowed_groups: vec![],
+            expiry_secs: default_expiry_secs(),
+            use_expiry_from_token: false,
+            extra_params: std::collections::HashMap::new(),
+            rate_limit_per_minute: 30,
+        };
+
+        let json = serde_json::to_string(&oidc).unwrap();
+        // secret must not appear in serialized output
+        assert!(
+            !json.contains("super-secret-value"),
+            "client_secret should not be serialized"
         );
     }
 }

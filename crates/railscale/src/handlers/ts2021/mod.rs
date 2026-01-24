@@ -1,8 +1,8 @@
-//! tS2021 protocol handler for tailscale clients
+//! ts2021 protocol handler for tailscale clients.
 //!
 //! this module implements the `/ts2021` endpoint that handles
 //! both websocket upgrades (for browser clients) and http protocol
-//! switch (for native tailscale clients) with Noise handshakes
+//! switch (for native Tailscale clients) with Noise handshakes.
 //!
 //! ## protocol variants
 //!
@@ -26,7 +26,7 @@
 //! - Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
 //! - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
 //!
-//! large writes are automatically chunked into multiple frames
+//! large writes are automatically chunked into multiple frames.
 
 mod http_noise_stream;
 mod ws_noise_stream;
@@ -47,6 +47,7 @@ use railscale_proto::NoiseHandshake;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
 use tracing::{debug, error, info, trace};
+use zeroize::Zeroizing;
 
 use http_noise_stream::HttpNoiseStream;
 use ws_noise_stream::ServerNoiseStream;
@@ -54,33 +55,33 @@ use ws_noise_stream::ServerNoiseStream;
 use super::MachineKeyContext;
 use crate::AppState;
 
-/// tS2021 message types
+/// ts2021 message types.
 const MSG_TYPE_INITIATION: u8 = 0x01;
 const MSG_TYPE_RESPONSE: u8 = 0x02;
 #[allow(dead_code)]
 const MSG_TYPE_ERROR: u8 = 0x03;
-/// post-handshake data record type
+/// post-handshake data record type.
 const MSG_TYPE_RECORD: u8 = 0x04;
 
-/// maximum plaintext bytes per Noise frame (from tailscale's control/controlbase/conn.go)
+/// maximum plaintext bytes per noise frame (from tailscale's control/controlbase/conn.go).
 const MAX_PLAINTEXT_SIZE: usize = 4077;
 
-/// query parameters for the /ts2021 endpoint
+/// query parameters for the /ts2021 endpoint.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Ts2021Params {
-    /// base64-encoded Noise handshake initiation message
+    /// base64-encoded noise handshake initiation message.
     #[serde(rename = "X-Tailscale-Handshake")]
     pub handshake: Option<String>,
 }
 
-/// handle TS2021 protocol upgrade requests
+/// handle ts2021 protocol upgrade requests.
 ///
 /// this endpoint accepts websocket upgrades and performs the noise
-/// protocol handshake to establish an encrypted connection
+/// protocol handshake to establish an encrypted connection.
 ///
 /// if no websocket upgrade header is present, axum's extractor will
-/// automatically return a 400 Bad Request with an appropriate message
+/// automatically return a 400 Bad Request with an appropriate message.
 pub async fn ts2021(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
@@ -99,10 +100,10 @@ pub async fn ts2021(
         })
 }
 
-/// handle TS2021 http protocol upgrade requests (native tailscale clients)
+/// handle ts2021 http protocol upgrade requests (native tailscale clients).
 ///
 /// this endpoint handles the `upgrade: tailscale-control-protocol` header
-/// used by native tailscale clients (Linux, macOS, Windows)
+/// used by native Tailscale clients (Linux, macOS, Windows).
 ///
 /// protocol:
 /// ```text
@@ -122,7 +123,7 @@ pub async fn ts2021_http_upgrade(
     headers: HeaderMap,
     request: axum::http::Request<Body>,
 ) -> Response {
-    info!("POST /ts2021 - http upgrade request received");
+    info!("POST /ts2021 - HTTP upgrade request received");
     trace!("headers: {:?}", headers);
 
     // check for the upgrade header
@@ -145,7 +146,7 @@ pub async fn ts2021_http_upgrade(
         .get("X-Tailscale-Handshake")
         .and_then(|v| v.to_str().ok())
     else {
-        info!("Missing X-tailscale-Handshake header");
+        info!("Missing X-Tailscale-Handshake header");
         return (
             StatusCode::BAD_REQUEST,
             "Missing X-Tailscale-Handshake header",
@@ -187,11 +188,11 @@ pub async fn ts2021_http_upgrade(
         .unwrap()
 }
 
-/// handle a TS2021 WebSocket connection
+/// handle a ts2021 websocket connection.
 async fn handle_ts2021_connection(
     mut socket: axum::extract::ws::WebSocket,
     handshake_b64: Option<String>,
-    private_key: Vec<u8>,
+    private_key: Zeroizing<Vec<u8>>,
     state: AppState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // parse the initiation message from the query parameter
@@ -316,20 +317,20 @@ async fn handle_ts2021_connection(
     http2.max_frame_size(16384);
 
     if let Err(e) = http2.serve_connection(io, service).await {
-        debug!("http/2 connection ended: {}", e);
+        debug!("HTTP/2 connection ended: {}", e);
     }
 
     Ok(())
 }
 
-/// handle a TS2021 http upgraded connection (raw tcp stream)
+/// handle a ts2021 http upgraded connection (raw tcp stream).
 ///
 /// unlike the websocket handler, this works with a raw byte stream
-/// after the http 101 upgrade completes
+/// after the HTTP 101 upgrade completes.
 async fn handle_ts2021_http_connection(
     upgraded: hyper::upgrade::Upgraded,
     handshake_b64: String,
-    private_key: Vec<u8>,
+    private_key: Zeroizing<Vec<u8>>,
     state: AppState,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // wrap the upgraded connection for tokio compatibility
@@ -439,9 +440,9 @@ async fn handle_ts2021_http_connection(
     let machine_key_context = MachineKeyContext::from_bytes(client_key);
 
     let transport = handshake.into_transport()?;
-    info!("starting http/2 server over Noise transport");
+    info!("Starting HTTP/2 server over Noise transport");
 
-    // create the encrypted stream for http/2
+    // create the encrypted stream for HTTP/2
     let noise_stream = HttpNoiseStream::new(io, transport);
 
     // create a router for the ts2021 endpoints with state
@@ -474,7 +475,7 @@ async fn handle_ts2021_http_connection(
     http2.max_frame_size(16384);
 
     if let Err(e) = http2.serve_connection(io, service).await {
-        debug!("http/2 connection ended: {}", e);
+        debug!("HTTP/2 connection ended: {}", e);
     }
 
     Ok(())

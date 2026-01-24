@@ -10,6 +10,7 @@ use openidconnect::{
     reqwest,
 };
 use railscale_types::{OidcClaims, OidcConfig, PkceMethod, RegistrationId};
+use secrecy::ExposeSecret;
 
 use railscale_types::{HostInfo, MachineKey, Node, NodeKey, User};
 use tokio::sync::{Mutex, Notify};
@@ -138,7 +139,7 @@ impl AuthProviderOidc {
         Ok(Self {
             provider_metadata,
             client_id: ClientId::new(config.client_id.clone()),
-            client_secret: ClientSecret::new(config.client_secret.clone()),
+            client_secret: ClientSecret::new(config.client_secret.expose_secret().to_string()),
             redirect_url,
             http_client,
             config,
@@ -342,6 +343,7 @@ pub fn validate_oidc_claims(config: &OidcConfig, claims: &OidcClaims) -> Result<
 mod tests {
     use super::*;
     use railscale_types::{PkceConfig, PkceMethod};
+    use secrecy::SecretString;
 
     #[test]
     fn test_pending_registration_stores_node_info() {
@@ -426,7 +428,7 @@ mod tests {
         OidcConfig {
             issuer: "https://sso.example.com".to_string(),
             client_id: "railscale".to_string(),
-            client_secret: "secret".to_string(),
+            client_secret: SecretString::from("secret"),
             client_secret_path: None,
             scope: vec!["openid".to_string()],
             email_verified_required: false,

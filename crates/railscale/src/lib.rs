@@ -55,6 +55,7 @@ use railscale_types::{Config, RegistrationId};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Mutex, RwLock};
+use zeroize::Zeroizing;
 
 use crate::oidc::PendingRegistration;
 
@@ -110,10 +111,11 @@ pub struct AppState {
     pub notifier: StateNotifier,
     /// ip address allocator for new nodes.
     pub ip_allocator: Arc<Mutex<IpAllocator>>,
-    /// server's noise public key for ts2021 protocol.
+    /// wrapped in Zeroizing for secure memory clearing on drop
     pub noise_public_key: Vec<u8>,
     /// server's noise private key for ts2021 protocol handshakes.
-    pub noise_private_key: Vec<u8>,
+    /// wrapped in zeroizing for secure memory clearing on drop.
+    pub noise_private_key: Zeroizing<Vec<u8>>,
     /// cache of pending registrations waiting for oidc completion.
     /// maps registrationid -> arc<pendingregistration>.
     pub pending_registrations: Cache<RegistrationId, Arc<PendingRegistration>>,
@@ -255,7 +257,7 @@ pub async fn create_app_with_policy_handle(
         notifier,
         ip_allocator: Arc::new(Mutex::new(ip_allocator)),
         noise_public_key: keypair.public,
-        noise_private_key: keypair.private,
+        noise_private_key: Zeroizing::new(keypair.private),
         pending_registrations,
         derp_map,
     };

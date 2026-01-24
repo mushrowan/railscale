@@ -11,6 +11,7 @@ use railscale_admin::{AdminServiceImpl, AdminServiceServer};
 use railscale_db::RailscaleDb;
 use railscale_grants::Policy;
 use railscale_types::{Config, EmbeddedDerpRuntime};
+use secrecy::ExposeSecret;
 use tokio::net::{TcpListener, UnixListener};
 use tokio::signal::unix::{SignalKind, signal};
 use tonic::transport::Server as TonicServer;
@@ -490,10 +491,11 @@ impl ServeCommand {
                         format!("failed to read OIDC client secret from {:?}", secret_path)
                     })?
                     .trim()
-                    .to_string();
+                    .to_string()
+                    .into();
             }
 
-            if oidc_config.client_secret.is_empty() {
+            if oidc_config.client_secret.expose_secret().is_empty() {
                 bail!("OIDC client_secret is required (set client_secret or client_secret_path)");
             }
 

@@ -46,6 +46,7 @@ expand-tilde = "0.6"
 openidconnect = { workspace = true }
 moka = { workspace = true }
 axum-extra = { version = "0.12", features = ["cookie"] }
+secrecy = { workspace = true }
 rand = "0.9"
 
 # Streaming
@@ -59,6 +60,7 @@ hex = "0.4"
 tokio-tungstenite = "0.28"
 snow = "0.10"
 tower = "0.5"
+zeroize = "1.8"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 crypto_box = "0.9"
 httparse = "1.10"
@@ -102,6 +104,7 @@ tokio-tungstenite = "0.28"
 hyper-util = { version = "0.1", features = ["server-auto", "tokio"] }
 http = "1"
 anyhow = { workspace = true }
+secrecy = { workspace = true }
 # Crypto crates for Noise handshake testing
 snow = "0.10"
 zstd = "0.13"

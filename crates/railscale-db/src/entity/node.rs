@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use ipnet::IpNet;
 use sea_orm::entity::prelude::*;
 use sea_orm::{ActiveValue::NotSet, Set};
+use tracing::warn;
 
 use railscale_types::{
     DiscoKey, HostInfo, MachineKey, Node, NodeId, NodeKey, RegisterMethod, Tag, UserId,
@@ -102,19 +103,39 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for Node {
     fn from(model: Model) -> Self {
-        let endpoints: Vec<SocketAddr> = serde_json::from_str(&model.endpoints).unwrap_or_default();
-        let hostinfo: Option<HostInfo> = model
-            .hostinfo
-            .as_ref()
-            .and_then(|s| serde_json::from_str(s).ok());
+        let endpoints: Vec<SocketAddr> = match serde_json::from_str(&model.endpoints) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(node_id = model.id, error = %e, "failed to parse node endpoints JSON, using empty list");
+                Vec::new()
+            }
+        };
+        let hostinfo: Option<HostInfo> =
+            model
+                .hostinfo
+                .as_ref()
+                .and_then(|s| match serde_json::from_str(s) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        warn!(node_id = model.id, error = %e, "failed to parse node hostinfo JSON");
+                        None
+                    }
+                });
         // parse tags - invalid tags from legacy data are filtered out
-        let tags: Vec<Tag> = serde_json::from_str::<Vec<String>>(&model.tags)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let approved_routes: Vec<IpNet> =
-            serde_json::from_str(&model.approved_routes).unwrap_or_default();
+        let tags: Vec<Tag> = match serde_json::from_str::<Vec<String>>(&model.tags) {
+            Ok(v) => v.into_iter().filter_map(|s| s.parse().ok()).collect(),
+            Err(e) => {
+                warn!(node_id = model.id, error = %e, "failed to parse node tags JSON, using empty list");
+                Vec::new()
+            }
+        };
+        let approved_routes: Vec<IpNet> = match serde_json::from_str(&model.approved_routes) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(node_id = model.id, error = %e, "failed to parse node approved_routes JSON, using empty list");
+                Vec::new()
+            }
+        };
 
         let ipv4: Option<IpAddr> = model.ipv4.as_ref().and_then(|s| s.parse().ok());
         let ipv6: Option<IpAddr> = model.ipv6.as_ref().and_then(|s| s.parse().ok());

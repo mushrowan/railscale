@@ -12,6 +12,7 @@ thiserror = { workspace = true }
 chrono = { workspace = true }
 ipnet = { workspace = true }
 email_address = { workspace = true }
+secrecy = { workspace = true }
 base64 = "0.22"
 hex = "0.4"
 rand = "0.9"

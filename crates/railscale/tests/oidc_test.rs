@@ -8,6 +8,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use railscale_db::RailscaleDb;
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use railscale_types::{Config, OidcConfig, PkceConfig, PkceMethod, RegistrationId};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tower::ServiceExt;
@@ -139,7 +140,7 @@ fn test_oidc_config(issuer: &str) -> OidcConfig {
     OidcConfig {
         issuer: issuer.to_string(),
         client_id: "test-client".to_string(),
-        client_secret: "test-secret".to_string(),
+        client_secret: SecretString::from("test-secret"),
         client_secret_path: None,
         scope: vec!["openid".to_string(), "email".to_string()],
         email_verified_required: false,

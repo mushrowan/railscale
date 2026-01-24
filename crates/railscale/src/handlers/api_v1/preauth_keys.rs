@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
-use railscale_types::{PreAuthKey, UserId};
+use railscale_types::{PreAuthKey, PreAuthKeyToken, UserId};
 
 /// response wrapper for list preauth keys endpoint.
 #[derive(Debug, Serialize)]
@@ -237,10 +237,7 @@ async fn delete_preauth_key(
 
 /// generate a random preauth key string.
 fn generate_preauth_key() -> String {
-    use rand::Rng;
-    let mut rng = rand::rng();
-    let bytes: [u8; 24] = rng.random();
-    format!("tskey-auth-{}", hex::encode(bytes))
+    PreAuthKeyToken::generate().into_inner()
 }
 
 #[cfg(test)]
