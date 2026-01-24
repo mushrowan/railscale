@@ -431,6 +431,8 @@ pub struct EmbeddedDerpServer {
     bytes_per_second: u32,
     /// message burst size in bytes (sent to clients in serverinfo).
     bytes_burst: u32,
+    /// whether to enforce rate limiting server-side (in addition to client-side).
+    server_side_rate_limit: bool,
 }
 
 impl EmbeddedDerpServer {
@@ -447,6 +449,7 @@ impl EmbeddedDerpServer {
             idle_timeout,
             bytes_per_second: options.bytes_per_second,
             bytes_burst: options.bytes_burst,
+            server_side_rate_limit: options.server_side_rate_limit,
         }
     }
 
@@ -511,6 +514,22 @@ impl EmbeddedDerpServer {
     where
         R: AsyncRead + Unpin + Send,
     {
+        // create per-connection rate limiter if server-side enforcement is enabled
+        let rate_limiter: Option<RateLimiter<governor::state::NotKeyed, _, _>> = if self
+            .server_side_rate_limit
+            && self.bytes_per_second > 0
+        {
+            // create a rate limiter with the configured bytes per second
+            // burst allows the configured burst size
+            let quota = Quota::per_second(
+                NonZeroU32::new(self.bytes_per_second).unwrap_or(NonZeroU32::new(1).unwrap()),
+            )
+            .allow_burst(NonZeroU32::new(self.bytes_burst).unwrap_or(NonZeroU32::new(1).unwrap()));
+            Some(RateLimiter::direct(quota))
+        } else {
+            None
+        };
+
         loop {
             // read frame with optional idle timeout
             let frame_result = if let Some(timeout) = self.idle_timeout {
@@ -539,6 +558,24 @@ impl EmbeddedDerpServer {
                 }
                 Err(err) => return Err(err.into()),
             };
+
+            // server-side rate limiting: check if this frame exceeds the limit
+            if let Some(ref limiter) = rate_limiter {
+                let payload_size = payload.len() as u32;
+                if payload_size > 0 {
+                    // check rate limit for this payload
+                    // we use check_n to consume multiple units based on payload size
+                    let units = NonZeroU32::new(payload_size.max(1)).unwrap();
+                    if limiter.check_n(units).is_err() {
+                        debug!(
+                            client = %short_key(&client_key),
+                            bytes = payload_size,
+                            "DERP rate limit exceeded, closing connection"
+                        );
+                        return Err(DerpServerError::Protocol("rate limit exceeded".into()));
+                    }
+                }
+            }
 
             match frame_type {
                 FRAME_SEND_PACKET => self.relay_packet(client_key, payload).await?,
@@ -674,8 +711,11 @@ pub struct EmbeddedDerpOptions {
     pub idle_timeout_secs: u64,
     /// message rate limit in bytes per second (sent to clients in serverinfo).
     pub bytes_per_second: u32,
-    /// message burst size in bytes (sent to clients in serverinfo).
+    /// when true, the server enforces the rate limit in addition to client-side
     pub bytes_burst: u32,
+    /// enable server-side message rate limiting.
+    /// when true, the server enforces the rate limit in addition to client-side.
+    pub server_side_rate_limit: bool,
 }
 
 impl EmbeddedDerpOptions {
@@ -686,6 +726,7 @@ impl EmbeddedDerpOptions {
             idle_timeout_secs: railscale_types::DEFAULT_DERP_IDLE_TIMEOUT_SECS,
             bytes_per_second: railscale_types::DEFAULT_DERP_BYTES_PER_SECOND,
             bytes_burst: railscale_types::DEFAULT_DERP_BYTES_BURST,
+            server_side_rate_limit: false,
         }
     }
 
@@ -699,6 +740,14 @@ impl EmbeddedDerpOptions {
     pub fn with_rate_limit(mut self, bytes_per_second: u32, bytes_burst: u32) -> Self {
         self.bytes_per_second = bytes_per_second;
         self.bytes_burst = bytes_burst;
+        self
+    }
+
+    /// enable server-side rate limiting.
+    /// when enabled, the server enforces the rate limit in addition to
+    /// sending it to clients (client-side enforcement).
+    pub fn with_server_side_rate_limit(mut self, enabled: bool) -> Self {
+        self.server_side_rate_limit = enabled;
         self
     }
 }

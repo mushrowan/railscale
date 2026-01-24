@@ -97,9 +97,9 @@ impl std::fmt::Debug for DatabaseConfig {
     }
 }
 
-/// returns the original string for non-url formats (like SQLite file paths)
+/// redact password from a database connection string.
 ///
-//check if it looks like a url with credentials
+/// handles postgresql urls like `postgres://user:password@host:port/database`.
 /// returns the original string for non-url formats (like sqlite file paths).
 fn redact_connection_string(s: &str) -> String {
     // check if it looks like a url with credentials
@@ -254,6 +254,15 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_stun_rate_per_minute")]
     pub stun_rate_per_minute: u32,
 
+    /// this protects against malicious or misconfigured clients that ignore
+    /// the ServerInfo rate limits
+    /// default: false (client-side only, for headscale compatibility)
+    /// this protects against malicious or misconfigured clients that ignore
+    /// the ServerInfo rate limits.
+    /// default: false (client-side only, for headscale compatibility).
+    #[serde(default)]
+    pub server_side_rate_limit: bool,
+
     /// runtime details populated when the derp server starts.
     #[serde(skip)]
     pub runtime: Option<EmbeddedDerpRuntime>,
@@ -278,6 +287,7 @@ impl Default for EmbeddedDerpConfig {
             bytes_burst: default_derp_bytes_burst(),
             connection_rate_per_minute: default_derp_connection_rate_per_minute(),
             stun_rate_per_minute: default_stun_rate_per_minute(),
+            server_side_rate_limit: false,
             runtime: None,
         }
     }
@@ -749,8 +759,14 @@ mod tests {
         assert_eq!(derp.bytes_burst, 204800); // 200KB
         // connection rate limiting (server-enforced)
         assert_eq!(derp.connection_rate_per_minute, 10);
-        // stun rate limiting
+        // (for compatibility with clients that don't expect it)
         assert_eq!(derp.stun_rate_per_minute, 60);
+        // server-side message rate limiting should be disabled by default
+        // (for compatibility with clients that don't expect it)
+        assert!(
+            !derp.server_side_rate_limit,
+            "server_side_rate_limit should be false by default"
+        );
     }
 
     #[test]
@@ -767,6 +783,18 @@ mod tests {
         assert_eq!(derp.bytes_burst, 102400);
         assert_eq!(derp.connection_rate_per_minute, 5);
         assert_eq!(derp.stun_rate_per_minute, 30);
+        // default when not specified
+        assert!(!derp.server_side_rate_limit);
+    }
+
+    #[test]
+    fn test_derp_server_side_rate_limit_serde() {
+        let json = r#"{
+            "enabled": true,
+            "server_side_rate_limit": true
+        }"#;
+        let derp: EmbeddedDerpConfig = serde_json::from_str(json).unwrap();
+        assert!(derp.server_side_rate_limit);
     }
 
     #[test]

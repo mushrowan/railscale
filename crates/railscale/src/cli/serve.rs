@@ -445,7 +445,8 @@ impl ServeCommand {
                     .with_rate_limit(
                         config.derp.embedded_derp.bytes_per_second,
                         config.derp.embedded_derp.bytes_burst,
-                    ),
+                    )
+                    .with_server_side_rate_limit(config.derp.embedded_derp.server_side_rate_limit),
             );
             derp_server::spawn_derp_listener(DerpListenerConfig {
                 listen_addr: derp_listen_addr,
