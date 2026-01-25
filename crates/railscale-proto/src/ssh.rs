@@ -1,7 +1,7 @@
-//! ssh policy types for the tailscale control protocol
+//! ssh policy types for the tailscale control protocol.
 //!
-//! these types represent the ssh policy sent to clients in mapresponse
-//! the wire format uses lowercase/camelcase field names
+//! these types represent the ssh policy sent to clients in mapresponse.
+//! the wire format uses lowercase/camelcase field names.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -9,56 +9,55 @@ use std::net::SocketAddr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// ssh policy containing rules for incoming ssh connections
+/// ssh policy containing rules for incoming ssh connections.
 ///
-/// rules are evaluated in order; the first matching rule wins
+/// rules are evaluated in order; the first matching rule wins.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SshPolicy {
-    /// ssh rules to evaluate for incoming connections
+    /// ssh rules to evaluate for incoming connections.
     pub rules: Vec<SshRule>,
 }
 
-/// a single ssh rule matching principals to actions
+/// a single ssh rule matching principals to actions.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SshRule {
-    /// when this rule expires (optional)
+    /// when this rule expires (optional).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_expires: Option<DateTime<Utc>>,
 
-    /// principals that can match this rule (or logic)
+    /// principals that can match this rule (or logic).
     pub principals: Vec<SshPrincipal>,
 
-    /// ssh user to local user mapping
+    /// ssh user to local user mapping.
     ///
-    /// keys: ssh username or "*" for wildcard
-    /// values: local username, "=" for same-as-ssh-user, "" to deny
+    /// keys: ssh username or "*" for wildcard.
+    /// values: local username, "=" for same-as-ssh-user, "" to deny.
     pub ssh_users: HashMap<String, String>,
 
-    /// action to take when rule matches
+    /// action to take when rule matches.
     pub action: SshAction,
 
-    /// environment variables to accept (glob patterns like "GIT_*")
+    /// environment variables to accept (glob patterns like "git_*").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accept_env: Option<Vec<String>>,
 }
 
-/// principal identifying who can use an ssh rule
+/// principal identifying who can use an ssh rule.
 ///
-/// any matching field causes a match (or logic)
+/// any matching field causes a match (or logic).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct SshPrincipal {
     /// stable node id (not used by railscale, but included for wire compatibility).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub node: Option<String>,
 
     /// node's tailnet ip address (primary matching method).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "nodeIP", skip_serializing_if = "Option::is_none")]
     pub node_ip: Option<String>,
 
     /// user's login email.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "userLogin", skip_serializing_if = "Option::is_none")]
     pub user_login: Option<String>,
 
     /// match any connection.
@@ -83,7 +82,7 @@ pub struct SshAction {
     pub accept: Option<bool>,
 
     /// session duration in nanoseconds.
-    ///serialised as an integer (go's `format:nano` tag)
+    ///
     /// serialised as an integer (go's `format:nano` tag).
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -184,7 +183,7 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&action).unwrap();
-        
+
         // sessionDuration should be in nanoseconds: 86400 * 1e9 = 86400000000000
         assert!(json.contains(r#""sessionDuration":86400000000000"#));
         assert!(json.contains(r#""accept":true"#));
@@ -195,9 +194,12 @@ mod tests {
     fn test_ssh_action_duration_deserialize() {
         let json = r#"{"accept":true,"sessionDuration":86400000000000}"#;
         let action: SshAction = serde_json::from_str(json).unwrap();
-        
+
         assert_eq!(action.accept, Some(true));
-        assert_eq!(action.session_duration, Some(std::time::Duration::from_secs(86400)));
+        assert_eq!(
+            action.session_duration,
+            Some(std::time::Duration::from_secs(86400))
+        );
     }
 
     #[test]
@@ -225,7 +227,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&rule).unwrap();
-        
+
         // verify camelcase field names
         assert!(json.contains(r#""principals""#));
         assert!(json.contains(r#""sshUsers""#));
@@ -255,7 +257,7 @@ mod tests {
 
         let json = serde_json::to_string(&policy).unwrap();
         let parsed: SshPolicy = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(policy, parsed);
     }
 
