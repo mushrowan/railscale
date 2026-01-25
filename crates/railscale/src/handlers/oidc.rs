@@ -129,9 +129,21 @@ pub async fn oidc_callback(
         .await
         .map_internal()?;
 
-    let user = if let Some(user) = existing_user {
-        // create new user with oidc groups
-        user
+    let user = if let Some(mut user) = existing_user {
+        // user exists - sync oidc groups if they've changed
+        if user.oidc_groups != claims.groups {
+            tracing::debug!(
+                user_id = %user.id,
+                old_groups = ?user.oidc_groups,
+                new_groups = ?claims.groups,
+                "syncing OIDC groups on re-login"
+            );
+            user.oidc_groups = claims.groups.clone();
+            user.updated_at = chrono::Utc::now();
+            state.db.update_user(&user).await.map_internal()?
+        } else {
+            user
+        }
     } else {
         // create new user with OIDC groups
         use railscale_types::{User, UserId};
