@@ -282,6 +282,9 @@ async fn build_map_response(
     // generate packet filter rules from grants
     let packet_filter = grants.generate_filter_rules(&node, &all_nodes, &resolver);
 
+    // compile ssh policy for this node
+    let ssh_policy = grants.compile_ssh_policy(&node, &all_nodes, &resolver);
+
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);
 
@@ -304,8 +307,7 @@ async fn build_map_response(
         packet_filter,
         user_profiles,
         control_time: Some(chrono::Utc::now().to_rfc3339()),
-        // TODO: compile ssh policy per-node from grants
-        ssh_policy: None,
+        ssh_policy,
     })
 }
 
