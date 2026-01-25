@@ -260,11 +260,21 @@ async fn build_map_response(
         })
         .collect();
 
-    // acquire read lock on grants engine for policy evaluation
+    // get oidc group prefix if configured
     let grants = state.grants.read().await;
 
-    let resolver =
-        crate::resolver::MapUserResolver::with_groups(users, grants.policy().groups.clone());
+    // get oidc group prefix if configured
+    let oidc_group_prefix = state
+        .config
+        .oidc
+        .as_ref()
+        .and_then(|oidc| oidc.group_prefix.clone());
+
+    let resolver = crate::resolver::MapUserResolver::with_groups(
+        users,
+        grants.policy().groups.clone(),
+        oidc_group_prefix,
+    );
 
     // use grants engine to filter visible peers
     let visible_peers = grants.get_visible_peers(&node, &all_nodes, &resolver);

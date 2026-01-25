@@ -1,36 +1,56 @@
 use railscale_grants::UserResolver;
-use railscale_types::{User, UserId};
+use railscale_types::{OidcGroupPrefix, User, UserId};
 use std::collections::HashMap;
 
-/// a userresolver that uses an in-memory map of users and policy-defined groups.
-///
-/// use `with_groups()` to also include policy-defined groups
+/// 2. oidc groups (synced from identity provider claims)
+///optional prefix to apply to oidc group names
+/// this is typically constructed in the map handler where we already
 /// have the list of users loaded from the database and the policy groups.
+///
+/// groups are resolved from two sources:
+/// 1. Policy file groups (email-based membership)
+/// 2. OIDC groups (synced from identity provider claims)
 pub struct MapUserResolver {
     users: HashMap<UserId, User>,
     /// maps group name (with "group:" prefix) to list of member emails.
     groups: HashMap<String, Vec<String>>,
+    /// optional prefix to apply to oidc group names.
+    oidc_group_prefix: Option<OidcGroupPrefix>,
 }
 
 impl MapUserResolver {
-    /// groups should be a mapping from group name (e.g., "group:engineering")
-    ///to a list of member email addresses
+    /// create a new resolver from a list of users.
+    ///
     /// use `with_groups()` to also include policy-defined groups.
     pub fn new(users: Vec<User>) -> Self {
         let users = users.into_iter().map(|u| (u.id, u)).collect();
         Self {
             users,
             groups: HashMap::new(),
+            oidc_group_prefix: None,
         }
     }
 
-    /// create a new resolver with users and policy groups.
+    /// create a new resolver with users, policy groups, and oidc configuration.
     ///
     /// groups should be a mapping from group name (e.g., "group:engineering")
     /// to a list of member email addresses.
-    pub fn with_groups(users: Vec<User>, groups: HashMap<String, Vec<String>>) -> Self {
+    ///
+    /// the `oidc_group_prefix` is applied to oidc group names when resolving
+    /// group membership. For example, with prefix "oidc-", an OIDC group
+    /// "engineering" becomes "oidc-engineering" for matching against
+    /// `group:oidc-engineering` in grants.
+    pub fn with_groups(
+        users: Vec<User>,
+        groups: HashMap<String, Vec<String>>,
+        oidc_group_prefix: Option<OidcGroupPrefix>,
+    ) -> Self {
         let users = users.into_iter().map(|u| (u.id, u)).collect();
-        Self { users, groups }
+        Self {
+            users,
+            groups,
+            oidc_group_prefix,
+        }
     }
 }
 
@@ -40,31 +60,39 @@ impl UserResolver for MapUserResolver {
     }
 
     fn resolve_groups(&self, user_id: &UserId) -> Vec<String> {
-        // get the user's email - if no email, they can't be in any policy groups
         let user = match self.users.get(user_id) {
             Some(u) => u,
             None => return Vec::new(),
         };
 
-        let email = match &user.email {
-            Some(e) => e.to_lowercase(),
-            None => return Vec::new(),
-        };
+        let mut result = Vec::new();
 
-        // find all groups where this user's email is a member
-        self.groups
-            .iter()
-            .filter_map(|(group_name, members)| {
+        // 2. Add policy groups (email-based membership)
+        for oidc_group in &user.oidc_groups {
+            let group_name = match &self.oidc_group_prefix {
+                Some(prefix) => prefix.apply(oidc_group),
+                None => oidc_group.clone(),
+            };
+            result.push(group_name);
+        }
+
+        // 2. Add policy groups (email-based membership)
+        if let Some(email) = &user.email {
+            let email_lower = email.to_lowercase();
+            for (group_name, members) in &self.groups {
                 // strip "group:" prefix for the returned group name
                 let name = group_name.strip_prefix("group:").unwrap_or(group_name);
                 // check if user's email is in the member list (case-insensitive)
-                if members.iter().any(|m| m.to_lowercase() == email) {
-                    Some(name.to_string())
-                } else {
-                    None
+                if members.iter().any(|m| m.to_lowercase() == email_lower) {
+                    // avoid duplicates if oidc group matches policy group
+                    if !result.contains(&name.to_string()) {
+                        result.push(name.to_string());
+                    }
                 }
-            })
-            .collect()
+            }
+        }
+
+        result
     }
 }
 
@@ -75,6 +103,17 @@ mod tests {
     fn make_user(id: u64, name: &str, email: Option<&str>) -> User {
         let mut user = User::new(UserId(id), name.to_string());
         user.email = email.map(String::from);
+        user
+    }
+
+    fn make_user_with_oidc_groups(
+        id: u64,
+        name: &str,
+        email: Option<&str>,
+        oidc_groups: Vec<&str>,
+    ) -> User {
+        let mut user = make_user(id, name, email);
+        user.oidc_groups = oidc_groups.into_iter().map(String::from).collect();
         user
     }
 
@@ -99,7 +138,7 @@ mod tests {
             vec!["alice@example.com".to_string()],
         );
 
-        let resolver = MapUserResolver::with_groups(users, groups);
+        let resolver = MapUserResolver::with_groups(users, groups, None);
 
         // alice is in both groups
         let alice_groups = resolver.resolve_groups(&UserId(1));
@@ -128,7 +167,7 @@ mod tests {
             vec!["alice@example.com".to_string()],
         );
 
-        let resolver = MapUserResolver::with_groups(users, groups);
+        let resolver = MapUserResolver::with_groups(users, groups, None);
         let alice_groups = resolver.resolve_groups(&UserId(1));
         assert_eq!(alice_groups, vec!["team".to_string()]);
     }
@@ -143,7 +182,7 @@ mod tests {
             vec!["someone@example.com".to_string()],
         );
 
-        let resolver = MapUserResolver::with_groups(users, groups);
+        let resolver = MapUserResolver::with_groups(users, groups, None);
         let groups = resolver.resolve_groups(&UserId(1));
         assert!(groups.is_empty());
     }
@@ -153,5 +192,90 @@ mod tests {
         let resolver = MapUserResolver::new(vec![]);
         let groups = resolver.resolve_groups(&UserId(999));
         assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_oidc_groups_without_prefix() {
+        let users = vec![make_user_with_oidc_groups(
+            1,
+            "alice",
+            Some("alice@example.com"),
+            vec!["engineering", "devops"],
+        )];
+
+        let resolver = MapUserResolver::with_groups(users, HashMap::new(), None);
+        let alice_groups = resolver.resolve_groups(&UserId(1));
+
+        assert!(alice_groups.contains(&"engineering".to_string()));
+        assert!(alice_groups.contains(&"devops".to_string()));
+        assert_eq!(alice_groups.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_oidc_groups_with_prefix() {
+        let users = vec![make_user_with_oidc_groups(
+            1,
+            "alice",
+            Some("alice@example.com"),
+            vec!["engineering", "devops"],
+        )];
+
+        let prefix = OidcGroupPrefix::new("oidc-").unwrap();
+        let resolver = MapUserResolver::with_groups(users, HashMap::new(), Some(prefix));
+        let alice_groups = resolver.resolve_groups(&UserId(1));
+
+        assert!(alice_groups.contains(&"oidc-engineering".to_string()));
+        assert!(alice_groups.contains(&"oidc-devops".to_string()));
+        assert_eq!(alice_groups.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_combined_oidc_and_policy_groups() {
+        let users = vec![make_user_with_oidc_groups(
+            1,
+            "alice",
+            Some("alice@example.com"),
+            vec!["engineering"], // OIDC group
+        )];
+
+        let mut policy_groups = HashMap::new();
+        policy_groups.insert(
+            "group:admins".to_string(),
+            vec!["alice@example.com".to_string()],
+        );
+
+        let resolver = MapUserResolver::with_groups(users, policy_groups, None);
+        let alice_groups = resolver.resolve_groups(&UserId(1));
+
+        // should have both oidc and policy groups
+        assert!(alice_groups.contains(&"engineering".to_string())); // OIDC
+        assert!(alice_groups.contains(&"admins".to_string())); // Policy
+        assert_eq!(alice_groups.len(), 2);
+    }
+
+    #[test]
+    fn test_resolve_groups_no_duplicates() {
+        // user has oidc group that matches a policy group they're also in
+        let users = vec![make_user_with_oidc_groups(
+            1,
+            "alice",
+            Some("alice@example.com"),
+            vec!["engineering"], // OIDC group
+        )];
+
+        let mut policy_groups = HashMap::new();
+        policy_groups.insert(
+            "group:engineering".to_string(), // Same name as OIDC group
+            vec!["alice@example.com".to_string()],
+        );
+
+        let resolver = MapUserResolver::with_groups(users, policy_groups, None);
+        let alice_groups = resolver.resolve_groups(&UserId(1));
+
+        // should only appear once
+        assert_eq!(
+            alice_groups.iter().filter(|g| *g == "engineering").count(),
+            1
+        );
     }
 }
