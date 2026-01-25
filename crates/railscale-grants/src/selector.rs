@@ -59,6 +59,7 @@ fn autogroup_name(ag: Autogroup) -> &'static str {
         Autogroup::Shared => "shared",
         Autogroup::Internet => "internet",
         Autogroup::SelfDevices => "self",
+        Autogroup::NonRoot => "nonroot",
     }
 }
 
@@ -81,6 +82,9 @@ pub enum Autogroup {
     /// user's own devices (dst only).
     #[serde(rename = "self")]
     SelfDevices,
+    /// any user except root (ssh users only)
+    #[serde(rename = "nonroot")]
+    NonRoot,
 }
 
 impl Selector {
@@ -100,6 +104,7 @@ impl Selector {
                     "shared" => Autogroup::Shared,
                     "internet" => Autogroup::Internet,
                     "self" => Autogroup::SelfDevices,
+                    "nonroot" => Autogroup::NonRoot,
                     _ => return Err(ParseError::UnknownAutogroup(name.to_string())),
                 };
                 Ok(Selector::Autogroup(autogroup))
@@ -143,6 +148,12 @@ mod tests {
     fn test_parse_autogroup_admin() {
         let selector = Selector::parse("autogroup:admin").unwrap();
         assert_eq!(selector, Selector::Autogroup(Autogroup::Admin));
+    }
+
+    #[test]
+    fn test_parse_autogroup_nonroot() {
+        let selector = Selector::parse("autogroup:nonroot").unwrap();
+        assert_eq!(selector, Selector::Autogroup(Autogroup::NonRoot));
     }
 
     #[test]
@@ -211,6 +222,7 @@ mod proptests {
             Just("shared"),
             Just("internet"),
             Just("self"),
+            Just("nonroot"),
         ]
     }
 
@@ -275,7 +287,7 @@ mod proptests {
             if let Ok(selector) = Selector::parse(&cidr)
                 && let Selector::Cidr(net) = &selector
             {
-                // verify it's still a cidr
+                // roundtrip through serde
                 let json = serde_json::to_string(&selector).unwrap();
                 let parsed: Selector = serde_json::from_str(&json).unwrap();
                 // verify it's still a cidr
@@ -296,7 +308,7 @@ mod proptests {
         #[test]
         fn invalid_autogroup_rejected(name in "[a-z]{1,20}") {
             // skip valid autogroup names
-            if !["admin", "member", "owner", "tagged", "shared", "internet", "self"]
+            if !["admin", "member", "owner", "tagged", "shared", "internet", "self", "nonroot"]
                 .contains(&name.as_str())
             {
                 let input = format!("autogroup:{}", name);
