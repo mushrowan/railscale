@@ -9,7 +9,7 @@ pub enum Error {
     #[error("failed to parse policy JSON: {0}")]
     ParseJson(#[from] serde_json::Error),
 
-    /// the zero-based index of the invalid grant in the policy
+    /// invalid grant at given index.
     #[error("invalid grant at index {index}: {cause}")]
     InvalidGrant {
         /// the zero-based index of the invalid grant in the policy.
@@ -18,21 +18,30 @@ pub enum Error {
         cause: ValidationError,
     },
 
+    /// invalid ssh rule at given index
+    #[error("invalid SSH rule at index {index}: {cause}")]
+    InvalidSshRule {
+        /// the zero-based index of the invalid ssh rule in the policy
+        index: usize,
+        /// the specific validation error
+        cause: ValidationError,
+    },
+
     /// failed to parse selector.
     #[error("failed to parse selector: {0}")]
     ParseSelector(#[from] ParseError),
 }
 
-/// grant has no source selectors
-///grant has no destination selectors
-/// grant has neither IP nor app capabilities
+/// validation errors for grants.
+///
+/// these errors indicate structural problems with a grant definition.
 #[derive(Debug, Error)]
 pub enum ValidationError {
-    /// these errors indicate syntax problems in selector or capability strings
+    /// grant has no source selectors.
     #[error("src cannot be empty")]
     EmptySrc,
 
-    /// port number is not a valid u16 or port range is invalid
+    /// grant has no destination selectors.
     #[error("dst cannot be empty")]
     EmptyDst,
 
@@ -43,6 +52,14 @@ pub enum ValidationError {
     /// via selector is not a tag (only tags allowed for transit).
     #[error("via must contain only tags, got: {0}")]
     InvalidVia(String),
+
+    /// ssh rule has no users
+    #[error("SSH rule users cannot be empty")]
+    EmptySshUsers,
+
+    /// ssh check action requires checkperiod
+    #[error("SSH check action requires checkPeriod")]
+    MissingCheckPeriod,
 }
 
 /// parse errors for selectors and capabilities.

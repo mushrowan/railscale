@@ -12,6 +12,7 @@ pub mod error;
 pub mod grant;
 pub mod policy;
 pub mod selector;
+pub mod ssh;
 
 pub use capability::{AppCapability, NetworkCapability, Protocol};
 pub use engine::{GrantsEngine, UserResolver};
@@ -19,3 +20,4 @@ pub use error::{Error, ParseError, Result, ValidationError};
 pub use grant::Grant;
 pub use policy::Policy;
 pub use selector::{Autogroup, Selector};
+pub use ssh::{SshActionType, SshPolicyRule};

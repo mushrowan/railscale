@@ -6,11 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 use crate::grant::Grant;
+use crate::ssh::SshPolicyRule;
 
 /// the complete policy document.
 ///
 /// policies define access control through grants and can include group definitions
 /// for organizing users. Groups are referenced in grants using `group:name` selectors.
+/// ssh rules define who can ssh to which nodes
 ///
 /// # Example
 ///
@@ -21,6 +23,9 @@ use crate::grant::Grant;
 ///   },
 ///   "grants": [
 ///     {"src": ["group:engineering"], "dst": ["tag:servers"], "ip": ["*"]}
+///   ],
+/// example ssh rule in doc comment
+///     {"action": "accept", "src": ["group:engineering"], "dst": ["autogroup:self"], "users": ["autogroup:nonroot"]}
 ///   ]
 /// }
 /// ```
@@ -36,6 +41,10 @@ pub struct Policy {
     /// all grants in this policy.
     #[serde(default)]
     pub grants: Vec<Grant>,
+
+    /// ssh rules for controlling ssh access
+    #[serde(default)]
+    pub ssh: Vec<SshPolicyRule>,
 }
 
 impl Policy {
@@ -51,12 +60,17 @@ impl Policy {
         Ok(policy)
     }
 
-    /// validate all grants in the policy.
+    /// validate all grants and ssh rules in the policy
     pub fn validate(&self) -> Result<(), Error> {
         for (i, grant) in self.grants.iter().enumerate() {
             grant
                 .validate()
                 .map_err(|e| Error::InvalidGrant { index: i, cause: e })?;
+        }
+        for (i, ssh_rule) in self.ssh.iter().enumerate() {
+            ssh_rule
+                .validate()
+                .map_err(|e| Error::InvalidSshRule { index: i, cause: e })?;
         }
         Ok(())
     }
@@ -109,6 +123,7 @@ mod proptests {
             let policy = Policy {
                 groups,
                 grants: vec![],
+                ssh: vec![],
             };
 
             let json = serde_json::to_string(&policy).unwrap();
@@ -336,6 +351,47 @@ mod tests {
         });
 
         let result = policy.validate();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_json_with_ssh() {
+        let json = r#"{
+            "grants": [
+                {"src": ["*"], "dst": ["*"], "ip": ["22"]}
+            ],
+            "ssh": [
+                {
+                    "action": "accept",
+                    "src": ["group:admins"],
+                    "dst": ["autogroup:self"],
+                    "users": ["autogroup:nonroot"]
+                }
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(policy.grants.len(), 1);
+        assert_eq!(policy.ssh.len(), 1);
+        assert_eq!(policy.ssh[0].src, vec!["group:admins"]);
+        assert_eq!(policy.ssh[0].users, vec!["autogroup:nonroot"]);
+    }
+
+    #[test]
+    fn test_validate_invalid_ssh_rule() {
+        let json = r#"{
+            "grants": [],
+            "ssh": [
+                {
+                    "action": "accept",
+                    "src": [],
+                    "dst": ["*"],
+                    "users": ["ubuntu"]
+                }
+            ]
+        }"#;
+
+        let result = Policy::from_json(json);
         assert!(result.is_err());
     }
 }
