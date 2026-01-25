@@ -11,7 +11,7 @@
 //! - **Verifier hash** (stored in DB): SHA-256 hash for verification
 //!
 //! this design ensures:
-//! - Sensitive key material is zeroed from memory when dropped
+//! - Database lookups are timing-safe (lookup by selector, not by comparing hashes)
 //! - Keys cannot be recovered from database breach (only hash is stored)
 //! - Verification uses constant-time comparison
 //! - Sensitive key material is zeroed from memory when dropped
@@ -37,8 +37,8 @@ const VERIFIER_BYTES: usize = 16;
 /// a generated api key secret with its components for storage.
 ///
 /// this struct is returned when generating a new api key. the `full_key` should
-/// the `full_key` field is automatically zeroed from memory when this struct
-/// is dropped to prevent secrets from lingering in memory
+/// be shown to the user exactly once, while `selector` and `verifier_hash` are
+/// stored in the database.
 ///
 /// the `full_key` field is automatically zeroed from memory when this struct
 /// is dropped to prevent secrets from lingering in memory.
@@ -71,8 +71,8 @@ impl ApiKeySecret {
         rng.fill_bytes(&mut *verifier_bytes);
 
         // encode as hex (deterministic length, no separator conflicts)
-        let selector = hex::encode(&*selector_bytes);
-        let verifier = Zeroizing::new(hex::encode(&*verifier_bytes));
+        let selector = hex::encode(*selector_bytes);
+        let verifier = Zeroizing::new(hex::encode(*verifier_bytes));
 
         // hash the verifier for storage (hash the hex string, not raw bytes)
         let verifier_hash = hex::encode(Sha256::digest(verifier.as_bytes()));

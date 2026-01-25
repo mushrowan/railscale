@@ -368,7 +368,7 @@ mod proptests {
         #![proptest_config(ProptestConfig::with_cases(1000))]
 
         #[test]
-        fn wildcard_roundtrips(s in Just("*")) {
+        fn wildcard_roundtrips(s in Just("*".to_string())) {
             let cap = NetworkCapability::parse(&s).unwrap();
             prop_assert_eq!(&cap, &NetworkCapability::Wildcard);
             // roundtrip through serde

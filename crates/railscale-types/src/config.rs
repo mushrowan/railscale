@@ -119,18 +119,18 @@ impl std::fmt::Debug for DatabaseConfig {
 /// returns the original string for non-url formats (like sqlite file paths).
 fn redact_connection_string(s: &str) -> String {
     // check if it looks like a url with credentials
-    if let Some(at_pos) = s.find('@') {
-        if let Some(scheme_end) = s.find("://") {
-            let credentials_start = scheme_end + 3;
-            let credentials = &s[credentials_start..at_pos];
+    if let Some(at_pos) = s.find('@')
+        && let Some(scheme_end) = s.find("://")
+    {
+        let credentials_start = scheme_end + 3;
+        let credentials = &s[credentials_start..at_pos];
 
-            // check if credentials contain a password (colon-separated)
-            if let Some(colon_pos) = credentials.find(':') {
-                let user = &credentials[..colon_pos];
-                let scheme = &s[..scheme_end + 3];
-                let rest = &s[at_pos..];
-                return format!("{}{}:[REDACTED]{}", scheme, user, rest);
-            }
+        // check if credentials contain a password (colon-separated)
+        if let Some(colon_pos) = credentials.find(':') {
+            let user = &credentials[..colon_pos];
+            let scheme = &s[..scheme_end + 3];
+            let rest = &s[at_pos..];
+            return format!("{}{}:[REDACTED]{}", scheme, user, rest);
         }
     }
 
@@ -479,9 +479,9 @@ pub struct OidcConfig {
     #[serde(default)]
     pub allowed_groups: Vec<String>,
 
-    /// "oidc-engineering" for matching against `group:oidc-engineering` in grants
+    /// prefix to apply to oidc groups when mapping to policy groups.
     ///
-    /// if not set, oidc groups are used as-is
+    /// for example, with prefix "oidc-", an oidc group "engineering" becomes
     /// "oidc-engineering" for matching against `group:oidc-engineering` in grants.
     ///
     /// if not set, oidc groups are used as-is.

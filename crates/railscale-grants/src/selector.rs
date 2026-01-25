@@ -218,7 +218,7 @@ mod proptests {
         #![proptest_config(ProptestConfig::with_cases(1000))]
 
         #[test]
-        fn wildcard_roundtrips(s in Just("*")) {
+        fn wildcard_roundtrips(s in Just("*".to_string())) {
             let selector = Selector::parse(&s).unwrap();
             prop_assert_eq!(&selector, &Selector::Wildcard);
             // roundtrip through serde
@@ -271,18 +271,18 @@ mod proptests {
 
         #[test]
         fn cidr_roundtrips(cidr in cidr_v4_strategy()) {
-            // roundtrip through serde
-            if let Ok(selector) = Selector::parse(&cidr) {
-                if let Selector::Cidr(net) = &selector {
-                    // verify it's still a cidr
-                    let json = serde_json::to_string(&selector).unwrap();
-                    let parsed: Selector = serde_json::from_str(&json).unwrap();
-                    // verify it's still a cidr
-                    prop_assert!(matches!(parsed, Selector::Cidr(_)));
-                    if let Selector::Cidr(parsed_net) = parsed {
-                        prop_assert_eq!(net.network(), parsed_net.network());
-                        prop_assert_eq!(net.prefix_len(), parsed_net.prefix_len());
-                    }
+            // NOTE: cidr parsing may normalize the network address
+            if let Ok(selector) = Selector::parse(&cidr)
+                && let Selector::Cidr(net) = &selector
+            {
+                // verify it's still a cidr
+                let json = serde_json::to_string(&selector).unwrap();
+                let parsed: Selector = serde_json::from_str(&json).unwrap();
+                // verify it's still a cidr
+                prop_assert!(matches!(parsed, Selector::Cidr(_)));
+                if let Selector::Cidr(parsed_net) = parsed {
+                    prop_assert_eq!(net.network(), parsed_net.network());
+                    prop_assert_eq!(net.prefix_len(), parsed_net.prefix_len());
                 }
             }
         }
