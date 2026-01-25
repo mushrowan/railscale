@@ -7,19 +7,19 @@ use serde::{Deserialize, Serialize};
 use crate::error::Error;
 use crate::grant::Grant;
 
+/// the complete policy document.
+///
+/// policies define access control through grants and can include group definitions
+/// for organizing users. Groups are referenced in grants using `group:name` selectors.
+///
+/// # Example
+///
+/// ```json
 /// {
-///"groups": {
-/// "group:engineering": ["alice@example.com", "bob@example.com"]
-/// },
-///"grants": [
-/// {"src": ["group:engineering"], "dst": ["tag:servers"], "ip": ["*"]}
-///]
-/// }
-/// ```
-/// group definitions mapping group names to member emails
+///   "groups": {
 ///     "group:engineering": ["alice@example.com", "bob@example.com"]
-/// group names should include the `group:` prefix (e.g., `"group:engineering"`)
-/// members are identified by email address
+///   },
+///   "grants": [
 ///     {"src": ["group:engineering"], "dst": ["tag:servers"], "ip": ["*"]}
 ///   ]
 /// }
@@ -59,6 +59,169 @@ impl Policy {
                 .map_err(|e| Error::InvalidGrant { index: i, cause: e })?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid group names
+    fn group_name_strategy() -> impl Strategy<Value = String> {
+        "[a-z][a-z0-9-]{0,15}".prop_map(|name| format!("group:{}", name))
+    }
+
+    // strategy for valid email addresses
+    fn email_strategy() -> impl Strategy<Value = String> {
+        "[a-z]{3,8}@[a-z]{3,8}\\.[a-z]{2,4}"
+    }
+
+    // strategy for valid selector strings
+    fn selector_string_strategy() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("*".to_string()),
+            "[a-z]{3,10}".prop_map(|t| format!("tag:{}", t)),
+            Just("autogroup:tagged".to_string()),
+            "[a-z]{3,8}@[a-z]{3,8}\\.[a-z]{2,4}",
+            "[a-z]{3,10}".prop_map(|g| format!("group:{}", g)),
+        ]
+    }
+
+    // strategy for valid capability strings
+    fn capability_string_strategy() -> impl Strategy<Value = String> {
+        prop_oneof![
+            Just("*".to_string()),
+            (1u16..65535).prop_map(|p| p.to_string()),
+            (1u16..1000, 1000u16..65535).prop_map(|(a, b)| format!("{}-{}", a, b)),
+            (1u16..65535).prop_map(|p| format!("tcp:{}", p)),
+            (1u16..65535).prop_map(|p| format!("udp:{}", p)),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+
+        #[test]
+        fn policy_serde_roundtrips_empty(
+            groups in prop::collection::hash_map(group_name_strategy(), prop::collection::vec(email_strategy(), 0..3), 0..3)
+        ) {
+            let policy = Policy {
+                groups,
+                grants: vec![],
+            };
+
+            let json = serde_json::to_string(&policy).unwrap();
+            let parsed: Policy = serde_json::from_str(&json).unwrap();
+
+            prop_assert_eq!(policy.groups.len(), parsed.groups.len());
+            for (key, value) in &policy.groups {
+                prop_assert_eq!(Some(value), parsed.groups.get(key));
+            }
+        }
+
+        #[test]
+        fn policy_from_json_valid_grant(
+            src in prop::collection::vec(selector_string_strategy(), 1..3),
+            dst in prop::collection::vec(selector_string_strategy(), 1..3),
+            ip in prop::collection::vec(capability_string_strategy(), 1..3),
+        ) {
+            let json = format!(
+                r#"{{"grants": [{{"src": {:?}, "dst": {:?}, "ip": {:?}}}]}}"#,
+                src, dst, ip
+            );
+
+            let result = Policy::from_json(&json);
+            // should parse and validate successfully
+            prop_assert!(result.is_ok(), "Failed to parse: {:?}", result);
+
+            let policy = result.unwrap();
+            prop_assert_eq!(policy.grants.len(), 1);
+            prop_assert_eq!(policy.grants[0].src.len(), src.len());
+            prop_assert_eq!(policy.grants[0].dst.len(), dst.len());
+            prop_assert_eq!(policy.grants[0].ip.len(), ip.len());
+        }
+
+        #[test]
+        fn policy_from_json_empty_src_rejected(
+            dst in prop::collection::vec(selector_string_strategy(), 1..3),
+            ip in prop::collection::vec(capability_string_strategy(), 1..3),
+        ) {
+            let json = format!(
+                r#"{{"grants": [{{"src": [], "dst": {:?}, "ip": {:?}}}]}}"#,
+                dst, ip
+            );
+
+            let result = Policy::from_json(&json);
+            prop_assert!(result.is_err());
+        }
+
+        #[test]
+        fn policy_from_json_empty_dst_rejected(
+            src in prop::collection::vec(selector_string_strategy(), 1..3),
+            ip in prop::collection::vec(capability_string_strategy(), 1..3),
+        ) {
+            let json = format!(
+                r#"{{"grants": [{{"src": {:?}, "dst": [], "ip": {:?}}}]}}"#,
+                src, ip
+            );
+
+            let result = Policy::from_json(&json);
+            prop_assert!(result.is_err());
+        }
+
+        #[test]
+        fn policy_from_json_no_capabilities_rejected(
+            src in prop::collection::vec(selector_string_strategy(), 1..3),
+            dst in prop::collection::vec(selector_string_strategy(), 1..3),
+        ) {
+            let json = format!(
+                r#"{{"grants": [{{"src": {:?}, "dst": {:?}}}]}}"#,
+                src, dst
+            );
+
+            let result = Policy::from_json(&json);
+            prop_assert!(result.is_err());
+        }
+
+        #[test]
+        fn policy_from_json_invalid_via_rejected(
+            src in prop::collection::vec(selector_string_strategy(), 1..3),
+            dst in prop::collection::vec(selector_string_strategy(), 1..3),
+            ip in prop::collection::vec(capability_string_strategy(), 1..3),
+            via in "[a-z]+@[a-z]+\\.[a-z]+",  // email format, not tag:
+        ) {
+            let json = format!(
+                r#"{{"grants": [{{"src": {:?}, "dst": {:?}, "ip": {:?}, "via": [{:?}]}}]}}"#,
+                src, dst, ip, via
+            );
+
+            let result = Policy::from_json(&json);
+            prop_assert!(result.is_err());
+        }
+
+        #[test]
+        fn policy_from_json_valid_via_accepted(
+            src in prop::collection::vec(selector_string_strategy(), 1..3),
+            dst in prop::collection::vec(selector_string_strategy(), 1..3),
+            ip in prop::collection::vec(capability_string_strategy(), 1..3),
+            via_tag in "[a-z]{3,10}",
+        ) {
+            let via = format!("tag:{}", via_tag);
+            let json = format!(
+                r#"{{"grants": [{{"src": {:?}, "dst": {:?}, "ip": {:?}, "via": [{:?}]}}]}}"#,
+                src, dst, ip, via
+            );
+
+            let result = Policy::from_json(&json);
+            prop_assert!(result.is_ok(), "Failed with via tag '{}': {:?}", via, result);
+        }
+
+        #[test]
+        fn arbitrary_json_string_never_panics(s in ".*") {
+            // arbitrary strings should never panic policy::from_json
+            let _ = Policy::from_json(&s);
+        }
     }
 }
 

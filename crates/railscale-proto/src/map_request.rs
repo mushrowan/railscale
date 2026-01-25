@@ -384,3 +384,169 @@ pub struct UserProfile {
     )]
     pub profile_pic_url: Option<String>,
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid 32-byte key data
+    fn valid_key_bytes() -> impl Strategy<Value = Vec<u8>> {
+        prop::collection::vec(any::<u8>(), 32)
+    }
+
+    // strategy for maprequest
+    fn map_request_strategy() -> impl Strategy<Value = MapRequest> {
+        (
+            any::<u32>(),                      // version
+            valid_key_bytes(),                 // node_key
+            any::<bool>(),                     // omit_peers
+            any::<bool>(),                     // stream
+            prop::collection::vec(".*", 0..3), // debug_flags
+        )
+            .prop_map(
+                |(version, node_key_bytes, omit_peers, stream, debug_flags)| MapRequest {
+                    version: CapabilityVersion(version),
+                    node_key: NodeKey::from_bytes(node_key_bytes),
+                    disco_key: None,
+                    endpoints: vec![],
+                    hostinfo: None,
+                    omit_peers,
+                    stream,
+                    debug_flags,
+                    compress: None,
+                },
+            )
+    }
+
+    // strategy for portrange
+    fn port_range_strategy() -> impl Strategy<Value = PortRange> {
+        (any::<u16>(), any::<u16>()).prop_map(|(first, last)| {
+            let (first, last) = if first <= last {
+                (first, last)
+            } else {
+                (last, first)
+            };
+            PortRange { first, last }
+        })
+    }
+
+    // strategy for filterrule
+    fn filter_rule_strategy() -> impl Strategy<Value = FilterRule> {
+        (
+            prop::collection::vec(
+                "[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}/[0-9]{1,2}",
+                0..3,
+            ),
+            prop::collection::vec(
+                (
+                    "[*]|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}",
+                    port_range_strategy(),
+                ),
+                0..3,
+            ),
+        )
+            .prop_map(|(src_ips, dst_ports)| FilterRule {
+                src_ips,
+                dst_ports: dst_ports
+                    .into_iter()
+                    .map(|(ip, ports)| NetPortRange { ip, ports })
+                    .collect(),
+            })
+    }
+
+    // strategy for mapresponse
+    fn map_response_strategy() -> impl Strategy<Value = MapResponse> {
+        (
+            any::<bool>(),                                       // keep_alive
+            prop::collection::vec(filter_rule_strategy(), 0..3), // packet_filter
+        )
+            .prop_map(|(keep_alive, packet_filter)| MapResponse {
+                keep_alive,
+                node: None,
+                peers: vec![],
+                dns_config: None,
+                derp_map: None,
+                packet_filter,
+                user_profiles: vec![],
+                control_time: None,
+            })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(500))]
+
+        #[test]
+        fn map_request_serde_roundtrips(req in map_request_strategy()) {
+            let json = serde_json::to_string(&req).unwrap();
+            let parsed: MapRequest = serde_json::from_str(&json).unwrap();
+
+            prop_assert_eq!(req.version.0, parsed.version.0);
+            prop_assert_eq!(req.omit_peers, parsed.omit_peers);
+            prop_assert_eq!(req.stream, parsed.stream);
+            prop_assert_eq!(req.debug_flags, parsed.debug_flags);
+        }
+
+        #[test]
+        fn map_response_serde_roundtrips(resp in map_response_strategy()) {
+            let json = serde_json::to_string(&resp).unwrap();
+            let parsed: MapResponse = serde_json::from_str(&json).unwrap();
+
+            prop_assert_eq!(resp.keep_alive, parsed.keep_alive);
+            prop_assert_eq!(resp.packet_filter.len(), parsed.packet_filter.len());
+        }
+
+        #[test]
+        fn port_range_serde_roundtrips(pr in port_range_strategy()) {
+            let json = serde_json::to_string(&pr).unwrap();
+            let parsed: PortRange = serde_json::from_str(&json).unwrap();
+
+            prop_assert_eq!(pr.first, parsed.first);
+            prop_assert_eq!(pr.last, parsed.last);
+        }
+
+        #[test]
+        fn port_range_single_correct(port in any::<u16>()) {
+            let pr = PortRange::single(port);
+            prop_assert_eq!(pr.first, port);
+            prop_assert_eq!(pr.last, port);
+        }
+
+        #[test]
+        fn port_range_any_covers_all(_: ()) {
+            let pr = PortRange::any();
+            prop_assert_eq!(pr.first, 0);
+            prop_assert_eq!(pr.last, 65535);
+        }
+
+        #[test]
+        fn filter_rule_serde_roundtrips(rule in filter_rule_strategy()) {
+            let json = serde_json::to_string(&rule).unwrap();
+            let parsed: FilterRule = serde_json::from_str(&json).unwrap();
+
+            prop_assert_eq!(rule.src_ips, parsed.src_ips);
+            prop_assert_eq!(rule.dst_ports.len(), parsed.dst_ports.len());
+        }
+
+        #[test]
+        fn arbitrary_json_object_does_not_panic(
+            keep_alive in any::<bool>(),
+            version in any::<i32>(),
+        ) {
+            // well-formed json with various field combinations shouldn't panic
+            let json = format!(
+                r#"{{"KeepAlive": {}, "Version": {}, "Peers": []}}"#,
+                keep_alive, version
+            );
+            let result: Result<MapResponse, _> = serde_json::from_str(&json);
+            // should either succeed or fail gracefully (no panic)
+            let _ = result;
+        }
+
+        #[test]
+        fn map_request_is_read_only_correct(req in map_request_strategy()) {
+            let expected = req.endpoints.is_empty() && req.hostinfo.is_none();
+            prop_assert_eq!(req.is_read_only(), expected);
+        }
+    }
+}
