@@ -1,4 +1,4 @@
-//! validated tag type for node and acl tagging
+//! validated tag type for node and acl tagging.
 //!
 //! tags must:
 //! - Start with "tag:"
@@ -9,13 +9,13 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// maximum length for a tag name (after "tag:" prefix)
+/// maximum length for a tag name (after "tag:" prefix).
 pub const MAX_TAG_NAME_LEN: usize = 50;
 
-/// maximum number of tags per entity
+/// maximum number of tags per entity.
 pub const MAX_TAGS: usize = 100;
 
-/// a validated tag string
+/// a validated tag string.
 ///
 /// tags are guaranteed to:
 /// - Start with "tag:"
@@ -33,24 +33,24 @@ pub const MAX_TAGS: usize = 100;
 pub struct Tag(String);
 
 impl Tag {
-    /// create a new tag, validating the format
+    /// create a new tag, validating the format.
     pub fn new(s: impl Into<String>) -> Result<Self, TagError> {
         let s = s.into();
         Self::validate(&s)?;
         Ok(Self(s))
     }
 
-    /// get the full tag string (e.g., "tag:server")
+    /// get the full tag string (e.g., "tag:server").
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// get just the name portion (e.g., "server" from "tag:server")
+    /// get just the name portion (e.g., "server" from "tag:server").
     pub fn name(&self) -> &str {
         &self.0[4..] // Safe because we validated the "tag:" prefix
     }
 
-    /// consume the tag and return the inner string
+    /// consume the tag and return the inner string.
     pub fn into_inner(self) -> String {
         self.0
     }
@@ -133,16 +133,16 @@ impl Serialize for Tag {
     }
 }
 
-/// error type for tag validation
+/// error type for tag validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TagError {
-    /// tag must start with "tag:"
+    /// tag must start with "tag:".
     MissingPrefix,
-    /// tag name cannot be empty
+    /// tag name cannot be empty.
     EmptyName,
-    /// tag name exceeds maximum length
+    /// tag name exceeds maximum length.
     NameTooLong(usize),
-    /// tag name contains invalid characters
+    /// tag name contains invalid characters.
     InvalidCharacters,
 }
 
@@ -228,5 +228,66 @@ mod tests {
     fn test_serde_invalid() {
         let result: Result<Tag, _> = serde_json::from_str("\"invalid\"");
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid tag names: lowercase alphanumeric + hyphens/underscores
+    fn valid_tag_name_strategy() -> impl Strategy<Value = String> {
+        "[a-z][a-z0-9_-]{0,49}"
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+
+        #[test]
+        fn valid_tag_roundtrips(name in valid_tag_name_strategy()) {
+            let input = format!("tag:{}", name);
+            if let Ok(tag) = Tag::new(&input) {
+                // verify invariants
+                prop_assert!(tag.as_str().starts_with("tag:"));
+                prop_assert!(tag.name().len() <= MAX_TAG_NAME_LEN);
+                prop_assert!(tag.name().chars().all(|c|
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_'
+                ));
+
+                // roundtrip through serde
+                let json = serde_json::to_string(&tag).unwrap();
+                let parsed: Tag = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(parsed, tag);
+            }
+        }
+
+        #[test]
+        fn arbitrary_string_never_panics(s in ".*") {
+            // parsing arbitrary strings should never panic
+            let _ = Tag::new(&s);
+        }
+
+        #[test]
+        fn missing_prefix_rejected(name in "[a-z]{1,10}") {
+            // without "tag:" prefix
+            let result = Tag::new(&name);
+            prop_assert!(matches!(result.unwrap_err(), TagError::MissingPrefix));
+        }
+
+        #[test]
+        fn too_long_rejected(n in (MAX_TAG_NAME_LEN + 1)..=100usize) {
+            let name = "a".repeat(n);
+            let input = format!("tag:{}", name);
+            let result = Tag::new(&input);
+            prop_assert!(matches!(result.unwrap_err(), TagError::NameTooLong(_)));
+        }
+
+        #[test]
+        fn uppercase_rejected(name in "[A-Z][a-z]{0,10}") {
+            let input = format!("tag:{}", name);
+            let result = Tag::new(&input);
+            prop_assert!(matches!(result.unwrap_err(), TagError::InvalidCharacters));
+        }
     }
 }

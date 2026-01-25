@@ -1,4 +1,4 @@
-//! validated username type for user identification
+//! validated username type for user identification.
 //!
 //! usernames must:
 //! - be 1-63 characters long (dns label compatible)
@@ -10,10 +10,10 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// maximum length for a username (dns label compatible)
+/// maximum length for a username (dns label compatible).
 pub const MAX_USERNAME_LEN: usize = 63;
 
-/// a validated username string
+/// a validated username string.
 ///
 /// usernames are guaranteed to:
 /// - Be 1-63 characters long
@@ -31,19 +31,19 @@ pub const MAX_USERNAME_LEN: usize = 63;
 pub struct Username(String);
 
 impl Username {
-    /// create a new username, validating the format
+    /// create a new username, validating the format.
     pub fn new(s: impl Into<String>) -> Result<Self, UsernameError> {
         let s = s.into();
         Self::validate(&s)?;
         Ok(Self(s))
     }
 
-    /// get the username string
+    /// get the username string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// consume the username and return the inner string
+    /// consume the username and return the inner string.
     pub fn into_inner(self) -> String {
         self.0
     }
@@ -124,16 +124,16 @@ impl Serialize for Username {
     }
 }
 
-/// error type for username validation
+/// error type for username validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsernameError {
-    /// username cannot be empty
+    /// username cannot be empty.
     Empty,
-    /// username exceeds maximum length
+    /// username exceeds maximum length.
     TooLong(usize),
-    /// username contains invalid characters
+    /// username contains invalid characters.
     InvalidCharacters,
-    /// username starts or ends with a hyphen
+    /// username starts or ends with a hyphen.
     InvalidHyphenPosition,
 }
 
@@ -282,5 +282,74 @@ mod tests {
 
         let result: Result<Username, _> = serde_json::from_str("\"\"");
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid username patterns: [a-z0-9](-?[a-z0-9])*
+    fn valid_username_strategy() -> impl Strategy<Value = String> {
+        // start with alphanumeric, then optional groups of (hyphen + alphanumeric)
+        "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?".prop_filter("no leading/trailing hyphens", |s| {
+            !s.starts_with('-') && !s.ends_with('-')
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+
+        #[test]
+        fn valid_username_roundtrips(name in valid_username_strategy()) {
+            if let Ok(username) = Username::new(&name) {
+                // verify invariants
+                prop_assert!(username.as_str().len() <= MAX_USERNAME_LEN);
+                prop_assert!(!username.as_str().starts_with('-'));
+                prop_assert!(!username.as_str().ends_with('-'));
+                prop_assert!(username.as_str().chars().all(|c|
+                    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'
+                ));
+
+                // roundtrip through serde
+                let json = serde_json::to_string(&username).unwrap();
+                let parsed: Username = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(parsed, username);
+            }
+        }
+
+        #[test]
+        fn arbitrary_string_never_panics(s in ".*") {
+            // parsing arbitrary strings should never panic
+            let _ = Username::new(&s);
+        }
+
+        #[test]
+        fn too_long_rejected(n in (MAX_USERNAME_LEN + 1)..=200usize) {
+            let long = "a".repeat(n);
+            let result = Username::new(&long);
+            prop_assert!(result.is_err());
+        }
+
+        #[test]
+        fn uppercase_rejected(s in "[A-Z][a-z]{0,10}") {
+            let result = Username::new(&s);
+            prop_assert!(result.is_err());
+        }
+
+        #[test]
+        fn leading_hyphen_rejected(s in "[a-z0-9]{1,10}") {
+            let input = format!("-{}", s);
+            let result = Username::new(&input);
+            prop_assert!(matches!(result.unwrap_err(), UsernameError::InvalidHyphenPosition));
+        }
+
+        #[test]
+        fn trailing_hyphen_rejected(s in "[a-z0-9]{1,10}") {
+            let input = format!("{}-", s);
+            let result = Username::new(&input);
+            prop_assert!(matches!(result.unwrap_err(), UsernameError::InvalidHyphenPosition));
+        }
     }
 }

@@ -1,6 +1,6 @@
-//! validated email address type
+//! validated email address type.
 //!
-//! uses the `email_address` crate for RFC-compliant validation
+//! uses the `email_address` crate for rfc-compliant validation.
 
 use std::fmt;
 use std::str::FromStr;
@@ -8,26 +8,26 @@ use std::str::FromStr;
 use email_address::EmailAddress;
 use serde::{Deserialize, Serialize};
 
-/// a validated email address
+/// a validated email address.
 ///
 /// wraps `email_address::emailaddress` to provide rfc-compliant validation
-/// with serde integration that validates during deserialisation
+/// with serde integration that validates during deserialisation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Email(EmailAddress);
 
 impl Email {
-    /// create a new Email, validating the format
+    /// create a new email, validating the format.
     pub fn new(s: &str) -> Result<Self, EmailError> {
         let addr = EmailAddress::from_str(s).map_err(|_| EmailError::Invalid)?;
         Ok(Self(addr))
     }
 
-    /// get the email as a string slice
+    /// get the email as a string slice.
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
 
-    /// consume the Email and return the inner string
+    /// consume the email and return the inner string.
     pub fn into_inner(self) -> String {
         self.0.to_string()
     }
@@ -73,10 +73,10 @@ impl Serialize for Email {
     }
 }
 
-/// error type for email validation
+/// error type for email validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EmailError {
-    /// email format is invalid
+    /// email format is invalid.
     Invalid,
 }
 
@@ -146,5 +146,53 @@ mod tests {
     fn test_from_str() {
         let email: Email = "user@example.com".parse().unwrap();
         assert_eq!(email.as_str(), "user@example.com");
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid email-like patterns
+    fn valid_email_strategy() -> impl Strategy<Value = String> {
+        // simple email pattern: local@domain.tld
+        "[a-z][a-z0-9.]{0,20}@[a-z]{1,10}\\.[a-z]{2,4}"
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+
+        #[test]
+        fn valid_email_roundtrips(email_str in valid_email_strategy()) {
+            if let Ok(email) = Email::new(&email_str) {
+                // roundtrip through serde
+                let json = serde_json::to_string(&email).unwrap();
+                let parsed: Email = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(parsed, email);
+            }
+        }
+
+        #[test]
+        fn arbitrary_string_never_panics(s in ".*") {
+            // parsing arbitrary strings should never panic
+            let _ = Email::new(&s);
+        }
+
+        #[test]
+        fn missing_at_rejected(s in "[a-z]{1,20}") {
+            // strings without @ should be rejected
+            if !s.contains('@') {
+                let result = Email::new(&s);
+                prop_assert!(result.is_err());
+            }
+        }
+
+        #[test]
+        fn empty_local_rejected(domain in "[a-z]{1,10}\\.[a-z]{2,4}") {
+            let input = format!("@{}", domain);
+            let result = Email::new(&input);
+            prop_assert!(result.is_err());
+        }
     }
 }

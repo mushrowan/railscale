@@ -1,8 +1,8 @@
-//! validated oidc group prefix type
+//! validated oidc group prefix type.
 //!
-//! when syncing oidc groups to policy groups, an optional prefix can be applied
+//! when syncing oidc groups to policy groups, an optional prefix can be applied.
 //! for example, with prefix "oidc-", an oidc group "engineering" becomes "oidc-engineering"
-//! for matching against `group:oidc-engineering` in grants
+//! for matching against `group:oidc-engineering` in grants.
 //!
 //! prefixes must:
 //! - Be 1-50 characters
@@ -14,13 +14,13 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// maximum length for an oidc group prefix
+/// maximum length for an oidc group prefix.
 pub const MAX_OIDC_GROUP_PREFIX_LEN: usize = 50;
 
-/// a validated oidc group prefix string
+/// a validated oidc group prefix string.
 ///
-/// used to namespace oidc groups when mapping them to policy groups
-/// for example, prefix "oidc-" transforms group "engineering" into "oidc-engineering"
+/// used to namespace oidc groups when mapping them to policy groups.
+/// for example, prefix "oidc-" transforms group "engineering" into "oidc-engineering".
 ///
 /// # Example
 /// ```
@@ -33,19 +33,19 @@ pub const MAX_OIDC_GROUP_PREFIX_LEN: usize = 50;
 pub struct OidcGroupPrefix(String);
 
 impl OidcGroupPrefix {
-    /// create a new oidc group prefix, validating the format
+    /// create a new oidc group prefix, validating the format.
     pub fn new(s: impl Into<String>) -> Result<Self, OidcGroupPrefixError> {
         let s = s.into();
         Self::validate(&s)?;
         Ok(Self(s))
     }
 
-    /// get the prefix string
+    /// get the prefix string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// apply the prefix to a group name
+    /// apply the prefix to a group name.
     ///
     /// # Example
     /// ```
@@ -58,7 +58,7 @@ impl OidcGroupPrefix {
         format!("{}{}", self.0, group)
     }
 
-    /// consume the prefix and return the inner string
+    /// consume the prefix and return the inner string.
     pub fn into_inner(self) -> String {
         self.0
     }
@@ -128,16 +128,16 @@ impl Serialize for OidcGroupPrefix {
     }
 }
 
-/// error type for oidc group prefix validation
+/// error type for oidc group prefix validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OidcGroupPrefixError {
-    /// prefix cannot be empty
+    /// prefix cannot be empty.
     Empty,
-    /// prefix exceeds maximum length
+    /// prefix exceeds maximum length.
     TooLong(usize),
-    /// prefix cannot contain colons (reserved for selector syntax)
+    /// prefix cannot contain colons (reserved for selector syntax).
     ContainsColon,
-    /// prefix contains invalid characters
+    /// prefix contains invalid characters.
     InvalidCharacters,
 }
 
@@ -240,5 +240,63 @@ mod tests {
         // contains colon - should fail validation
         let result: Result<OidcGroupPrefix, _> = serde_json::from_str("\"group:\"");
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid prefix patterns: alphanumeric + hyphens/underscores
+    fn valid_prefix_strategy() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9_-]{1,50}"
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+
+        #[test]
+        fn valid_prefix_roundtrips(prefix in valid_prefix_strategy()) {
+            if let Ok(p) = OidcGroupPrefix::new(&prefix) {
+                // verify invariants
+                prop_assert!(!p.as_str().is_empty());
+                prop_assert!(p.as_str().len() <= MAX_OIDC_GROUP_PREFIX_LEN);
+                prop_assert!(!p.as_str().contains(':'));
+
+                // roundtrip through serde
+                let json = serde_json::to_string(&p).unwrap();
+                let parsed: OidcGroupPrefix = serde_json::from_str(&json).unwrap();
+                prop_assert_eq!(parsed, p);
+            }
+        }
+
+        #[test]
+        fn apply_preserves_prefix(prefix in valid_prefix_strategy(), group in "[a-z]{1,20}") {
+            if let Ok(p) = OidcGroupPrefix::new(&prefix) {
+                let result = p.apply(&group);
+                prop_assert!(result.starts_with(p.as_str()));
+                prop_assert!(result.ends_with(&group));
+            }
+        }
+
+        #[test]
+        fn arbitrary_string_never_panics(s in ".*") {
+            // parsing arbitrary strings should never panic
+            let _ = OidcGroupPrefix::new(&s);
+        }
+
+        #[test]
+        fn colon_rejected(s in "[a-z]{0,5}:[a-z]{0,5}") {
+            let result = OidcGroupPrefix::new(&s);
+            prop_assert!(matches!(result.unwrap_err(), OidcGroupPrefixError::ContainsColon));
+        }
+
+        #[test]
+        fn too_long_rejected(n in (MAX_OIDC_GROUP_PREFIX_LEN + 1)..=100usize) {
+            let long = "a".repeat(n);
+            let result = OidcGroupPrefix::new(&long);
+            prop_assert!(matches!(result.unwrap_err(), OidcGroupPrefixError::TooLong(_)));
+        }
     }
 }
