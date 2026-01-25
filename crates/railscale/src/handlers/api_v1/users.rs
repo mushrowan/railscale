@@ -39,6 +39,9 @@ pub struct UserResponse {
     pub provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile_pic_url: Option<String>,
+    /// oidc group memberships synced from identity provider.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub oidc_groups: Vec<String>,
     pub created_at: String,
 }
 
@@ -51,6 +54,7 @@ impl From<User> for UserResponse {
             email: user.email,
             provider: user.provider,
             profile_pic_url: user.profile_pic_url,
+            oidc_groups: user.oidc_groups,
             created_at: user.created_at.to_rfc3339(),
         }
     }
@@ -255,6 +259,21 @@ mod tests {
         assert_eq!(response.name, "alice");
         assert!(response.display_name.is_none());
         assert!(response.email.is_none());
+        assert!(response.oidc_groups.is_empty());
+    }
+
+    #[test]
+    fn test_user_response_with_oidc_groups() {
+        let mut user = User::new(UserId(42), "alice".to_string());
+        user.oidc_groups = vec!["engineering".to_string(), "devops".to_string()];
+
+        let response = UserResponse::from(user);
+        assert_eq!(response.oidc_groups, vec!["engineering", "devops"]);
+
+        // verify serialization includes oidc_groups
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"oidc_groups\""));
+        assert!(json.contains("engineering"));
     }
 
     #[test]
@@ -266,6 +285,7 @@ mod tests {
             email: Some("alice@example.com".to_string()),
             provider: None,
             profile_pic_url: None,
+            oidc_groups: vec![],
             created_at: "2024-01-01T00:00:00Z".to_string(),
         };
 
@@ -277,9 +297,10 @@ mod tests {
         assert!(json.contains("\"display_name\""));
         assert!(json.contains("\"created_at\""));
 
-        // verify none fields are skipped
+        // verify none/empty fields are skipped
         assert!(!json.contains("\"provider\""));
         assert!(!json.contains("\"profile_pic_url\""));
+        assert!(!json.contains("\"oidc_groups\"")); // empty vec skipped
     }
 
     #[test]
@@ -292,6 +313,7 @@ mod tests {
                 email: None,
                 provider: None,
                 profile_pic_url: None,
+                oidc_groups: vec![],
                 created_at: "2024-01-01T00:00:00Z".to_string(),
             }],
         };
