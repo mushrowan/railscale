@@ -260,7 +260,7 @@ async fn build_map_response(
         })
         .collect();
 
-    // get oidc group prefix if configured
+    // acquire read lock on grants engine for policy evaluation
     let grants = state.grants.read().await;
 
     // get oidc group prefix if configured
@@ -285,9 +285,9 @@ async fn build_map_response(
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);
 
-    // generate derp map
-    let derp_map = crate::derp::generate_derp_map(&state.config);
-    let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1); // Default to region 1 if none configured
+    // use shared derp map from state (generated once at startup)
+    let derp_map = state.derp_map.read().await.clone();
+    let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1);
 
     Ok(MapResponse {
         // keep_alive=false signals "this response has real data, process it"

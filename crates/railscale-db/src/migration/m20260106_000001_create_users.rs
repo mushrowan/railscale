@@ -1,4 +1,4 @@
-//! create users table migration
+//! create users table migration.
 
 use sea_orm_migration::prelude::*;
 
@@ -26,6 +26,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Users::ProviderIdentifier).string())
                     .col(ColumnDef::new(Users::Provider).string())
                     .col(ColumnDef::new(Users::ProfilePicUrl).string())
+                    .col(ColumnDef::new(Users::OidcGroups).text())
                     .col(
                         ColumnDef::new(Users::CreatedAt)
                             .timestamp_with_time_zone()
@@ -63,13 +64,14 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // index on provider_identifier for oidc users
+        // unique index on provider_identifier for oidc users
         manager
             .create_index(
                 Index::create()
                     .name("idx_users_provider_identifier")
                     .table(Users::Table)
                     .col(Users::ProviderIdentifier)
+                    .unique()
                     .to_owned(),
             )
             .await?;
@@ -94,6 +96,7 @@ pub enum Users {
     ProviderIdentifier,
     Provider,
     ProfilePicUrl,
+    OidcGroups,
     CreatedAt,
     UpdatedAt,
     DeletedAt,

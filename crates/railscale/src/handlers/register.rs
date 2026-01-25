@@ -451,11 +451,16 @@ async fn handle_preauth_registration(
         .await
         .map_internal()?;
 
-    let hostname = req
+    // sanitise hostname for dns compatibility
+    let raw_hostname = req
         .hostinfo
         .as_ref()
         .and_then(|h| h.hostname.clone())
         .unwrap_or_default();
+
+    let hostname = railscale_types::NodeName::sanitise(&raw_hostname)
+        .map(|n| n.into_inner())
+        .unwrap_or_else(|| "node".to_string());
 
     // allocate ip addresses for the new node
     let (ipv4, ipv6) = {

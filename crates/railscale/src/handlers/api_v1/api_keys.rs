@@ -196,15 +196,28 @@ async fn expire_api_key(
         (None, Some(prefix)) => {
             // look up by prefix (selector prefix, first 8 chars)
             let selector_prefix = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
-            let key = state
+            let keys = state
                 .db
-                .get_api_key_by_selector_prefix(selector_prefix)
+                .get_api_keys_by_selector_prefix(selector_prefix)
                 .await
-                .map_err(ApiError::internal)?
-                .ok_or_else(|| {
-                    ApiError::not_found(format!("API key with prefix '{}' not found", prefix))
-                })?;
-            key.id
+                .map_err(ApiError::internal)?;
+
+            match keys.len() {
+                0 => {
+                    return Err(ApiError::not_found(format!(
+                        "API key with prefix '{}' not found",
+                        prefix
+                    )));
+                }
+                1 => keys[0].id,
+                _ => {
+                    return Err(ApiError::conflict(format!(
+                        "prefix '{}' matches {} keys; use key ID instead",
+                        prefix,
+                        keys.len()
+                    )));
+                }
+            }
         }
         (None, None) => {
             return Err(ApiError::bad_request("must provide id or prefix"));
@@ -230,18 +243,32 @@ async fn delete_api_key(
 ) -> Result<Json<DeleteApiKeyResponse>, ApiError> {
     // look up by prefix (selector prefix, first 8 chars)
     let selector_prefix = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
-    let key = state
+    let keys = state
         .db
-        .get_api_key_by_selector_prefix(selector_prefix)
+        .get_api_keys_by_selector_prefix(selector_prefix)
         .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| {
-            ApiError::not_found(format!("API key with prefix '{}' not found", prefix))
-        })?;
+        .map_err(ApiError::internal)?;
+
+    let key_id = match keys.len() {
+        0 => {
+            return Err(ApiError::not_found(format!(
+                "API key with prefix '{}' not found",
+                prefix
+            )));
+        }
+        1 => keys[0].id,
+        _ => {
+            return Err(ApiError::conflict(format!(
+                "prefix '{}' matches {} keys; use key ID instead",
+                prefix,
+                keys.len()
+            )));
+        }
+    };
 
     state
         .db
-        .delete_api_key(key.id)
+        .delete_api_key(key_id)
         .await
         .map_err(ApiError::internal)?;
 

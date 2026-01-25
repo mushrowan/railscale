@@ -149,15 +149,26 @@ fn generate_new_cert(
     let cert_pem = certified_key.cert.pem();
     let key_pem = certified_key.signing_key.serialize_pem();
     fs::write(cert_path, &cert_pem).wrap_err("failed to write DERP certificate")?;
-    fs::write(key_path, &key_pem).wrap_err("failed to write DERP key")?;
 
-    // set restrictive permissions on the private key file (unix only)
+    // write key with restrictive permissions at creation time (unix)
+    // this avoids a brief window with insecure default permissions
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(key_path, fs::Permissions::from_mode(0o600))
-            .wrap_err("failed to set DERP key permissions")?;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600) // Restrictive permissions at creation
+            .open(key_path)
+            .wrap_err("failed to create DERP key file")?;
+        file.write_all(key_pem.as_bytes())
+            .wrap_err("failed to write DERP key")?;
     }
+
+    #[cfg(not(unix))]
+    fs::write(key_path, &key_pem).wrap_err("failed to write DERP key")?;
 
     // get der bytes for fingerprint calculation
     let der_bytes = certified_key.cert.der().to_vec();
@@ -711,7 +722,7 @@ pub struct EmbeddedDerpOptions {
     pub idle_timeout_secs: u64,
     /// message rate limit in bytes per second (sent to clients in serverinfo).
     pub bytes_per_second: u32,
-    /// when true, the server enforces the rate limit in addition to client-side
+    /// message burst size in bytes (sent to clients in serverinfo).
     pub bytes_burst: u32,
     /// enable server-side message rate limiting.
     /// when true, the server enforces the rate limit in addition to client-side.

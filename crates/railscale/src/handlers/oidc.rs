@@ -146,10 +146,21 @@ pub async fn oidc_callback(
         }
     } else {
         // create new user with OIDC groups
-        use railscale_types::{User, UserId};
+        use railscale_types::{User, UserId, Username};
+
+        // sanitise username from oidc claims, falling back to email local part
+        let sanitised_name = Username::sanitise(&claims.preferred_username)
+            .or_else(|| {
+                // try email local part (before @)
+                let email_local = claims.email.split('@').next().unwrap_or("");
+                Username::sanitise(email_local)
+            })
+            .map(|u| u.into_inner())
+            .unwrap_or_else(|| "user".to_string());
+
         let new_user = User {
             id: UserId(0), // Will be assigned by database
-            name: claims.preferred_username.clone(),
+            name: sanitised_name,
             display_name: Some(claims.display_name().to_string()),
             email: Some(claims.email.clone()),
             provider_identifier: Some(provider_identifier),
@@ -176,12 +187,19 @@ pub async fn oidc_callback(
                 .map_err(|e| ApiError::internal(e.to_string()))?
         };
 
-        // create the node
-        let hostname = pending
+        // create the node with sanitised hostname
+        use railscale_types::NodeName;
+
+        let raw_hostname = pending
             .hostinfo
             .as_ref()
             .and_then(|h| h.hostname.clone())
             .unwrap_or_default();
+
+        // sanitise hostname for dns compatibility, falling back to "node"
+        let hostname = NodeName::sanitise(&raw_hostname)
+            .map(|n| n.into_inner())
+            .unwrap_or_else(|| "node".to_string());
 
         let now = chrono::Utc::now();
         let node = railscale_types::Node {

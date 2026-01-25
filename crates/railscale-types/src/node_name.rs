@@ -1,4 +1,4 @@
-//! validated node name type for node identification
+//! validated node name type for node identification.
 //!
 //! node names must:
 //! - be 1-63 characters long (dns label compatible)
@@ -10,10 +10,10 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// maximum length for a node name (dns label compatible)
+/// maximum length for a node name (dns label compatible).
 pub const MAX_NODE_NAME_LEN: usize = 63;
 
-/// a validated node name string
+/// a validated node name string.
 ///
 /// node names are guaranteed to:
 /// - Be 1-63 characters long
@@ -31,19 +31,71 @@ pub const MAX_NODE_NAME_LEN: usize = 63;
 pub struct NodeName(String);
 
 impl NodeName {
-    /// create a new node name, validating the format
+    /// create a new node name, validating the format.
     pub fn new(s: impl Into<String>) -> Result<Self, NodeNameError> {
         let s = s.into();
         Self::validate(&s)?;
         Ok(Self(s))
     }
 
-    /// get the node name string
+    /// sanitise an arbitrary string into a valid node name
+    ///
+    /// this normalises input by:
+    /// - converting to lowercase
+    /// - replacing invalid characters with hyphens
+    /// - collapsing multiple hyphens
+    /// - trimming leading/trailing hyphens
+    /// - truncating to max length
+    ///
+    /// returns `None` if the result would be empty
+    pub fn sanitise(s: &str) -> Option<Self> {
+        // convert to lowercase and replace invalid chars with hyphens
+        let sanitised: String = s
+            .to_lowercase()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_lowercase() || c.is_ascii_digit() {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+
+        // collapse multiple hyphens and trim leading/trailing
+        let mut result = String::new();
+        let mut last_was_hyphen = true; // Treat start as if preceded by hyphen
+        for c in sanitised.chars() {
+            if c == '-' {
+                if !last_was_hyphen && result.len() < MAX_NODE_NAME_LEN {
+                    result.push(c);
+                    last_was_hyphen = true;
+                }
+            } else if result.len() < MAX_NODE_NAME_LEN {
+                result.push(c);
+                last_was_hyphen = false;
+            }
+        }
+
+        // trim trailing hyphen
+        while result.ends_with('-') {
+            result.pop();
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            // this should always succeed given our sanitisation logic
+            Self::new(result).ok()
+        }
+    }
+
+    /// get the node name string.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    /// consume the node name and return the inner string
+    /// consume the node name and return the inner string.
     pub fn into_inner(self) -> String {
         self.0
     }
@@ -124,16 +176,16 @@ impl Serialize for NodeName {
     }
 }
 
-/// error type for node name validation
+/// error type for node name validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeNameError {
-    /// node name cannot be empty
+    /// node name cannot be empty.
     Empty,
-    /// node name exceeds maximum length
+    /// node name exceeds maximum length.
     TooLong(usize),
-    /// node name contains invalid characters
+    /// node name contains invalid characters.
     InvalidCharacters,
-    /// node name starts or ends with a hyphen
+    /// node name starts or ends with a hyphen.
     InvalidHyphenPosition,
 }
 
@@ -282,5 +334,41 @@ mod tests {
 
         let result: Result<NodeName, _> = serde_json::from_str("\"\"");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sanitise_valid() {
+        assert_eq!(NodeName::sanitise("mynode").unwrap().as_str(), "mynode");
+        assert_eq!(NodeName::sanitise("my-node").unwrap().as_str(), "my-node");
+    }
+
+    #[test]
+    fn test_sanitise_uppercase() {
+        assert_eq!(NodeName::sanitise("MyNode").unwrap().as_str(), "mynode");
+        assert_eq!(NodeName::sanitise("MY-NODE").unwrap().as_str(), "my-node");
+    }
+
+    #[test]
+    fn test_sanitise_special_chars() {
+        assert_eq!(
+            NodeName::sanitise("my.node.local").unwrap().as_str(),
+            "my-node-local"
+        );
+        assert_eq!(NodeName::sanitise("my_node").unwrap().as_str(), "my-node");
+    }
+
+    #[test]
+    fn test_sanitise_leading_trailing() {
+        assert_eq!(NodeName::sanitise(".mynode.").unwrap().as_str(), "mynode");
+        assert_eq!(
+            NodeName::sanitise("---mynode---").unwrap().as_str(),
+            "mynode"
+        );
+    }
+
+    #[test]
+    fn test_sanitise_empty() {
+        assert!(NodeName::sanitise("").is_none());
+        assert!(NodeName::sanitise("...").is_none());
     }
 }

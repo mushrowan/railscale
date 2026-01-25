@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::Policy;
-use railscale_types::MAX_POLICY_SIZE;
+use railscale_types::{MAX_POLICY_SIZE, MAX_TAGS, NodeName, Username};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::info;
@@ -138,10 +138,13 @@ impl AdminService for AdminServiceImpl {
     ) -> Result<Response<pb::User>, Status> {
         let req = request.into_inner();
 
-        let user = railscale_types::User::new(
-            railscale_types::UserId(0), // Will be assigned by DB
-            req.email.clone(),
-        );
+        // validate and sanitise user name, but preserve original email
+        let name = Username::sanitise(&req.email)
+            .map(|u| u.into_inner())
+            .ok_or_else(|| Status::invalid_argument("invalid email/username format"))?;
+
+        let mut user = railscale_types::User::new(railscale_types::UserId(0), name);
+        user.email = Some(req.email.clone());
 
         let created = self
             .db
@@ -255,6 +258,11 @@ impl AdminService for AdminServiceImpl {
         let req = request.into_inner();
         let id = railscale_types::UserId(req.id);
 
+        // sanitise new username, preserving original as email
+        let sanitised_name = Username::sanitise(&req.new_name)
+            .map(|u| u.into_inner())
+            .ok_or_else(|| Status::invalid_argument("invalid username format"))?;
+
         let mut user = self
             .db
             .get_user(id)
@@ -262,8 +270,7 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get user: {}", e)))?
             .ok_or_else(|| Status::not_found("User not found"))?;
 
-        // new_name is the new email/name
-        user.name = req.new_name.clone();
+        user.name = sanitised_name;
         user.email = Some(req.new_name);
 
         let updated = self
@@ -371,6 +378,10 @@ impl AdminService for AdminServiceImpl {
         let req = request.into_inner();
         let id = railscale_types::NodeId(req.id);
 
+        // validate new node name
+        let validated_name = NodeName::new(&req.new_name)
+            .map_err(|e| Status::invalid_argument(format!("invalid node name: {}", e)))?;
+
         let mut node = self
             .db
             .get_node(id)
@@ -378,7 +389,7 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
             .ok_or_else(|| Status::not_found("Node not found"))?;
 
-        node.given_name = req.new_name;
+        node.given_name = validated_name.into_inner();
 
         let updated = self
             .db
@@ -395,6 +406,15 @@ impl AdminService for AdminServiceImpl {
     ) -> Result<Response<pb::Node>, Status> {
         let req = request.into_inner();
         let id = railscale_types::NodeId(req.id);
+
+        // check tag count limit
+        if req.tags.len() > MAX_TAGS {
+            return Err(Status::invalid_argument(format!(
+                "too many tags ({}, max {})",
+                req.tags.len(),
+                MAX_TAGS
+            )));
+        }
 
         // parse tags from request
         let tags: Vec<railscale_types::Tag> = req
@@ -466,6 +486,15 @@ impl AdminService for AdminServiceImpl {
         request: Request<pb::CreatePreauthKeyRequest>,
     ) -> Result<Response<pb::PreauthKey>, Status> {
         let req = request.into_inner();
+
+        // check tag count limit
+        if req.tags.len() > MAX_TAGS {
+            return Err(Status::invalid_argument(format!(
+                "too many tags ({}, max {})",
+                req.tags.len(),
+                MAX_TAGS
+            )));
+        }
 
         // parse tags from request
         let tags: Vec<railscale_types::Tag> = req

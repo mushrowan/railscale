@@ -1,4 +1,4 @@
-//! create api_keys table migration
+//! create api_keys table migration.
 
 use sea_orm_migration::prelude::*;
 
@@ -22,7 +22,8 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(ApiKeys::Key).string().not_null())
+                    .col(ColumnDef::new(ApiKeys::Selector).string().not_null())
+                    .col(ColumnDef::new(ApiKeys::VerifierHash).string().not_null())
                     .col(ColumnDef::new(ApiKeys::Name).string().not_null())
                     .col(ColumnDef::new(ApiKeys::UserId).big_integer().not_null())
                     .col(ColumnDef::new(ApiKeys::Expiration).timestamp_with_time_zone())
@@ -44,13 +45,13 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // index on key for lookups
+        // unique index on selector for fast lookups
         manager
             .create_index(
                 Index::create()
-                    .name("idx_api_keys_key")
+                    .name("idx_api_keys_selector")
                     .table(ApiKeys::Table)
-                    .col(ApiKeys::Key)
+                    .col(ApiKeys::Selector)
                     .unique()
                     .to_owned(),
             )
@@ -93,7 +94,8 @@ pub enum ApiKeys {
     #[sea_orm(iden = "api_keys")]
     Table,
     Id,
-    Key,
+    Selector,
+    VerifierHash,
     Name,
     UserId,
     Expiration,

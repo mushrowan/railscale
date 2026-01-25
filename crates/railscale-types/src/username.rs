@@ -38,6 +38,58 @@ impl Username {
         Ok(Self(s))
     }
 
+    /// sanitise an arbitrary string into a valid username
+    ///
+    /// this normalises input by:
+    /// - converting to lowercase
+    /// - replacing invalid characters with hyphens
+    /// - collapsing multiple hyphens
+    /// - trimming leading/trailing hyphens
+    /// - truncating to max length
+    ///
+    /// returns `None` if the result would be empty
+    pub fn sanitise(s: &str) -> Option<Self> {
+        // convert to lowercase and replace invalid chars with hyphens
+        let sanitised: String = s
+            .to_lowercase()
+            .chars()
+            .map(|c| {
+                if c.is_ascii_lowercase() || c.is_ascii_digit() {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect();
+
+        // collapse multiple hyphens and trim leading/trailing
+        let mut result = String::new();
+        let mut last_was_hyphen = true; // Treat start as if preceded by hyphen
+        for c in sanitised.chars() {
+            if c == '-' {
+                if !last_was_hyphen && result.len() < MAX_USERNAME_LEN {
+                    result.push(c);
+                    last_was_hyphen = true;
+                }
+            } else if result.len() < MAX_USERNAME_LEN {
+                result.push(c);
+                last_was_hyphen = false;
+            }
+        }
+
+        // trim trailing hyphen
+        while result.ends_with('-') {
+            result.pop();
+        }
+
+        if result.is_empty() {
+            None
+        } else {
+            // this should always succeed given our sanitisation logic
+            Self::new(result).ok()
+        }
+    }
+
     /// get the username string.
     pub fn as_str(&self) -> &str {
         &self.0
@@ -282,6 +334,65 @@ mod tests {
 
         let result: Result<Username, _> = serde_json::from_str("\"\"");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sanitise_valid() {
+        // already valid
+        assert_eq!(Username::sanitise("alice").unwrap().as_str(), "alice");
+        assert_eq!(
+            Username::sanitise("alice-bob").unwrap().as_str(),
+            "alice-bob"
+        );
+    }
+
+    #[test]
+    fn test_sanitise_uppercase() {
+        // uppercase converted to lowercase
+        assert_eq!(Username::sanitise("Alice").unwrap().as_str(), "alice");
+        assert_eq!(Username::sanitise("ALICE").unwrap().as_str(), "alice");
+    }
+
+    #[test]
+    fn test_sanitise_special_chars() {
+        // special chars become hyphens
+        assert_eq!(
+            Username::sanitise("alice@example.com").unwrap().as_str(),
+            "alice-example-com"
+        );
+        assert_eq!(
+            Username::sanitise("alice_bob").unwrap().as_str(),
+            "alice-bob"
+        );
+        assert_eq!(
+            Username::sanitise("alice.bob").unwrap().as_str(),
+            "alice-bob"
+        );
+    }
+
+    #[test]
+    fn test_sanitise_leading_trailing() {
+        // leading/trailing invalid chars trimmed
+        assert_eq!(Username::sanitise("@alice@").unwrap().as_str(), "alice");
+        assert_eq!(Username::sanitise("---alice---").unwrap().as_str(), "alice");
+    }
+
+    #[test]
+    fn test_sanitise_collapse_hyphens() {
+        // multiple hyphens collapsed
+        assert_eq!(
+            Username::sanitise("alice---bob").unwrap().as_str(),
+            "alice-bob"
+        );
+        assert_eq!(Username::sanitise("a   b   c").unwrap().as_str(), "a-b-c");
+    }
+
+    #[test]
+    fn test_sanitise_empty() {
+        // empty or all-invalid returns None
+        assert!(Username::sanitise("").is_none());
+        assert!(Username::sanitise("@@@").is_none());
+        assert!(Username::sanitise("---").is_none());
     }
 }
 

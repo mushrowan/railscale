@@ -342,6 +342,15 @@ impl ServeCommand {
         info!("Listen address: {}", config.listen_addr);
         info!("Server URL: {}", config.server_url);
 
+        // security warning for insecure configuration
+        if config.allow_non_noise_registration {
+            warn!("SECURITY WARNING: allow_non_noise_registration=true is enabled!");
+            warn!(
+                "This bypasses cryptographic binding between registration requests and machine keys."
+            );
+            warn!("Only use this setting in test environments, never in production.");
+        }
+
         // ensure parent directory exists for sqlite databases
         if config.database.db_type == "sqlite" {
             let db_path = std::path::Path::new(&config.database.connection_string);
@@ -516,6 +525,8 @@ impl ServeCommand {
 
         // build routers with policy handle for hot-reload
         let notifier = crate::StateNotifier::new();
+        // generate derp map once at startup - config doesn't change at runtime
+        let derp_map = crate::derp::generate_derp_map(&config);
         let (routers, policy_handle) = crate::create_app_routers_with_policy_handle(
             db,
             policy,
@@ -523,7 +534,7 @@ impl ServeCommand {
             oidc,
             notifier,
             Some(keypair),
-            None,
+            Some(derp_map),
         )
         .await;
 
@@ -540,7 +551,7 @@ impl ServeCommand {
                 .context("invalid API listen address")?;
             (routers.protocol, routers.api, Some(api_addr))
         } else if let Some(api_router) = routers.api {
-            // no api
+            // api merged onto protocol router
             (routers.protocol.merge(api_router), None, None)
         } else {
             // no api

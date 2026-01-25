@@ -144,12 +144,12 @@ pub trait Database: Send + Sync {
         selector: &str,
     ) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
 
-    /// get an api key by a prefix of its selector (first 8 chars).
-    /// used for user-facing lookups where only the prefix is shown.
-    fn get_api_key_by_selector_prefix(
+    /// get all api keys matching a prefix of its selector
+    /// returns all matches to allow callers to detect ambiguous prefixes
+    fn get_api_keys_by_selector_prefix(
         &self,
         prefix: &str,
-    ) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+    ) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
 
     /// get an api key by its numeric id.
     fn get_api_key_by_id(&self, id: u64) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
@@ -475,13 +475,13 @@ impl Database for RailscaleDb {
         Ok(result.map(Into::into))
     }
 
-    async fn get_api_key_by_selector_prefix(&self, prefix: &str) -> Result<Option<ApiKey>> {
-        let result = entity::api_key::Entity::find()
+    async fn get_api_keys_by_selector_prefix(&self, prefix: &str) -> Result<Vec<ApiKey>> {
+        let results = entity::api_key::Entity::find()
             .filter(entity::api_key::Column::Selector.starts_with(prefix))
             .filter(entity::api_key::Column::DeletedAt.is_null())
-            .one(&self.conn)
+            .all(&self.conn)
             .await?;
-        Ok(result.map(Into::into))
+        Ok(results.into_iter().map(Into::into).collect())
     }
 
     async fn get_api_key_by_id(&self, id: u64) -> Result<Option<ApiKey>> {
@@ -600,7 +600,7 @@ mod tests {
         let user = User::new(UserId(0), "keyowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        // get by token (looks up by hash)
+        // create key using token
         let token = PreAuthKeyToken::generate();
         let key = PreAuthKey::from_token(0, &token, user.id);
         let created = db.create_preauth_key(&key).await.unwrap();
@@ -748,9 +748,13 @@ mod tests {
         let prefix_8 = &secret.selector[..8];
 
         // look up by 8-char prefix (this is what the api does)
-        let found = db.get_api_key_by_selector_prefix(prefix_8).await.unwrap();
-        assert!(found.is_some(), "Should find key by 8-char prefix");
-        assert_eq!(found.unwrap().id, created.id);
+        let found = db.get_api_keys_by_selector_prefix(prefix_8).await.unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "Should find exactly one key by 8-char prefix"
+        );
+        assert_eq!(found[0].id, created.id);
     }
 
     #[tokio::test]

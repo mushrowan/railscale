@@ -121,11 +121,14 @@ pub struct AppState {
     pub pending_registrations: Cache<RegistrationId, Arc<PendingRegistration>>,
     /// derp map for relay coordination (shared for dynamic updates).
     pub derp_map: Arc<RwLock<DerpMap>>,
+    /// dns resolution cache for /bootstrap-dns endpoint
+    /// maps hostname -> resolved ip addresses. entries expire after 60 seconds.
+    pub dns_cache: Cache<String, Vec<std::net::IpAddr>>,
 }
 
-/// listener from the protocol router. Otherwise, they're merged
+/// routers for the application, potentially running on separate listeners.
 ///
-/// protocol router (tailscale client endpoints)
+/// when `api.listen_host` is configured, the api router runs on a separate
 /// listener from the protocol router. Otherwise, they're merged.
 pub struct AppRouters {
     /// protocol router (tailscale client endpoints).
@@ -171,17 +174,26 @@ pub async fn load_or_generate_noise_keypair(path: &Path) -> std::io::Result<Keyp
         }
 
         // write keypair: private (32 bytes) + public (32 bytes)
+        // use sync std::fs::openoptions to set restrictive permissions at creation time
+        // (avoids a brief window with insecure default permissions)
+        #[cfg(unix)]
+        let mut file = {
+            use std::os::unix::fs::OpenOptionsExt;
+            let std_file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600) // Restrictive permissions at creation
+                .open(path)?;
+            fs::File::from_std(std_file)
+        };
+
+        #[cfg(not(unix))]
         let mut file = fs::File::create(path).await?;
+
         file.write_all(&keypair.private).await?;
         file.write_all(&keypair.public).await?;
         file.sync_all().await?;
-
-        // set restrictive permissions on unix (owner read/write only)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-        }
 
         Ok(keypair)
     }
@@ -199,6 +211,8 @@ pub async fn create_app(
     notifier: StateNotifier,
     keypair: Option<Keypair>,
 ) -> Router {
+    // generate derp map from config so tests and callers get a usable default
+    let derp_map = derp::generate_derp_map(&config);
     let (app, _handle) = create_app_with_policy_handle(
         db,
         grants.policy().clone(),
@@ -206,7 +220,7 @@ pub async fn create_app(
         oidc,
         notifier,
         keypair,
-        None,
+        Some(derp_map),
     )
     .await;
     app
@@ -217,8 +231,8 @@ pub async fn create_app(
 /// returns both the router and a [`policyhandle`] that can be used to
 /// reload the policy at runtime (e.g., in response to SIGHUP).
 ///
-/// note: This function always merges api routes onto the protocol router
-/// for separate api listener support, use [`create_app_routers_with_policy_handle`]
+/// if `keypair` is none, a new keypair will be generated (not persisted).
+/// if `derp_map` is none, a default empty map will be used.
 ///
 /// NOTE: this function always merges api routes onto the protocol router.
 /// for separate api listener support, use [`create_app_routers_with_policy_handle`].
@@ -246,16 +260,16 @@ pub async fn create_app_with_policy_handle(
     (router, handle)
 }
 
-/// - protocol router (tailscale client endpoints)
-///- api router (REST admin endpoints), if api is enabled
-/// - Flag indicating whether api should run on a separate listener
+/// create separate routers for protocol and api endpoints.
+///
+/// returns [`approuters`] containing:
 /// - Protocol router (Tailscale client endpoints)
-/// use this when you need to run the api on a separate port from the protocol
-/// the caller is responsible for starting the appropriate listeners based on
-///the `api_separate` flag
+/// - API router (REST admin endpoints), if API is enabled
+/// - Flag indicating whether API should run on a separate listener
+///
 /// use this when you need to run the api on a separate port from the protocol.
-/// if `keypair` is None, a new keypair will be generated (not persisted)
-/// if `derp_map` is None, a default empty map will be used
+/// the caller is responsible for starting the appropriate listeners based on
+/// the `api_separate` flag.
 ///
 /// if `keypair` is none, a new keypair will be generated (not persisted).
 /// if `derp_map` is none, a default empty map will be used.
@@ -299,8 +313,14 @@ pub async fn create_app_routers_with_policy_handle(
         .time_to_live(Duration::from_secs(900))
         .build();
 
-    // determine if api should run on separate listener
+    // initialize derp map (default to empty if not provided)
     let derp_map = Arc::new(RwLock::new(derp_map.unwrap_or_default()));
+
+    // create dns cache for /bootstrap-dns with 60 second ttl
+    let dns_cache = Cache::builder()
+        .max_capacity(1000)
+        .time_to_live(Duration::from_secs(60))
+        .build();
 
     // determine if api should run on separate listener
     let api_separate = config.api.enabled && config.api.listen_host.is_some();
@@ -316,9 +336,10 @@ pub async fn create_app_routers_with_policy_handle(
         noise_private_key: Zeroizing::new(keypair.private),
         pending_registrations,
         derp_map,
+        dns_cache,
     };
 
-    // build api router if enabled
+    // build protocol router
     let protocol_router = build_protocol_router(&state);
 
     // build api router if enabled
@@ -391,7 +412,7 @@ fn build_protocol_router(state: &AppState) -> Router {
 
 /// build the api router (rest admin endpoints).
 fn build_api_router(state: &AppState) -> Router {
-    // apply rate limiting if enabled
+    // apply body size limit (64kb) to prevent memory exhaustion
     let api_router = handlers::api_v1::router().layer(DefaultBodyLimit::max(64 * 1024));
 
     // apply rate limiting if enabled
