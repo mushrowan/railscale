@@ -1,8 +1,8 @@
-//! http upgraded Noise stream implementation
+//! http upgraded noise stream implementation.
 //!
 //! this module provides `httpnoisestream`, which wraps a raw tcp stream
 //! (from an http upgrade) with noise encryption for running http/2 over
-//! the encrypted transport
+//! the encrypted transport.
 
 use bytes::{Buf, BytesMut};
 use hyper_util::rt::TokioIo;
@@ -14,10 +14,10 @@ use tracing::{debug, error, trace};
 
 use super::{MAX_PLAINTEXT_SIZE, MSG_TYPE_RECORD};
 
-/// http upgraded Noise stream wrapper
+/// http upgraded noise stream wrapper.
 ///
 /// this provides asyncread + asyncwrite over a noise-encrypted raw tcp stream,
-/// suitable for running http/2 over the Noise transport after http upgrade
+/// suitable for running HTTP/2 over the Noise transport after HTTP upgrade.
 pub(super) struct HttpNoiseStream {
     io: TokioIo<hyper::upgrade::Upgraded>,
     transport: railscale_proto::NoiseTransport,
@@ -115,29 +115,14 @@ impl AsyncRead for HttpNoiseStream {
 
                 // check if we have the complete frame
                 if this.pending_frame.len() >= total_frame_len {
-                    // extract the ciphertext
+                    // log frame metadata only (no content for security)
                     let ciphertext = &this.pending_frame[3..total_frame_len];
 
-                    // log detailed ciphertext info
-                    let ct_preview_len = std::cmp::min(16, ciphertext.len());
-                    let ct_preview: Vec<String> = ciphertext[..ct_preview_len]
-                        .iter()
-                        .map(|b| format!("{:02x}", b))
-                        .collect();
-
-                    // also log the last few bytes to detect any corruption
-                    let ct_tail_start = ciphertext.len().saturating_sub(16);
-                    let ct_tail: Vec<String> = ciphertext[ct_tail_start..]
-                        .iter()
-                        .map(|b| format!("{:02x}", b))
-                        .collect();
-
+                    // log frame metadata only (no content for security)
                     debug!(
                         decrypt_count = this.decrypt_count,
                         total_frame_len = total_frame_len,
                         ciphertext_len = ciphertext.len(),
-                        ciphertext_head = ct_preview.join(" "),
-                        ciphertext_tail = ct_tail.join(" "),
                         pending_frame_capacity = this.pending_frame.capacity(),
                         "poll_read: decrypting frame"
                     );
@@ -147,34 +132,22 @@ impl AsyncRead for HttpNoiseStream {
                         Ok(plaintext) => {
                             this.decrypt_count += 1;
 
-                            // log the plaintext preview
-                            let pt_preview_len = std::cmp::min(32, plaintext.len());
-                            let pt_preview: Vec<String> = plaintext[..pt_preview_len]
-                                .iter()
-                                .map(|b| format!("{:02x}", b))
-                                .collect();
-
+                            // log decrypt success with lengths only (no content for security)
                             debug!(
                                 decrypt_count = this.decrypt_count,
                                 ciphertext_len = ciphertext.len(),
                                 plaintext_len = plaintext.len(),
-                                plaintext_preview = pt_preview.join(" "),
                                 "poll_read: decrypted successfully"
                             );
 
                             // remove the processed frame from pending_frame
                             this.pending_frame.advance(total_frame_len);
 
-                            // log what's at the start of the next frame (if any)
-                            if this.pending_frame.len() >= 16 {
-                                let next_preview: Vec<String> = this.pending_frame[..16]
-                                    .iter()
-                                    .map(|b| format!("{:02x}", b))
-                                    .collect();
-                                debug!(
-                                    next_frame_preview = next_preview.join(" "),
+                            // log remaining buffer size (no content)
+                            if !this.pending_frame.is_empty() {
+                                trace!(
                                     remaining_bytes = this.pending_frame.len(),
-                                    "poll_read: next frame boundary preview"
+                                    "poll_read: remaining pending data"
                                 );
                             }
 
@@ -200,19 +173,11 @@ impl AsyncRead for HttpNoiseStream {
                             return Poll::Ready(Ok(()));
                         }
                         Err(e) => {
-                            // log extensive debugging info on failure
-                            let ct_full_preview_len = std::cmp::min(64, msg_len);
-                            let ct_full: Vec<String> = this.pending_frame
-                                [3..3 + ct_full_preview_len]
-                                .iter()
-                                .map(|b| format!("{:02x}", b))
-                                .collect();
-
+                            // log error with metadata only (no content for security)
                             error!(
                                 error = %e,
                                 decrypt_count = this.decrypt_count,
                                 ciphertext_len = ciphertext.len(),
-                                ciphertext_first_64 = ct_full.join(" "),
                                 pending_frame_len = this.pending_frame.len(),
                                 "poll_read: decrypt failed"
                             );
@@ -260,15 +225,9 @@ impl AsyncRead for HttpNoiseStream {
                         }
                     }
 
-                    // log the raw bytes received
-                    let preview_len = std::cmp::min(32, bytes_read.len());
-                    let preview: Vec<String> = bytes_read[..preview_len]
-                        .iter()
-                        .map(|b| format!("{:02x}", b))
-                        .collect();
+                    // log wire read with lengths only (no content for security)
                     trace!(
                         bytes_received = bytes_read.len(),
-                        first_bytes = preview.join(" "),
                         pending_before = this.pending_frame.len(),
                         "poll_read: received data from wire"
                     );

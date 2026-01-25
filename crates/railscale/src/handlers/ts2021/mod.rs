@@ -367,19 +367,13 @@ async fn handle_ts2021_http_connection(
         .into());
     }
 
-    // extract the noise payload
+    // log handshake metadata only (no content for security)
     let noise_payload = &init_message[5..];
 
-    // log the noise payload for debugging
-    let payload_preview: Vec<String> = noise_payload
-        .iter()
-        .take(48)
-        .map(|b| format!("{:02x}", b))
-        .collect();
+    // log handshake metadata only (no content for security)
     debug!(
         noise_payload_len = noise_payload.len(),
-        noise_payload_preview = payload_preview.join(" "),
-        "Noise initiation payload"
+        "Noise initiation payload received"
     );
 
     // create the tailscale prologue for this version
@@ -395,18 +389,12 @@ async fn handle_ts2021_http_connection(
     handshake.read_message(noise_payload)?;
     debug!("Noise initiation processed successfully");
 
-    // generate response message
+    // log response metadata only (no content for security)
     let response_payload = handshake.write_message(&[])?;
 
-    // log the response payload
-    let resp_preview: Vec<String> = response_payload
-        .iter()
-        .take(48)
-        .map(|b| format!("{:02x}", b))
-        .collect();
+    // log response metadata only (no content for security)
     debug!(
         response_len = response_payload.len(),
-        response_preview = resp_preview.join(" "),
         "Generated Noise response payload"
     );
 
@@ -431,8 +419,14 @@ async fn handle_ts2021_http_connection(
     let client_key = handshake
         .remote_static()
         .ok_or("missing client static key")?;
+    // log a short prefix of the client key (not secret, but cleaner logs)
+    let key_prefix = if client_key.len() >= 4 {
+        format!("{:02x}{:02x}...", client_key[0], client_key[1])
+    } else {
+        "??".to_string()
+    };
     info!(
-        client_key = %hex::encode(&client_key),
+        client_key_prefix = %key_prefix,
         "Noise handshake complete, client machine key authenticated"
     );
 
