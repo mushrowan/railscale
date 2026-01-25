@@ -1,6 +1,6 @@
-//! webSocket-based tests for the TS2021 protocol
+//! websocket-based tests for the ts2021 protocol.
 //!
-//! these tests verify Noise handshake and http/2 over WebSocket connections
+//! these tests verify noise handshake and http/2 over websocket connections.
 
 mod ts2021_common;
 
@@ -8,7 +8,7 @@ use base64::Engine;
 use futures_util::StreamExt;
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{GrantsEngine, Policy};
-use railscale_types::{Config, PreAuthKey, User, UserId};
+use railscale_types::{Config, PreAuthKey, PreAuthKeyToken, User, UserId};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -17,7 +17,7 @@ use ts2021_common::{
     create_valid_initiation_message, spawn_test_server,
 };
 
-/// test that the /ts2021 endpoint performs Noise handshake over WebSocket
+/// test that the /ts2021 endpoint performs noise handshake over websocket.
 ///
 /// this test:
 /// 1. Starts a real server
@@ -100,7 +100,7 @@ async fn test_ts2021_noise_handshake() {
     server_handle.abort();
 }
 
-/// test that http/2 works over the Noise-encrypted WebSocket connection
+/// test that http/2 works over the noise-encrypted websocket connection.
 ///
 /// this test:
 /// 1. Completes the Noise handshake
@@ -231,11 +231,11 @@ async fn test_ts2021_http2_over_noise() {
     server_handle.abort();
 }
 
-/// test that handlers receive the machine key from the Noise handshake context
+/// test that handlers receive the machine key from the noise handshake context.
 ///
 /// this test verifies that when a registration request comes through the ts2021
 /// protocol, the handler uses the machine key from the authenticated Noise
-/// handshake rather than trusting any machine key in the request body
+/// handshake rather than trusting any machine key in the request body.
 #[tokio::test]
 async fn test_ts2021_machine_key_from_noise_context() {
     use http_body_util::BodyExt;
@@ -258,8 +258,9 @@ async fn test_ts2021_machine_key_from_noise_context() {
     let user = User::new(UserId(1), "test".to_string());
     db.create_user(&user).await.expect("failed to create user");
 
-    // create preauth key
-    let mut preauth_key = PreAuthKey::new(0, "test-preauth-key".to_string(), UserId(1));
+    // create preauth key using token
+    let token = PreAuthKeyToken::generate();
+    let mut preauth_key = PreAuthKey::from_token(0, &token, UserId(1));
     preauth_key.reusable = true;
     preauth_key.expiration = Some(chrono::Utc::now() + chrono::Duration::hours(1));
 
@@ -346,7 +347,7 @@ async fn test_ts2021_machine_key_from_noise_context() {
         "NodeKey": format!("nodekey:{}", node_key_hex),
         "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
         "Auth": {
-            "AuthKey": "test-preauth-key"
+            "AuthKey": token.as_str()
         }
     });
 
@@ -393,14 +394,14 @@ async fn test_ts2021_machine_key_from_noise_context() {
     server_handle.abort();
 }
 
-/// test that large writes through Noise transport are chunked into multiple frames
+/// test that large writes through noise transport are chunked into multiple frames.
 ///
 /// tailscale's noise transport has a maximum frame size:
 /// - Max plaintext per frame: 4077 bytes
 /// - Max ciphertext per frame: 4093 bytes (plaintext + 16 byte AEAD tag)
 /// - Max frame on wire: 4096 bytes (3 byte header + ciphertext)
 ///
-/// this test verifies frame chunking works correctly via http/2 over Noise
+/// this test verifies frame chunking works correctly via http/2 over noise.
 #[tokio::test]
 async fn test_noise_transport_chunks_large_writes() {
     use http_body_util::BodyExt;

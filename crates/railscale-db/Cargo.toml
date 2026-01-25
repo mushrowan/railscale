@@ -14,6 +14,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 ipnet = { workspace = true }
+hex = "0.4"
 
 # Database
 sea-orm = { version = "1", features = [

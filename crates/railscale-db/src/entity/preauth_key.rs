@@ -12,7 +12,10 @@ use railscale_types::{PreAuthKey, Tag, UserId};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    pub key: String,
+    /// key prefix for identification (e.g., "tskey-auth-0123456789ab").
+    pub key_prefix: String,
+    /// sha-256 hash of the full key (hex-encoded, 64 chars).
+    pub key_hash: String,
     pub user_id: i64,
     pub reusable: bool,
     pub ephemeral: bool,
@@ -62,7 +65,8 @@ impl From<Model> for PreAuthKey {
 
         PreAuthKey {
             id: model.id as u64,
-            key: model.key,
+            key_prefix: model.key_prefix,
+            key_hash: model.key_hash,
             user_id: UserId(model.user_id as u64),
             reusable: model.reusable,
             ephemeral: model.ephemeral,
@@ -84,7 +88,8 @@ impl From<&PreAuthKey> for ActiveModel {
             } else {
                 Set(key.id as i64)
             },
-            key: Set(key.key.clone()),
+            key_prefix: Set(key.key_prefix.clone()),
+            key_hash: Set(key.key_hash.clone()),
             user_id: Set(key.user_id.0 as i64),
             reusable: Set(key.reusable),
             ephemeral: Set(key.ephemeral),

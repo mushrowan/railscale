@@ -42,11 +42,27 @@ pub struct PreAuthKeyResponse {
     pub created_at: String,
 }
 
-impl From<PreAuthKey> for PreAuthKeyResponse {
-    fn from(key: PreAuthKey) -> Self {
+impl PreAuthKeyResponse {
+    /// create from preauthkey with prefix only (for list operations).
+    fn from_key_prefix_only(key: PreAuthKey) -> Self {
         Self {
             id: key.id.to_string(),
-            key: key.key,
+            key: key.key_prefix, // Only show prefix, not full key
+            user_id: key.user_id.0.to_string(),
+            reusable: key.reusable,
+            ephemeral: key.ephemeral,
+            used: key.used,
+            tags: key.tags.iter().map(|t| t.to_string()).collect(),
+            expiration: key.expiration.map(|dt| dt.to_rfc3339()),
+            created_at: key.created_at.to_rfc3339(),
+        }
+    }
+
+    /// create from preauthkey with full key (for creation response only).
+    fn from_key_with_full_token(key: PreAuthKey, full_key: &str) -> Self {
+        Self {
+            id: key.id.to_string(),
+            key: full_key.to_string(), // Full key returned only at creation
             user_id: key.user_id.0.to_string(),
             reusable: key.reusable,
             ephemeral: key.ephemeral,
@@ -120,8 +136,11 @@ pub fn router() -> Router<AppState> {
 }
 
 /// list all preauth keys.
+///note: Only returns the key prefix for security. The full key is only
+/// available at creation time
 ///
-/// `GET /api/v1/preauthkey`
+/// NOTE: only returns the key prefix for security. the full key is only
+/// available at creation time.
 async fn list_preauth_keys(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
@@ -132,8 +151,10 @@ async fn list_preauth_keys(
         .await
         .map_err(ApiError::internal)?;
 
-    let preauth_keys: Vec<PreAuthKeyResponse> =
-        keys.into_iter().map(PreAuthKeyResponse::from).collect();
+    let preauth_keys: Vec<PreAuthKeyResponse> = keys
+        .into_iter()
+        .map(PreAuthKeyResponse::from_key_prefix_only)
+        .collect();
 
     Ok(Json(ListPreAuthKeysResponse { preauth_keys }))
 }
@@ -178,10 +199,10 @@ async fn create_preauth_key(
         Some(Utc::now() + Duration::days(90))
     };
 
-    // generate key
-    let key_str = generate_preauth_key();
+    // generate token
+    let token = PreAuthKeyToken::generate();
 
-    let mut key = PreAuthKey::new(0, key_str, user_id);
+    let mut key = PreAuthKey::from_token(0, &token, user_id);
     key.reusable = req.reusable;
     key.ephemeral = req.ephemeral;
     key.tags = req.acl_tags;
@@ -193,10 +214,11 @@ async fn create_preauth_key(
         .await
         .map_err(ApiError::internal)?;
 
+    // return the full token at creation time (this is the only time it's available)
     Ok((
         StatusCode::CREATED,
         Json(CreatePreAuthKeyResponse {
-            preauth_key: PreAuthKeyResponse::from(key),
+            preauth_key: PreAuthKeyResponse::from_key_with_full_token(key, token.as_str()),
         }),
     ))
 }
@@ -235,32 +257,41 @@ async fn delete_preauth_key(
     Ok(Json(DeletePreAuthKeyResponse {}))
 }
 
-/// generate a random preauth key string.
-fn generate_preauth_key() -> String {
-    PreAuthKeyToken::generate().into_inner()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_preauth_key_response_from() {
-        let key = PreAuthKey::new(1, "test-key".to_string(), UserId(42));
-        let response = PreAuthKeyResponse::from(key);
+    fn test_preauth_key_response_prefix_only() {
+        let token = PreAuthKeyToken::generate();
+        let key = PreAuthKey::from_token(1, &token, UserId(42));
+        let response = PreAuthKeyResponse::from_key_prefix_only(key);
 
         assert_eq!(response.id, "1");
-        assert_eq!(response.key, "test-key");
+        // should only contain the prefix
+        assert_eq!(response.key, token.prefix());
         assert_eq!(response.user_id, "42");
         assert!(!response.reusable);
         assert!(!response.ephemeral);
     }
 
     #[test]
+    fn test_preauth_key_response_with_full_token() {
+        let token = PreAuthKeyToken::generate();
+        let key = PreAuthKey::from_token(1, &token, UserId(42));
+        let response = PreAuthKeyResponse::from_key_with_full_token(key, token.as_str());
+
+        assert_eq!(response.id, "1");
+        // should contain the full token
+        assert_eq!(response.key, token.as_str());
+    }
+
+    #[test]
     fn test_preauth_key_response_serialization() {
-        let mut key = PreAuthKey::new(1, "test-key".to_string(), UserId(42));
+        let token = PreAuthKeyToken::generate();
+        let mut key = PreAuthKey::from_token(1, &token, UserId(42));
         key.tags = vec!["tag:server".parse().unwrap()];
-        let response = PreAuthKeyResponse::from(key);
+        let response = PreAuthKeyResponse::from_key_prefix_only(key);
 
         let json = serde_json::to_string(&response).unwrap();
 
@@ -299,12 +330,5 @@ mod tests {
         assert!(!req.reusable);
         assert!(!req.ephemeral);
         assert!(req.acl_tags.is_empty());
-    }
-
-    #[test]
-    fn test_generate_preauth_key() {
-        let key = generate_preauth_key();
-        assert!(key.starts_with("tskey-auth-"));
-        assert_eq!(key.len(), "tskey-auth-".len() + 48); // 24 bytes = 48 hex chars
     }
 }

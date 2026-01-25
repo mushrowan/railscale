@@ -363,12 +363,24 @@ async fn handle_preauth_registration(
     machine_key: MachineKey,
     auth_key_str: &str,
 ) -> Result<Json<RegisterResponse>, ApiError> {
+    use railscale_types::PreAuthKeyToken;
+
+    // parse the auth key string into a token for validation and lookup
+    let token: PreAuthKeyToken = auth_key_str
+        .parse()
+        .map_err(|_| ApiError::unauthorized("invalid preauth key format"))?;
+
     let preauth_key = state
         .db
-        .get_preauth_key(auth_key_str)
+        .get_preauth_key(&token)
         .await
         .map_internal()?
         .or_unauthorized("invalid preauth key")?;
+
+    // verify the token matches the stored hash (additional security check)
+    if !preauth_key.verify(&token) {
+        return Err(ApiError::unauthorized("invalid preauth key"));
+    }
 
     if !preauth_key.is_valid() {
         return Err(ApiError::unauthorized(

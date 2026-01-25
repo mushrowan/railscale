@@ -27,7 +27,7 @@ use sea_orm::{
 };
 use sea_orm_migration::MigratorTrait;
 
-use railscale_types::{ApiKey, Config, Node, NodeId, PreAuthKey, User, UserId};
+use railscale_types::{ApiKey, Config, Node, NodeId, PreAuthKey, PreAuthKeyToken, User, UserId};
 
 /// result type for database operations.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -109,9 +109,11 @@ pub trait Database: Send + Sync {
         key: &PreAuthKey,
     ) -> impl Future<Output = Result<PreAuthKey>> + Send;
 
-    /// get a pre-auth key by its key string.
-    fn get_preauth_key(&self, key: &str)
-    -> impl Future<Output = Result<Option<PreAuthKey>>> + Send;
+    /// get a pre-auth key by its token (lookup by hash).
+    fn get_preauth_key(
+        &self,
+        token: &PreAuthKeyToken,
+    ) -> impl Future<Output = Result<Option<PreAuthKey>>> + Send;
 
     /// list all pre-auth keys created by a specific user.
     fn list_preauth_keys(
@@ -390,9 +392,11 @@ impl Database for RailscaleDb {
         Ok(result.into())
     }
 
-    async fn get_preauth_key(&self, key: &str) -> Result<Option<PreAuthKey>> {
+    async fn get_preauth_key(&self, token: &PreAuthKeyToken) -> Result<Option<PreAuthKey>> {
+        // compute the hash of the provided token for lookup
+        let key_hash = hex::encode(token.hash());
         let result = entity::preauth_key::Entity::find()
-            .filter(entity::preauth_key::Column::Key.eq(key))
+            .filter(entity::preauth_key::Column::KeyHash.eq(key_hash))
             .filter(entity::preauth_key::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -596,14 +600,17 @@ mod tests {
         let user = User::new(UserId(0), "keyowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        // create key
-        let key = PreAuthKey::new(0, "test-key-123".to_string(), user.id);
+        // get by token (looks up by hash)
+        let token = PreAuthKeyToken::generate();
+        let key = PreAuthKey::from_token(0, &token, user.id);
         let created = db.create_preauth_key(&key).await.unwrap();
         assert!(created.id > 0);
 
-        // get by key
-        let fetched = db.get_preauth_key("test-key-123").await.unwrap();
+        // get by token (looks up by hash)
+        let fetched = db.get_preauth_key(&token).await.unwrap();
         assert!(fetched.is_some());
+        let fetched = fetched.unwrap();
+        assert!(fetched.verify(&token));
 
         // list by user
         let keys = db.list_preauth_keys(user.id).await.unwrap();
@@ -611,12 +618,12 @@ mod tests {
 
         // mark used
         db.mark_preauth_key_used(created.id).await.unwrap();
-        let updated = db.get_preauth_key("test-key-123").await.unwrap().unwrap();
+        let updated = db.get_preauth_key(&token).await.unwrap().unwrap();
         assert!(updated.used);
 
         // delete
         db.delete_preauth_key(created.id).await.unwrap();
-        let deleted = db.get_preauth_key("test-key-123").await.unwrap();
+        let deleted = db.get_preauth_key(&token).await.unwrap();
         assert!(deleted.is_none());
     }
 

@@ -1,11 +1,21 @@
 //! pre-authentication key type for automated node registration.
 //!
-//! preauthkeys allow nodes to register without interactive authentication,
+//! ## Security
 //! and can optionally tag the nodes they register.
+//!preauthkeys use split token storage for security:
+//! - `key_prefix`: Short identifier for display/lookup (e.g., "tskey-auth-0123456789ab")
+//!- `key_hash`: SHA-256 hash for verification
+//! preauthkeys use split token storage for security:
+//! the full key is only returned at creation time and is never stored
+//! - `key_hash`: SHA-256 hash for verification
+//!
+//! the full key is only returned at creation time and is never stored.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 
+use crate::preauth_key_token::PreAuthKeyToken;
 use crate::tag::Tag;
 use crate::user::UserId;
 
@@ -13,15 +23,28 @@ use crate::user::UserId;
 ///
 /// preauthkeys can be:
 /// - **reusable**: can register multiple nodes
-/// - **ephemeral**: nodes registered with this key are ephemeral
+/// ## Security
 /// - **tagged**: nodes registered get these tags (tags-as-identity)
+///the full key is never stored. Instead, we store:
+/// - `key_prefix`: For identification in logs and api responses
+///- `key_hash`: For secure verification during registration
+/// the key prefix for identification (e.g., "tskey-auth-0123456789ab")
+/// - `key_prefix`: For identification in logs and API responses
+/// this is safe to display in logs and api responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreAuthKey {
-    /// unique identifier.
+    /// sHA-256 hash of the full key for verification
     pub id: u64,
 
-    /// the key string used for authentication.
-    pub key: String,
+    /// the key prefix for identification (e.g., "tskey-auth-0123456789ab").
+    ///
+    /// this is safe to display in logs and api responses.
+    pub key_prefix: String,
+
+    /// sha-256 hash of the full key for verification.
+    ///
+    /// stored as hex string for database compatibility.
+    pub key_hash: String,
 
     /// user who created this key.
     pub user_id: UserId,
@@ -51,11 +74,15 @@ pub struct PreAuthKey {
 }
 
 impl PreAuthKey {
-    /// create a new pre-auth key.
-    pub fn new(id: u64, key: String, user_id: UserId) -> Self {
+    /// user only at creation time
+    ///
+    /// stores the prefix and hash; the full token should be returned to the
+    /// user only at creation time.
+    pub fn from_token(id: u64, token: &PreAuthKeyToken, user_id: UserId) -> Self {
         Self {
             id,
-            key,
+            key_prefix: token.prefix().to_string(),
+            key_hash: hex::encode(token.hash()),
             user_id,
             reusable: false,
             ephemeral: false,
@@ -64,6 +91,17 @@ impl PreAuthKey {
             expiration: None,
             created_at: Utc::now(),
         }
+    }
+
+    /// verify a token against this key's stored hash.
+    ///
+    /// uses constant-time comparison to prevent timing attacks.
+    pub fn verify(&self, token: &PreAuthKeyToken) -> bool {
+        let Ok(stored_hash) = hex::decode(&self.key_hash) else {
+            return false;
+        };
+        let computed_hash = token.hash();
+        computed_hash.ct_eq(&stored_hash).into()
     }
 
     /// check if this key is expired.
@@ -88,23 +126,27 @@ impl PreAuthKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PreAuthKeyToken;
 
     #[test]
     fn test_preauth_key_valid() {
-        let key = PreAuthKey::new(1, "test-key".to_string(), UserId(1));
+        let token = PreAuthKeyToken::generate();
+        let key = PreAuthKey::from_token(1, &token, UserId(1));
         assert!(key.is_valid());
     }
 
     #[test]
     fn test_preauth_key_used_non_reusable() {
-        let mut key = PreAuthKey::new(1, "test-key".to_string(), UserId(1));
+        let token = PreAuthKeyToken::generate();
+        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
         key.used = true;
         assert!(!key.is_valid());
     }
 
     #[test]
     fn test_preauth_key_used_reusable() {
-        let mut key = PreAuthKey::new(1, "test-key".to_string(), UserId(1));
+        let token = PreAuthKeyToken::generate();
+        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
         key.used = true;
         key.reusable = true;
         assert!(key.is_valid());
@@ -112,7 +154,8 @@ mod tests {
 
     #[test]
     fn test_preauth_key_expired() {
-        let mut key = PreAuthKey::new(1, "test-key".to_string(), UserId(1));
+        let token = PreAuthKeyToken::generate();
+        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
         key.expiration = Some(Utc::now() - chrono::Duration::hours(1));
         assert!(key.is_expired());
         assert!(!key.is_valid());
@@ -120,10 +163,30 @@ mod tests {
 
     #[test]
     fn test_preauth_key_creates_tagged_nodes() {
-        let mut key = PreAuthKey::new(1, "test-key".to_string(), UserId(1));
+        let token = PreAuthKeyToken::generate();
+        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
         assert!(!key.creates_tagged_nodes());
 
         key.tags = vec!["tag:server".parse().unwrap()];
         assert!(key.creates_tagged_nodes());
+    }
+
+    #[test]
+    fn test_preauth_key_verify() {
+        let token = PreAuthKeyToken::generate();
+        let key = PreAuthKey::from_token(1, &token, UserId(1));
+        // verification should succeed with the same token
+        assert!(key.verify(&token));
+        // verification should fail with a different token
+        let other_token = PreAuthKeyToken::generate();
+        assert!(!key.verify(&other_token));
+    }
+
+    #[test]
+    fn test_preauth_key_prefix() {
+        let token = PreAuthKeyToken::generate();
+        let key = PreAuthKey::from_token(1, &token, UserId(1));
+        // key_prefix should match the token's prefix
+        assert_eq!(key.key_prefix, token.prefix());
     }
 }

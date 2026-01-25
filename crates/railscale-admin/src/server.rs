@@ -479,12 +479,12 @@ impl AdminService for AdminServiceImpl {
             .expiration_days
             .map(|days| chrono::Utc::now() + chrono::Duration::days(days));
 
-        // generate a random key
-        let key_string = generate_preauth_key();
+        // generate a random token
+        let token = railscale_types::PreAuthKeyToken::generate();
 
-        let mut key = railscale_types::PreAuthKey::new(
+        let mut key = railscale_types::PreAuthKey::from_token(
             0, // Will be assigned by DB
-            key_string,
+            &token,
             railscale_types::UserId(req.user_id),
         );
         key.reusable = req.reusable;
@@ -498,7 +498,11 @@ impl AdminService for AdminServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to create preauth key: {}", e)))?;
 
-        Ok(Response::new(preauth_key_to_pb(&created)))
+        // at creation, return the full token (this is the only time it's available)
+        Ok(Response::new(preauth_key_to_pb_with_full_key(
+            &created,
+            token.as_str(),
+        )))
     }
 
     async fn list_preauth_keys(
@@ -687,10 +691,29 @@ fn node_to_pb(node: &railscale_types::Node) -> pb::Node {
     }
 }
 
+/// convert preauthkey to protobuf with prefix only (for list operations).
 fn preauth_key_to_pb(key: &railscale_types::PreAuthKey) -> pb::PreauthKey {
     pb::PreauthKey {
         id: key.id,
-        key: key.key.clone(),
+        key: key.key_prefix.clone(), // Only show prefix, not full key
+        user_id: key.user_id.0,
+        reusable: key.reusable,
+        ephemeral: key.ephemeral,
+        tags: key.tags.iter().map(|t| t.to_string()).collect(),
+        expiration: key.expiration.map(|e| e.to_rfc3339()),
+        created_at: key.created_at.to_rfc3339(),
+        use_count: if key.used { 1 } else { 0 },
+    }
+}
+
+/// convert preauthkey to protobuf with full key (for creation response only).
+fn preauth_key_to_pb_with_full_key(
+    key: &railscale_types::PreAuthKey,
+    full_key: &str,
+) -> pb::PreauthKey {
+    pb::PreauthKey {
+        id: key.id,
+        key: full_key.to_string(), // Full key returned only at creation
         user_id: key.user_id.0,
         reusable: key.reusable,
         ephemeral: key.ephemeral,
@@ -711,16 +734,4 @@ fn api_key_to_pb(key: &railscale_types::ApiKey) -> pb::ApiKey {
         last_used_at: key.last_used_at.map(|t| t.to_rfc3339()),
         created_at: key.created_at.to_rfc3339(),
     }
-}
-
-/// generate a random preauth key string.
-fn generate_preauth_key() -> String {
-    use base64::Engine;
-    use rand::RngCore;
-
-    let mut bytes = [0u8; 24];
-    rand::rng().fill_bytes(&mut bytes);
-
-    let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes);
-    format!("rskey_{}", encoded)
 }

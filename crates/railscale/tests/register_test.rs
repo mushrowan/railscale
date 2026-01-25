@@ -6,7 +6,7 @@ use axum::{
 };
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
-use railscale_types::{PreAuthKey, User, UserId};
+use railscale_types::{PreAuthKey, PreAuthKeyToken, User, UserId};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -19,10 +19,11 @@ async fn test_register_with_preauth_key() {
     let user = User::new(UserId(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    // create a preauth key
-    let mut preauth = PreAuthKey::new(1, "test-preauth-key-12345".to_string(), user.id);
+    // create a preauth key using token
+    let token = PreAuthKeyToken::generate();
+    let mut preauth = PreAuthKey::from_token(1, &token, user.id);
     preauth.tags = vec![]; // user-owned node
-    let preauth = db.create_preauth_key(&preauth).await.unwrap();
+    let _preauth = db.create_preauth_key(&preauth).await.unwrap();
 
     // create grants engine with wildcard policy (allow all)
     let mut policy = Policy::empty();
@@ -55,7 +56,7 @@ async fn test_register_with_preauth_key() {
         "NodeKey": "nodekey:0101010101010101010101010101010101010101010101010101010101010101",
         "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
         "Auth": {
-            "AuthKey": preauth.key
+            "AuthKey": token.as_str()
         }
     });
 
@@ -102,10 +103,11 @@ async fn test_register_with_tailscale_format() {
     let user = User::new(UserId(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    // create a preauth key
-    let mut preauth = PreAuthKey::new(1, "tskey-auth-test123".to_string(), user.id);
+    // create a preauth key using token
+    let token = PreAuthKeyToken::generate();
+    let mut preauth = PreAuthKey::from_token(1, &token, user.id);
     preauth.tags = vec![];
-    let preauth = db.create_preauth_key(&preauth).await.unwrap();
+    let _preauth = db.create_preauth_key(&preauth).await.unwrap();
 
     // create grants engine with wildcard policy
     let mut policy = Policy::empty();
@@ -138,7 +140,7 @@ async fn test_register_with_tailscale_format() {
         "NodeKey": "nodekey:0202020202020202020202020202020202020202020202020202020202020202",
         "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
         "Auth": {
-            "AuthKey": preauth.key
+            "AuthKey": token.as_str()
         },
         "Hostinfo": {
             "Hostname": "test-machine",
@@ -184,10 +186,10 @@ async fn test_register_with_tailscale_format() {
     );
 }
 
-/// from the configured prefixes
+/// test that register allocates ip addresses to the node.
 ///
 /// when a node registers, it should be assigned ipv4 and ipv6 addresses
-//set up test database
+/// from the configured prefixes.
 #[tokio::test]
 async fn test_register_allocates_ip_addresses() {
     // set up test database
@@ -198,10 +200,11 @@ async fn test_register_allocates_ip_addresses() {
     let user = User::new(UserId(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    // create a preauth key
-    let mut preauth = PreAuthKey::new(1, "tskey-ip-alloc-test".to_string(), user.id);
+    // create a preauth key using token
+    let token = PreAuthKeyToken::generate();
+    let mut preauth = PreAuthKey::from_token(1, &token, user.id);
     preauth.tags = vec![];
-    let preauth = db.create_preauth_key(&preauth).await.unwrap();
+    let _preauth = db.create_preauth_key(&preauth).await.unwrap();
 
     // create grants engine with wildcard policy
     let mut policy = Policy::empty();
@@ -234,7 +237,7 @@ async fn test_register_allocates_ip_addresses() {
         "NodeKey": node_key,
         "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
         "Auth": {
-            "AuthKey": preauth.key
+            "AuthKey": token.as_str()
         },
         "Hostinfo": {
             "Hostname": "ip-alloc-test"
@@ -316,10 +319,11 @@ async fn test_register_without_content_type_header() {
     let user = User::new(UserId(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    // create a preauth key
-    let mut preauth = PreAuthKey::new(1, "tskey-no-content-type".to_string(), user.id);
+    // create a preauth key using token
+    let token = PreAuthKeyToken::generate();
+    let mut preauth = PreAuthKey::from_token(1, &token, user.id);
     preauth.tags = vec![];
-    let preauth = db.create_preauth_key(&preauth).await.unwrap();
+    let _preauth = db.create_preauth_key(&preauth).await.unwrap();
 
     // create grants engine with wildcard policy
     let mut policy = Policy::empty();
@@ -351,7 +355,7 @@ async fn test_register_without_content_type_header() {
         "NodeKey": "nodekey:0303030303030303030303030303030303030303030303030303030303030303",
         "OldNodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
         "Auth": {
-            "AuthKey": preauth.key
+            "AuthKey": token.as_str()
         }
     });
 

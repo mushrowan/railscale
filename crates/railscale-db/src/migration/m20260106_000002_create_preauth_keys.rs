@@ -1,4 +1,4 @@
-//! create preauth_keys table migration
+//! create preauth_keys table migration.
 
 use sea_orm_migration::prelude::*;
 
@@ -22,7 +22,8 @@ impl MigrationTrait for Migration {
                             .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(PreauthKeys::Key).string().not_null())
+                    .col(ColumnDef::new(PreauthKeys::KeyPrefix).string().not_null())
+                    .col(ColumnDef::new(PreauthKeys::KeyHash).string().not_null())
                     .col(ColumnDef::new(PreauthKeys::UserId).big_integer().not_null())
                     .col(
                         ColumnDef::new(PreauthKeys::Reusable)
@@ -66,14 +67,25 @@ impl MigrationTrait for Migration {
             )
             .await?;
 
-        // index on key for lookups
+        // index on key_prefix for listing/display (not unique - prefixes could theoretically collide)
         manager
             .create_index(
                 Index::create()
-                    .name("idx_preauth_keys_key")
+                    .name("idx_preauth_keys_key_hash")
                     .table(PreauthKeys::Table)
-                    .col(PreauthKeys::Key)
+                    .col(PreauthKeys::KeyHash)
                     .unique()
+                    .to_owned(),
+            )
+            .await?;
+
+        // index on key_prefix for listing/display (not unique - prefixes could theoretically collide)
+        manager
+            .create_index(
+                Index::create()
+                    .name("idx_preauth_keys_key_prefix")
+                    .table(PreauthKeys::Table)
+                    .col(PreauthKeys::KeyPrefix)
                     .to_owned(),
             )
             .await?;
@@ -115,7 +127,8 @@ pub enum PreauthKeys {
     #[sea_orm(iden = "preauth_keys")]
     Table,
     Id,
-    Key,
+    KeyPrefix,
+    KeyHash,
     UserId,
     Reusable,
     Ephemeral,
