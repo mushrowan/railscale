@@ -380,6 +380,7 @@ mod tests {
             provider_identifier: None,
             provider: None,
             profile_pic_url: None,
+            oidc_groups: vec![],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -411,6 +412,7 @@ mod tests {
             provider_identifier: None,
             provider: None,
             profile_pic_url: None,
+            oidc_groups: vec![],
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

@@ -1,4 +1,4 @@
-//! in railscale (like headscale), users are "bubbles" or namespaces
+//! user type representing a tailscale user/namespace.
 //!
 //! in railscale (like headscale), users are "bubbles" or namespaces
 //! that contain nodes. Users can be created via CLI or OIDC.
@@ -56,8 +56,15 @@ pub struct User {
     /// provider origin (e.g., "oidc", "cli").
     pub provider: Option<String>,
 
-    /// profile picture url.
+    /// oidc group memberships synced from the identity provider
     pub profile_pic_url: Option<String>,
+
+    /// when resolving grants, these are optionally prefixed via `group_prefix` config
+    ///
+    /// these are the raw group names from the oidc `groups` claim.
+    /// when resolving grants, these are optionally prefixed via `group_prefix` config.
+    #[serde(default)]
+    pub oidc_groups: Vec<String>,
 
     /// when the user was created.
     pub created_at: DateTime<Utc>,
@@ -78,6 +85,7 @@ impl User {
             provider_identifier: None,
             provider: None,
             profile_pic_url: None,
+            oidc_groups: Vec::new(),
             created_at: now,
             updated_at: now,
         }
@@ -118,9 +126,16 @@ impl User {
             provider_identifier: None,
             provider: None,
             profile_pic_url: None,
+            oidc_groups: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
+    }
+}
+
+impl Default for User {
+    fn default() -> Self {
+        Self::new(UserId(0), String::new())
     }
 }
 
@@ -152,5 +167,36 @@ mod tests {
     #[test]
     fn test_tagged_devices_id() {
         assert_eq!(UserId::TAGGED_DEVICES.0, 2147455555);
+    }
+
+    #[test]
+    fn test_user_oidc_groups() {
+        let mut user = User::new(UserId(1), "testuser".to_string());
+        assert!(user.oidc_groups.is_empty());
+
+        user.oidc_groups = vec!["engineering".to_string(), "admins".to_string()];
+        assert_eq!(user.oidc_groups.len(), 2);
+        assert!(user.oidc_groups.contains(&"engineering".to_string()));
+    }
+
+    #[test]
+    fn test_user_serde_with_oidc_groups() {
+        let mut user = User::new(UserId(1), "testuser".to_string());
+        user.oidc_groups = vec!["group1".to_string()];
+
+        let json = serde_json::to_string(&user).unwrap();
+        assert!(json.contains("oidc_groups"));
+        assert!(json.contains("group1"));
+
+        let parsed: User = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.oidc_groups, vec!["group1".to_string()]);
+    }
+
+    #[test]
+    fn test_user_serde_without_oidc_groups() {
+        // ensure backwards compatibility - oidc_groups defaults to empty
+        let json = r#"{"id":1,"name":"test","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}"#;
+        let user: User = serde_json::from_str(json).unwrap();
+        assert!(user.oidc_groups.is_empty());
     }
 }

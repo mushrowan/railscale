@@ -130,10 +130,10 @@ pub async fn oidc_callback(
         .map_internal()?;
 
     let user = if let Some(user) = existing_user {
-        // user exists, return it
+        // create new user with oidc groups
         user
     } else {
-        // create new user
+        // create new user with OIDC groups
         use railscale_types::{User, UserId};
         let new_user = User {
             id: UserId(0), // Will be assigned by database
@@ -147,6 +147,7 @@ pub async fn oidc_callback(
             } else {
                 Some(claims.picture.clone())
             },
+            oidc_groups: claims.groups.clone(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

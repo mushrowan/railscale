@@ -18,6 +18,8 @@ pub struct Model {
     pub provider_identifier: Option<String>,
     pub provider: Option<String>,
     pub profile_pic_url: Option<String>,
+    /// oidc groups stored as json array string (e.g., `["engineering", "admins"]`).
+    pub oidc_groups: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -47,6 +49,13 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<Model> for User {
     fn from(model: Model) -> Self {
+        // parse oidc groups from json string, defaulting to empty vec
+        let oidc_groups = model
+            .oidc_groups
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_default();
+
         User {
             id: UserId(model.id as u64),
             name: model.name,
@@ -55,6 +64,7 @@ impl From<Model> for User {
             provider_identifier: model.provider_identifier,
             provider: model.provider,
             profile_pic_url: model.profile_pic_url,
+            oidc_groups,
             created_at: model.created_at,
             updated_at: model.updated_at,
         }
@@ -63,6 +73,13 @@ impl From<Model> for User {
 
 impl From<&User> for ActiveModel {
     fn from(user: &User) -> Self {
+        // serialize oidc groups to json string, none if empty
+        let oidc_groups = if user.oidc_groups.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&user.oidc_groups).unwrap_or_default())
+        };
+
         ActiveModel {
             id: if user.id.0 == 0 {
                 NotSet
@@ -75,6 +92,7 @@ impl From<&User> for ActiveModel {
             provider_identifier: Set(user.provider_identifier.clone()),
             provider: Set(user.provider.clone()),
             profile_pic_url: Set(user.profile_pic_url.clone()),
+            oidc_groups: Set(oidc_groups),
             created_at: Set(user.created_at),
             updated_at: Set(user.updated_at),
             deleted_at: NotSet,

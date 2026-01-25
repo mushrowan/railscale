@@ -7,6 +7,7 @@ mod m20260106_000002_create_preauth_keys;
 mod m20260106_000003_create_nodes;
 mod m20260106_000004_create_api_keys;
 mod m20260121_000001_api_key_split_token;
+mod m20260125_000001_add_user_oidc_groups;
 
 pub struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260106_000003_create_nodes::Migration),
             Box::new(m20260106_000004_create_api_keys::Migration),
             Box::new(m20260121_000001_api_key_split_token::Migration),
+            Box::new(m20260125_000001_add_user_oidc_groups::Migration),
         ]
     }
 }
