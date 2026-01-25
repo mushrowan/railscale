@@ -6,6 +6,9 @@
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+/// expected key length in bytes (curve25519 keys are 32 bytes).
+const KEY_LENGTH: usize = 32;
+
 /// helper to implement tailscale key serialization with a given prefix.
 macro_rules! impl_key_serde {
     ($type:ty, $prefix:expr) => {
@@ -35,6 +38,14 @@ macro_rules! impl_key_serde {
                 })?;
                 let bytes = hex::decode(hex_str)
                     .map_err(|e| de::Error::custom(format!("invalid hex in key: {}", e)))?;
+                // enforce exact key length to prevent memory inflation from malformed keys
+                if bytes.len() != KEY_LENGTH {
+                    return Err(de::Error::custom(format!(
+                        "key must be exactly {} bytes, got {}",
+                        KEY_LENGTH,
+                        bytes.len()
+                    )));
+                }
                 Ok(Self(bytes))
             }
         }
@@ -187,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_machine_key_roundtrip() {
-        let original = MachineKey::from_bytes(vec![0xab, 0xcd, 0xef, 0x12, 0x34, 0x56, 0x78, 0x90]);
+        let original = MachineKey::from_bytes(vec![0xab; 32]);
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: MachineKey = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
@@ -227,5 +238,29 @@ mod tests {
 
         let non_empty = DiscoKey::from_bytes(vec![1, 2, 3]);
         assert!(!non_empty.is_empty());
+    }
+
+    #[test]
+    fn test_node_key_rejects_oversized_input() {
+        // 33 bytes = 66 hex chars (1 byte too long)
+        let json = "\"nodekey:020202020202020202020202020202020202020202020202020202020202020202\"";
+        let result: Result<NodeKey, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "should reject oversized key");
+    }
+
+    #[test]
+    fn test_node_key_rejects_undersized_input() {
+        // 31 bytes = 62 hex chars (1 byte too short)
+        let json = "\"nodekey:02020202020202020202020202020202020202020202020202020202020202\"";
+        let result: Result<NodeKey, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "should reject undersized key");
+    }
+
+    #[test]
+    fn test_machine_key_rejects_wrong_size() {
+        // 16 bytes = 32 hex chars (half of required)
+        let json = "\"mkey:0202020202020202020202020202020202020202020202020202020202020202ff\"";
+        let result: Result<MachineKey, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "should reject wrong-size key");
     }
 }
