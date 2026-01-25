@@ -267,7 +267,8 @@ global = [
 # -----------------------------------------------------------------------------
 #
 # The REST API provides Headscale-compatible endpoints for remote administration.
-# When enabled, API endpoints are available at /api/v1/* on the main HTTP server.
+# By default, API endpoints are served on the main HTTP server when enabled.
+# Optionally, the API can run on a separate listener for network-level isolation.
 #
 # SECURITY: The API is disabled by default. Enable only if you need remote access.
 # Always use HTTPS in production and rotate API keys regularly.
@@ -276,6 +277,20 @@ global = [
 # Enable the REST API.
 # When false, /api/v1/* endpoints return 404.
 enabled = false
+
+# Host/IP to bind the API listener to.
+# If not set (default), API runs on the main server port (listen_addr).
+# If set, API runs on a separate listener at listen_host:listen_port.
+#
+# Examples:
+#   Not set       - API on same port as protocol (simple setup)
+#   "127.0.0.1"   - API on localhost only (secure, recommended for production)
+#   "0.0.0.0"     - API on all interfaces
+#
+# listen_host = "127.0.0.1"
+
+# Port for the API listener. Only used when listen_host is set.
+# listen_port = 9090
 
 # Enable per-IP rate limiting for API requests.
 # Protects against abuse and brute-force attacks.

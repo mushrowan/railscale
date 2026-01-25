@@ -123,6 +123,19 @@ pub struct AppState {
     pub derp_map: Arc<RwLock<DerpMap>>,
 }
 
+/// listener from the protocol router. Otherwise, they're merged
+///
+/// protocol router (tailscale client endpoints)
+/// listener from the protocol router. Otherwise, they're merged.
+pub struct AppRouters {
+    /// protocol router (tailscale client endpoints).
+    pub protocol: Router,
+    /// api router (rest admin endpoints), if api is enabled.
+    pub api: Option<Router>,
+    /// whether the api should run on a separate listener.
+    pub api_separate: bool,
+}
+
 /// load a noise keypair from file, or generate and save a new one.
 ///
 /// if the file exists, reads the 64-byte keypair (32 private + 32 public).
@@ -204,8 +217,11 @@ pub async fn create_app(
 /// returns both the router and a [`policyhandle`] that can be used to
 /// reload the policy at runtime (e.g., in response to SIGHUP).
 ///
-/// if `keypair` is none, a new keypair will be generated (not persisted).
-/// if `derp_map` is none, a default empty map will be used.
+/// note: This function always merges api routes onto the protocol router
+/// for separate api listener support, use [`create_app_routers_with_policy_handle`]
+///
+/// NOTE: this function always merges api routes onto the protocol router.
+/// for separate api listener support, use [`create_app_routers_with_policy_handle`].
 pub async fn create_app_with_policy_handle(
     db: RailscaleDb,
     policy: Policy,
@@ -215,6 +231,43 @@ pub async fn create_app_with_policy_handle(
     keypair: Option<Keypair>,
     derp_map: Option<DerpMap>,
 ) -> (Router, PolicyHandle) {
+    let (routers, handle) = create_app_routers_with_policy_handle(
+        db, policy, config, oidc, notifier, keypair, derp_map,
+    )
+    .await;
+
+    // merge api router onto protocol router if present
+    let router = if let Some(api_router) = routers.api {
+        routers.protocol.merge(api_router)
+    } else {
+        routers.protocol
+    };
+
+    (router, handle)
+}
+
+/// - protocol router (tailscale client endpoints)
+///- api router (REST admin endpoints), if api is enabled
+/// - Flag indicating whether api should run on a separate listener
+/// - Protocol router (Tailscale client endpoints)
+/// use this when you need to run the api on a separate port from the protocol
+/// the caller is responsible for starting the appropriate listeners based on
+///the `api_separate` flag
+/// use this when you need to run the api on a separate port from the protocol.
+/// if `keypair` is None, a new keypair will be generated (not persisted)
+/// if `derp_map` is None, a default empty map will be used
+///
+/// if `keypair` is none, a new keypair will be generated (not persisted).
+/// if `derp_map` is none, a default empty map will be used.
+pub async fn create_app_routers_with_policy_handle(
+    db: RailscaleDb,
+    policy: Policy,
+    config: Config,
+    oidc: Option<oidc::AuthProviderOidc>,
+    notifier: StateNotifier,
+    keypair: Option<Keypair>,
+    derp_map: Option<DerpMap>,
+) -> (AppRouters, PolicyHandle) {
     // generate keypair if not provided
     let keypair = keypair.unwrap_or_else(|| {
         railscale_proto::generate_keypair().expect("failed to generate noise keypair")
@@ -246,8 +299,11 @@ pub async fn create_app_with_policy_handle(
         .time_to_live(Duration::from_secs(900))
         .build();
 
-    // initialize derp map (default to empty if not provided)
+    // determine if api should run on separate listener
     let derp_map = Arc::new(RwLock::new(derp_map.unwrap_or_default()));
+
+    // determine if api should run on separate listener
+    let api_separate = config.api.enabled && config.api.listen_host.is_some();
 
     let state = AppState {
         db,
@@ -262,8 +318,29 @@ pub async fn create_app_with_policy_handle(
         derp_map,
     };
 
+    // build api router if enabled
+    let protocol_router = build_protocol_router(&state);
+
+    // build api router if enabled
+    let api_router = if state.config.api.enabled {
+        Some(build_api_router(&state))
+    } else {
+        None
+    };
+
+    let routers = AppRouters {
+        protocol: protocol_router,
+        api: api_router,
+        api_separate,
+    };
+
+    (routers, handle)
+}
+
+/// build the protocol router (tailscale client endpoints).
+fn build_protocol_router(state: &AppState) -> Router {
     // protocol routes with body size limits (64kb) to prevent memory exhaustion
-    let protocol_router = Router::new()
+    let protocol_routes = Router::new()
         .route("/verify", post(handlers::verify))
         .route(
             "/ts2021",
@@ -278,7 +355,7 @@ pub async fn create_app_with_policy_handle(
         .route("/version", get(handlers::version))
         .route("/bootstrap-dns", get(handlers::bootstrap_dns))
         .route("/key", get(handlers::key))
-        .merge(protocol_router);
+        .merge(protocol_routes);
 
     // add oidc routes (rate limited if configured)
     let oidc_router = Router::new()
@@ -309,81 +386,81 @@ pub async fn create_app_with_policy_handle(
         router = router.merge(oidc_router);
     }
 
-    // add rest api v1 routes if enabled
-    if state.config.api.enabled {
-        // apply body size limit (64kb) to prevent memory exhaustion
-        let api_router = handlers::api_v1::router().layer(DefaultBodyLimit::max(64 * 1024));
+    router.with_state(state.clone())
+}
 
-        // apply rate limiting if enabled
-        if state.config.api.rate_limit_enabled {
-            // convert per-minute rate to per-second (gcra algorithm works in seconds)
-            let requests_per_minute = state.config.api.rate_limit_per_minute;
-            let replenish_interval_ms = if requests_per_minute > 0 {
-                60_000 / requests_per_minute as u64
-            } else {
-                1000 // Default to 1 request/second if somehow 0
-            };
+/// build the api router (rest admin endpoints).
+fn build_api_router(state: &AppState) -> Router {
+    // apply rate limiting if enabled
+    let api_router = handlers::api_v1::router().layer(DefaultBodyLimit::max(64 * 1024));
 
-            // allow burst of ~10 seconds worth of requests, capped at 50
-            let burst_size = (requests_per_minute / 6).clamp(5, 50);
-
-            // use proxy-aware key extractor if behind a reverse proxy
-            if state.config.api.behind_proxy {
-                let key_extractor =
-                    rate_limit::TrustedProxyKeyExtractor::new(&state.config.api.trusted_proxies);
-
-                let governor_conf = GovernorConfigBuilder::default()
-                    .per_millisecond(replenish_interval_ms)
-                    .burst_size(burst_size)
-                    .key_extractor(key_extractor)
-                    .use_headers()
-                    .finish()
-                    .expect("valid governor config");
-
-                // start background task to clean up rate limiter storage
-                let governor_limiter = governor_conf.limiter().clone();
-                tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(Duration::from_secs(60));
-                    loop {
-                        interval.tick().await;
-                        governor_limiter.retain_recent();
-                    }
-                });
-
-                router = router.nest(
-                    "/api/v1",
-                    api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
-                );
-            } else {
-                // direct connection mode - use peer ip directly
-                let governor_conf = GovernorConfigBuilder::default()
-                    .per_millisecond(replenish_interval_ms)
-                    .burst_size(burst_size)
-                    .use_headers()
-                    .finish()
-                    .expect("valid governor config");
-
-                // start background task to clean up rate limiter storage
-                let governor_limiter = governor_conf.limiter().clone();
-                tokio::spawn(async move {
-                    let mut interval = tokio::time::interval(Duration::from_secs(60));
-                    loop {
-                        interval.tick().await;
-                        governor_limiter.retain_recent();
-                    }
-                });
-
-                router = router.nest(
-                    "/api/v1",
-                    api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
-                );
-            }
+    // apply rate limiting if enabled
+    let router = if state.config.api.rate_limit_enabled {
+        // convert per-minute rate to per-second (gcra algorithm works in seconds)
+        let requests_per_minute = state.config.api.rate_limit_per_minute;
+        let replenish_interval_ms = if requests_per_minute > 0 {
+            60_000 / requests_per_minute as u64
         } else {
-            router = router.nest("/api/v1", api_router);
+            1000 // Default to 1 request/second if somehow 0
+        };
+
+        // allow burst of ~10 seconds worth of requests, capped at 50
+        let burst_size = (requests_per_minute / 6).clamp(5, 50);
+
+        // use proxy-aware key extractor if behind a reverse proxy
+        if state.config.api.behind_proxy {
+            let key_extractor =
+                rate_limit::TrustedProxyKeyExtractor::new(&state.config.api.trusted_proxies);
+
+            let governor_conf = GovernorConfigBuilder::default()
+                .per_millisecond(replenish_interval_ms)
+                .burst_size(burst_size)
+                .key_extractor(key_extractor)
+                .use_headers()
+                .finish()
+                .expect("valid governor config");
+
+            // start background task to clean up rate limiter storage
+            let governor_limiter = governor_conf.limiter().clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    governor_limiter.retain_recent();
+                }
+            });
+
+            Router::new().nest(
+                "/api/v1",
+                api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
+            )
+        } else {
+            // direct connection mode - use peer ip directly
+            let governor_conf = GovernorConfigBuilder::default()
+                .per_millisecond(replenish_interval_ms)
+                .burst_size(burst_size)
+                .use_headers()
+                .finish()
+                .expect("valid governor config");
+
+            // start background task to clean up rate limiter storage
+            let governor_limiter = governor_conf.limiter().clone();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    governor_limiter.retain_recent();
+                }
+            });
+
+            Router::new().nest(
+                "/api/v1",
+                api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
+            )
         }
-    }
+    } else {
+        Router::new().nest("/api/v1", api_router)
+    };
 
-    let router = router.with_state(state);
-
-    (router, handle)
+    router.with_state(state.clone())
 }

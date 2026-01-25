@@ -49,16 +49,16 @@ pub struct Config {
     /// enable taildrop file sharing.
     pub taildrop_enabled: bool,
 
-    /// allow registration without Noise context (for testing only)
+    /// randomize client port (for nat traversal).
     pub randomize_client_port: bool,
 
-    /// context which cryptographically binds the machine key to the request
+    /// allow registration without noise context (for testing only).
     ///
-    /// when true, registration without Noise context is allowed with a zero
-    /// machine key. This is insecure and should only be used for testing
+    /// when false (default), `/machine/register` requires a valid noise handshake
+    /// context which cryptographically binds the machine key to the request.
     ///
-    /// **Security Warning**: Setting this to true allows nodes to register
-    /// without cryptographic proof of machine identity
+    /// when true, registration without noise context is allowed with a zero
+    /// machine key. This is insecure and should only be used for testing.
     ///
     /// **Security Warning**: Setting this to true allows nodes to register
     /// without cryptographic proof of machine identity.
@@ -599,8 +599,26 @@ impl Default for TuningConfig {
 #[serde(default)]
 pub struct ApiConfig {
     /// whether the rest api is enabled.
-    /// disabled by default for security.
+    /// host/IP to bind the api listener to
     pub enabled: bool,
+
+    /// if `Some`, the api runs on a separate listener at `listen_host:listen_port`
+    ///
+    /// examples:
+    /// - `None` - api on same port as protocol (simple setup)
+    ///- `Some("127.0.0.1")` - api on localhost only (secure)
+    /// - `Some("0.0.0.0")` - api on all interfaces
+    /// - `None` - API on same port as protocol (simple setup)
+    /// - `Some("127.0.0.1")` - API on localhost only (secure)
+    /// - `Some("0.0.0.0")` - API on all interfaces
+    #[serde(default)]
+    pub listen_host: Option<String>,
+
+    /// port to bind the api listener to.
+    /// only used when `listen_host` is set.
+    /// defaults to 9090.
+    #[serde(default = "default_api_port")]
+    pub listen_port: u16,
 
     /// whether rate limiting is enabled for api requests.
     /// enabled by default to protect against abuse.
@@ -625,6 +643,10 @@ pub struct ApiConfig {
     pub trusted_proxies: Vec<String>,
 }
 
+fn default_api_port() -> u16 {
+    9090
+}
+
 fn default_rate_limit_per_minute() -> u32 {
     100
 }
@@ -633,6 +655,8 @@ impl Default for ApiConfig {
     fn default() -> Self {
         Self {
             enabled: false,
+            listen_host: None,
+            listen_port: default_api_port(),
             rate_limit_enabled: true,
             rate_limit_per_minute: 100,
             behind_proxy: false,
@@ -693,6 +717,11 @@ mod tests {
     fn test_api_config_default_disabled() {
         let api = ApiConfig::default();
         assert!(!api.enabled, "API should be disabled by default");
+        assert!(
+            api.listen_host.is_none(),
+            "listen_host should be None by default (merge with main server)"
+        );
+        assert_eq!(api.listen_port, 9090, "listen_port should default to 9090");
     }
 
     #[test]
@@ -763,6 +792,27 @@ mod tests {
         assert!(api.trusted_proxies.contains(&"127.0.0.1".to_string()));
         assert!(api.trusted_proxies.contains(&"10.0.0.0/8".to_string()));
         assert!(api.trusted_proxies.contains(&"::1".to_string()));
+    }
+
+    #[test]
+    fn test_api_config_listen_serde() {
+        // default: no listen_host means merge with main server
+        let json = r#"{"enabled": true}"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert!(api.listen_host.is_none());
+        assert_eq!(api.listen_port, 9090);
+
+        // separate listener on localhost with custom port
+        let json = r#"{"enabled": true, "listen_host": "127.0.0.1", "listen_port": 8081}"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(api.listen_host, Some("127.0.0.1".to_string()));
+        assert_eq!(api.listen_port, 8081);
+
+        // separate listener on all interfaces with default port
+        let json = r#"{"enabled": true, "listen_host": "0.0.0.0"}"#;
+        let api: ApiConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(api.listen_host, Some("0.0.0.0".to_string()));
+        assert_eq!(api.listen_port, 9090);
     }
 
     #[test]

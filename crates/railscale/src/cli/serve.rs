@@ -511,12 +511,12 @@ impl ServeCommand {
             None
         };
 
-        // clone db for admin service (before create_app_with_policy_handle consumes it)
+        // clone db for admin service (before create_app_routers consumes it)
         let admin_db = db.clone();
 
-        // build router with policy handle for hot-reload
+        // build routers with policy handle for hot-reload
         let notifier = crate::StateNotifier::new();
-        let (app, policy_handle) = crate::create_app_with_policy_handle(
+        let (routers, policy_handle) = crate::create_app_routers_with_policy_handle(
             db,
             policy,
             config.clone(),
@@ -526,6 +526,26 @@ impl ServeCommand {
             None,
         )
         .await;
+
+        // determine if api runs on separate listener and build final routers
+        let (protocol_app, api_app, api_listen_addr) = if routers.api_separate {
+            // api on separate listener
+            let api_host = config
+                .api
+                .listen_host
+                .as_ref()
+                .expect("api_separate implies listen_host is set");
+            let api_addr: SocketAddr = format!("{}:{}", api_host, config.api.listen_port)
+                .parse()
+                .context("invalid API listen address")?;
+            (routers.protocol, routers.api, Some(api_addr))
+        } else if let Some(api_router) = routers.api {
+            // no api
+            (routers.protocol.merge(api_router), None, None)
+        } else {
+            // no api
+            (routers.protocol, None, None)
+        };
 
         // create admin policy handle from the same grants engine
         let admin_policy_handle =
@@ -613,24 +633,43 @@ impl ServeCommand {
             });
         }
 
-        // parse listen address
-        let addr: SocketAddr = config
+        // parse protocol listen address
+        let protocol_addr: SocketAddr = config
             .listen_addr
             .parse()
             .context("invalid listen address")?;
 
-        info!("Starting HTTP server on {}", addr);
+        // start api server on separate listener if configured
+        if let (Some(api_addr), Some(api_router)) = (api_listen_addr, api_app) {
+            info!("Starting API server on {}", api_addr);
+            let api_listener = TcpListener::bind(api_addr)
+                .await
+                .with_context(|| format!("failed to bind API listener to {}", api_addr))?;
 
-        // start server
+            tokio::spawn(async move {
+                if let Err(e) = axum::serve(
+                    api_listener,
+                    api_router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+                )
+                .await
+                {
+                    error!("API server error: {}", e);
+                }
+            });
+        }
+
+        info!("Starting protocol server on {}", protocol_addr);
+
+        // start protocol server (main task)
         // use into_make_service_with_connect_info to provide socket address
         // for rate limiting (tower_governor PeerIpKeyExtractor)
-        let listener = TcpListener::bind(addr).await?;
+        let protocol_listener = TcpListener::bind(protocol_addr).await?;
         axum::serve(
-            listener,
-            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            protocol_listener,
+            protocol_app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .await
-        .context("server error")?;
+        .context("protocol server error")?;
 
         Ok(())
     }

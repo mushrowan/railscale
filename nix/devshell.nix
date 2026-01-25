@@ -11,8 +11,10 @@ craneLib.devShell {
   inherit checks;
 
   packages = with pkgs; [
-    cargo-update
     cargo-edit
+    cargo-llvm-cov
+    cargo-update
+
     curl
     jq
     protobuf # For tonic-build (gRPC)

@@ -117,9 +117,9 @@
 
       # Flake-wide outputs (not per-system)
       flake = {
-        nixosModules = {
+        nixosModules = rec {
           railscale = ./nix/module.nix;
-          default = ./nix/module.nix;
+          default = railscale;
         };
       };
     };

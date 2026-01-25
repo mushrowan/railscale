@@ -12,19 +12,28 @@ let
 
   settingsFormat = pkgs.formats.toml { };
 
-  # Filter out null values and client_secret_path from settings before generating TOML
-  # (client_secret_path is handled via environment variable)
+  # Filter out null values and NixOS-specific options from settings before generating TOML
+  # - client_secret_path: handled via environment variable
+  # - openFirewall: NixOS-specific, controls firewall module
   filterSettings =
     settings:
     lib.filterAttrsRecursive (
       n: v:
       v != null
       && n != "client_secret_path"
+      && n != "openFirewall"
       && !(lib.isList v && v == [ ])
       && !(lib.isAttrs v && v == { })
     ) settings;
 
   configFile = settingsFormat.generate "config.toml" (filterSettings cfg.settings);
+
+  # Get the API port: from listen_port if listen_host is set, otherwise main server port
+  apiPort =
+    if (cfg.settings.api.listen_host or null) != null then
+      cfg.settings.api.listen_port or 9090
+    else
+      cfg.port;
 in
 {
   options.services.railscale = {
@@ -454,6 +463,48 @@ in
             };
           };
 
+          api = {
+            enabled = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Enable the REST API.
+                When false, /api/v1/* endpoints return 404.
+              '';
+            };
+
+            listen_host = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              example = "127.0.0.1";
+              description = ''
+                Host/IP to bind the API listener to.
+                If null (default), API runs on the main server port.
+                If set, API runs on a separate listener at listen_host:listen_port.
+              '';
+            };
+
+            listen_port = lib.mkOption {
+              type = lib.types.port;
+              default = 9090;
+              description = ''
+                Port for the API listener. Only used when listen_host is set.
+              '';
+            };
+
+            openFirewall = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Whether to open the firewall for the REST API port.
+                Only takes effect when {option}`settings.api.enabled` is also true.
+
+                If {option}`settings.api.listen_host` is set, opens {option}`settings.api.listen_port`.
+                Otherwise, opens the main server port ({option}`port`).
+              '';
+            };
+          };
+
           taildrop_enabled = lib.mkOption {
             type = lib.types.bool;
             default = true;
@@ -562,18 +613,25 @@ in
     # Set default socket path for CLI commands
     environment.variables.RAILSCALE_ADMIN_SOCKET = cfg.adminSocket.path;
 
-    # Open firewall ports if embedded DERP is enabled
-    networking.firewall = lib.mkIf cfg.settings.derp.embedded_derp.enabled {
-      allowedTCPPorts = [
-        (
-          if cfg.settings.derp.embedded_derp.advertise_port != null then
-            cfg.settings.derp.embedded_derp.advertise_port
-          else
-            3340
-        )
-      ];
-      allowedUDPPorts = lib.optional (cfg.settings.derp.embedded_derp.stun_listen_addr != null) 3478;
-    };
+    # Open firewall ports
+    networking.firewall = lib.mkMerge [
+      # DERP/STUN ports when embedded DERP is enabled
+      (lib.mkIf cfg.settings.derp.embedded_derp.enabled {
+        allowedTCPPorts = [
+          (
+            if cfg.settings.derp.embedded_derp.advertise_port != null then
+              cfg.settings.derp.embedded_derp.advertise_port
+            else
+              3340
+          )
+        ];
+        allowedUDPPorts = lib.optional (cfg.settings.derp.embedded_derp.stun_listen_addr != null) 3478;
+      })
+      # API port when settings.api.openFirewall and settings.api.enabled are both true
+      (lib.mkIf (cfg.settings.api.openFirewall && cfg.settings.api.enabled) {
+        allowedTCPPorts = [ apiPort ];
+      })
+    ];
   };
 
   meta.maintainers = [ ];
