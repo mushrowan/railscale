@@ -20,4 +20,4 @@ pub use error::{Error, ParseError, Result, ValidationError};
 pub use grant::Grant;
 pub use policy::Policy;
 pub use selector::{Autogroup, Selector};
-pub use ssh::{SshActionType, SshPolicyRule};
+pub use ssh::{SshActionType, SshPolicyRule, build_ssh_users_map};
