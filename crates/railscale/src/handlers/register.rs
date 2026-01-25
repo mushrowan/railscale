@@ -156,13 +156,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_register_rejects_non_noise_requests_by_default() {
+        // set up test database
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create app with default config (allow_non_noise_registration = false)
+        let config = railscale_types::Config::default();
+        assert!(
+            !config.allow_non_noise_registration,
+            "default should reject non-Noise registration"
+        );
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // send register request without Noise context
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // should reject with 400 bad request
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "should reject registration without Noise context"
+        );
+    }
+
+    #[tokio::test]
     async fn test_register_without_auth_key_returns_auth_url_when_oidc_disabled() {
         // set up test database
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
-        // create app without OIDC
-        let config = railscale_types::Config::default();
+        // create app with allow_non_noise_registration enabled for testing
+        let mut config = railscale_types::Config::default();
+        config.allow_non_noise_registration = true;
         let app = crate::create_app(
             db.clone(),
             default_grants(),
@@ -217,8 +266,9 @@ mod tests {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
-        // first, make an initial request to create a pending registration
-        let config = railscale_types::Config::default();
+        // create app with allow_non_noise_registration enabled for testing
+        let mut config = railscale_types::Config::default();
+        config.allow_non_noise_registration = true;
         let app = crate::create_app(
             db.clone(),
             default_grants(),
@@ -331,6 +381,12 @@ pub async fn register(
     let machine_key = match machine_key_ctx {
         Some(ctx) => ctx.0,
         None => {
+            // reject registration without noise context unless explicitly allowed
+            if !state.config.allow_non_noise_registration {
+                return Err(ApiError::bad_request(
+                    "registration requires Noise protocol handshake (ts2021)",
+                ));
+            }
             // for testing without ts2021, generate a placeholder key
             MachineKey::from_bytes(vec![0; 32])
         }

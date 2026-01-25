@@ -49,8 +49,21 @@ pub struct Config {
     /// enable taildrop file sharing.
     pub taildrop_enabled: bool,
 
-    /// randomize client port (for nat traversal).
+    /// allow registration without Noise context (for testing only)
     pub randomize_client_port: bool,
+
+    /// context which cryptographically binds the machine key to the request
+    ///
+    /// when true, registration without Noise context is allowed with a zero
+    /// machine key. This is insecure and should only be used for testing
+    ///
+    /// **Security Warning**: Setting this to true allows nodes to register
+    /// without cryptographic proof of machine identity
+    ///
+    /// **Security Warning**: Setting this to true allows nodes to register
+    /// without cryptographic proof of machine identity.
+    #[serde(default)]
+    pub allow_non_noise_registration: bool,
 }
 
 impl Default for Config {
@@ -70,6 +83,7 @@ impl Default for Config {
             api: ApiConfig::default(),
             taildrop_enabled: true,
             randomize_client_port: false,
+            allow_non_noise_registration: false,
         }
     }
 }
@@ -254,9 +268,9 @@ pub struct EmbeddedDerpConfig {
     #[serde(default = "default_stun_rate_per_minute")]
     pub stun_rate_per_minute: u32,
 
-    /// this protects against malicious or misconfigured clients that ignore
-    /// the ServerInfo rate limits
-    /// default: false (client-side only, for headscale compatibility)
+    /// enable server-side message rate limiting.
+    /// when enabled, the server enforces the rate limit in addition to
+    /// sending it to clients via ServerInfo (client-side enforcement).
     /// this protects against malicious or misconfigured clients that ignore
     /// the ServerInfo rate limits.
     /// default: false (client-side only, for headscale compatibility).
@@ -759,7 +773,7 @@ mod tests {
         assert_eq!(derp.bytes_burst, 204800); // 200KB
         // connection rate limiting (server-enforced)
         assert_eq!(derp.connection_rate_per_minute, 10);
-        // (for compatibility with clients that don't expect it)
+        // stun rate limiting
         assert_eq!(derp.stun_rate_per_minute, 60);
         // server-side message rate limiting should be disabled by default
         // (for compatibility with clients that don't expect it)
