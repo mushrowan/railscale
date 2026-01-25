@@ -2,13 +2,16 @@
 
 use std::sync::Arc;
 
-use railscale_proto::{FilterRule, NetPortRange, PortRange};
+use railscale_proto::{
+    FilterRule, NetPortRange, PortRange, SshAction, SshPolicy, SshPrincipal, SshRule,
+};
 use railscale_types::{Node, UserId};
 
 use crate::capability::NetworkCapability;
 use crate::grant::Grant;
 use crate::policy::Policy;
 use crate::selector::{Autogroup, Selector};
+use crate::ssh::build_ssh_users_map;
 
 /// trait for resolving user information during policy evaluation.
 pub trait UserResolver {
@@ -273,6 +276,135 @@ impl GrantsEngine {
             }
             // other autogroups require role resolution (future)
             Selector::Autogroup(_) => false,
+        }
+    }
+
+    /// compile ssh policy for a specific node
+    ///
+    /// returns the ssh policy that should be sent to this node in mapresponse
+    /// tagged nodes receive no ssh policy (ssh only applies to user-owned devices)
+    pub fn compile_ssh_policy<R: UserResolver>(
+        &self,
+        node: &Node,
+        all_nodes: &[Node],
+        resolver: &R,
+    ) -> Option<SshPolicy> {
+        // tagged nodes don't get ssh policies
+        if node.is_tagged() {
+            return None;
+        }
+
+        let mut rules = Vec::new();
+
+        for ssh_rule in &self.policy.ssh {
+            // parse destination selectors
+            let dst_selectors: Vec<Selector> = ssh_rule
+                .dst
+                .iter()
+                .filter_map(|s| Selector::parse(s).ok())
+                .collect();
+
+            // check if this node is in the destination set
+            let has_self_dst = dst_selectors
+                .iter()
+                .any(|s| matches!(s, Selector::Autogroup(Autogroup::SelfDevices)));
+
+            // for autogroup:self destinations, node must be untagged with a user_id
+            // for other selectors, use normal matching
+            let node_matches_dst = dst_selectors.iter().any(|selector| {
+                match selector {
+                    Selector::Autogroup(Autogroup::SelfDevices) => {
+                        // node is a valid autogroup:self destination if it's untagged with user
+                        !node.is_tagged() && node.user_id.is_some()
+                    }
+                    _ => self.node_matches_selector(node, selector, resolver, None),
+                }
+            });
+
+            if !node_matches_dst {
+                continue;
+            }
+
+            // parse source selectors
+            let src_selectors: Vec<Selector> = ssh_rule
+                .src
+                .iter()
+                .filter_map(|s| Selector::parse(s).ok())
+                .collect();
+
+            // find all source nodes that match
+            let mut source_ips: Vec<String> = Vec::new();
+
+            for src_node in all_nodes {
+                if src_node.id == node.id {
+                    continue; // Can't SSH to self
+                }
+
+                // for autogroup:self destinations, only same-user untagged nodes are sources
+                if has_self_dst {
+                    if src_node.is_tagged() || node.user_id != src_node.user_id {
+                        continue;
+                    }
+                }
+
+                // check if this source node matches any source selector
+                let matches_src = src_selectors.iter().any(|selector| {
+                    self.node_matches_selector(src_node, selector, resolver, Some(node))
+                });
+
+                if matches_src {
+                    // add all ips from this source node
+                    for ip in src_node.ips() {
+                        source_ips.push(ip.to_string());
+                    }
+                }
+            }
+
+            if source_ips.is_empty() {
+                continue; // No sources match, skip this rule
+            }
+
+            // build principals from source ips
+            let principals: Vec<SshPrincipal> = source_ips
+                .into_iter()
+                .map(|ip| SshPrincipal {
+                    node: None,
+                    node_ip: Some(ip),
+                    user_login: None,
+                    any: None,
+                })
+                .collect();
+
+            // build ssh users map
+            let ssh_users = build_ssh_users_map(&ssh_rule.users);
+
+            // build action
+            let action = SshAction {
+                message: None,
+                reject: None,
+                accept: Some(true),
+                session_duration: ssh_rule.check_period,
+                allow_agent_forwarding: Some(true),
+                hold_and_delegate: None,
+                allow_local_port_forwarding: Some(true),
+                allow_remote_port_forwarding: Some(true),
+                recorders: None,
+                on_recording_failure: None,
+            };
+
+            rules.push(SshRule {
+                rule_expires: None,
+                principals,
+                ssh_users,
+                action,
+                accept_env: None,
+            });
+        }
+
+        if rules.is_empty() {
+            None
+        } else {
+            Some(SshPolicy { rules })
         }
     }
 }
@@ -642,5 +774,124 @@ mod tests {
 
         // denied again
         assert!(!engine.can_see(&node1, &node2, &resolver));
+    }
+
+    // ssh policy compiler tests
+
+    #[test]
+    fn test_compile_ssh_policy_empty() {
+        let policy = Policy::empty();
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let node = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let all_nodes = vec![node.clone()];
+
+        let ssh_policy = engine.compile_ssh_policy(&node, &all_nodes, &resolver);
+        assert!(ssh_policy.is_none());
+    }
+
+    #[test]
+    fn test_compile_ssh_policy_tagged_node_skipped() {
+        let mut policy = Policy::empty();
+        policy.ssh.push(crate::ssh::SshPolicyRule {
+            action: crate::ssh::SshActionType::Accept,
+            check_period: None,
+            src: vec!["*".to_string()],
+            dst: vec!["*".to_string()],
+            users: vec!["autogroup:nonroot".to_string()],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // tagged node should not get ssh policy
+        let tagged_node = test_node(1, vec!["tag:server"]);
+        let all_nodes = vec![tagged_node.clone()];
+
+        let ssh_policy = engine.compile_ssh_policy(&tagged_node, &all_nodes, &resolver);
+        assert!(ssh_policy.is_none());
+    }
+
+    #[test]
+    fn test_compile_ssh_policy_basic() {
+        let mut policy = Policy::empty();
+        policy.ssh.push(crate::ssh::SshPolicyRule {
+            action: crate::ssh::SshActionType::Accept,
+            check_period: None,
+            src: vec!["*".to_string()],
+            dst: vec!["*".to_string()],
+            users: vec!["ubuntu".to_string()],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![node1.clone(), node2.clone()];
+
+        // compile ssh policy for node1
+        let ssh_policy = engine.compile_ssh_policy(&node1, &all_nodes, &resolver);
+        assert!(ssh_policy.is_some());
+
+        let policy = ssh_policy.unwrap();
+        assert_eq!(policy.rules.len(), 1);
+
+        let rule = &policy.rules[0];
+        assert!(rule.action.accept.unwrap_or(false));
+        assert_eq!(rule.ssh_users.get("ubuntu"), Some(&"ubuntu".to_string()));
+
+        // should have principal for node2's ip
+        assert_eq!(rule.principals.len(), 1);
+        assert!(rule.principals[0].node_ip.is_some());
+    }
+
+    #[test]
+    fn test_compile_ssh_policy_autogroup_self() {
+        let mut policy = Policy::empty();
+        policy.ssh.push(crate::ssh::SshPolicyRule {
+            action: crate::ssh::SshActionType::Accept,
+            check_period: None,
+            src: vec!["autogroup:member".to_string()],
+            dst: vec!["autogroup:self".to_string()],
+            users: vec!["autogroup:nonroot".to_string()],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // user 1's devices
+        let user1_node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let user1_node2 = test_node_with_user(2, vec![], Some(UserId::from(1)));
+
+        // user 2's device
+        let user2_node = test_node_with_user(3, vec![], Some(UserId::from(2)));
+
+        let all_nodes = vec![user1_node1.clone(), user1_node2.clone(), user2_node.clone()];
+
+        // compile ssh policy for user1_node1
+        let ssh_policy = engine.compile_ssh_policy(&user1_node1, &all_nodes, &resolver);
+        assert!(ssh_policy.is_some());
+
+        let policy = ssh_policy.unwrap();
+        assert_eq!(policy.rules.len(), 1);
+
+        let rule = &policy.rules[0];
+        // should only have principal for user1_node2, not user2_node
+        assert_eq!(rule.principals.len(), 1);
+
+        // check ssh_users map has nonroot pattern
+        assert_eq!(rule.ssh_users.get("*"), Some(&"=".to_string()));
+        assert_eq!(rule.ssh_users.get("root"), Some(&String::new())); // denied
+    }
+
+    fn test_node_with_user(id: u64, tags: Vec<&str>, user_id: Option<UserId>) -> Node {
+        let tags = tags.into_iter().filter_map(|t| t.parse().ok()).collect();
+        let mut builder = TestNodeBuilder::new(id).with_tags(tags);
+        if let Some(uid) = user_id {
+            builder = builder.with_user_id(uid);
+        }
+        builder.build()
     }
 }
