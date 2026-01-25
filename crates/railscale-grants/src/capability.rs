@@ -4,28 +4,28 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::error::ParseError;
 
-/// they can be parsed from strings like `"*"`, `"443"`, `"80-443"`, `"tcp:22"`
-///wildcard - all tcp, udp, icmp traffic on any port
-/// single port (any protocol). Example: `"443"`
-/// port range (any protocol). Example: `"80-443"`
+/// network capability - what ports/protocols are allowed.
+///
+/// capabilities specify which network connections are permitted by a grant.
+/// they can be parsed from strings like `"*"`, `"443"`, `"80-443"`, `"tcp:22"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkCapability {
     /// wildcard - all tcp, udp, icmp traffic on any port.
     Wildcard,
     /// single port (any protocol). Example: `"443"`.
     Port(u16),
-    /// protocol-specific port. Example: `"tcp:22"`
+    /// port range (any protocol). Example: `"80-443"`.
     PortRange {
-        /// the network protocol
+        /// start of port range (inclusive).
         start: u16,
-        /// the port number
+        /// end of port range (inclusive).
         end: u16,
     },
-    /// protocol-specific port range. Example: `"tcp:8000-9000"`
+    /// protocol-specific port. Example: `"tcp:22"`.
     ProtocolPort {
-        /// start of port range (inclusive)
+        /// the network protocol.
         protocol: Protocol,
-        /// protocol wildcard (all ports). Example: `"icmp:*"`
+        /// the port number.
         port: u16,
     },
     /// protocol-specific port range. Example: `"tcp:8000-9000"`.
@@ -96,15 +96,15 @@ fn protocol_name(proto: Protocol) -> &'static str {
     }
 }
 
-/// transmission Control protocol (IANA 6)
-///user Datagram protocol (IANA 17)
-/// internet Control Message protocol (IANA 1)
+/// network protocol for capability matching.
+///
+/// these correspond to iana protocol numbers used in ip headers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Protocol {
-    /// stream Control Transmission protocol (IANA 132)
+    /// transmission control protocol (iana 6).
     Tcp,
-    /// ipv4 encapsulation (IANA 4)
+    /// user datagram protocol (iana 17).
     Udp,
     /// internet control message protocol (iana 1).
     Icmp,
@@ -336,5 +336,144 @@ mod tests {
         assert_eq!(Protocol::Tcp.number(), 6);
         assert_eq!(Protocol::Udp.number(), 17);
         assert_eq!(Protocol::Icmp.number(), 1);
+    }
+}
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid port numbers (1-65535, 0 is special)
+    fn port_strategy() -> impl Strategy<Value = u16> {
+        1u16..=65535
+    }
+
+    // strategy for valid protocol names
+    fn protocol_strategy() -> impl Strategy<Value = &'static str> {
+        prop_oneof![
+            Just("tcp"),
+            Just("udp"),
+            Just("icmp"),
+            Just("gre"),
+            Just("esp"),
+            Just("ah"),
+            Just("sctp"),
+            Just("igmp"),
+            Just("ipv4"),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+
+        #[test]
+        fn wildcard_roundtrips(s in Just("*")) {
+            let cap = NetworkCapability::parse(&s).unwrap();
+            prop_assert_eq!(&cap, &NetworkCapability::Wildcard);
+            // roundtrip through serde
+            let json = serde_json::to_string(&cap).unwrap();
+            let parsed: NetworkCapability = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, cap);
+        }
+
+        #[test]
+        fn single_port_roundtrips(port in port_strategy()) {
+            let input = port.to_string();
+            let cap = NetworkCapability::parse(&input).unwrap();
+            prop_assert_eq!(&cap, &NetworkCapability::Port(port));
+            // roundtrip through serde
+            let json = serde_json::to_string(&cap).unwrap();
+            let parsed: NetworkCapability = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, cap);
+        }
+
+        #[test]
+        fn port_range_roundtrips(start in port_strategy(), end in port_strategy()) {
+            // ensure start <= end for valid range
+            let (start, end) = if start <= end { (start, end) } else { (end, start) };
+            let input = format!("{}-{}", start, end);
+            let cap = NetworkCapability::parse(&input).unwrap();
+            prop_assert_eq!(&cap, &NetworkCapability::PortRange { start, end });
+            // roundtrip through serde
+            let json = serde_json::to_string(&cap).unwrap();
+            let parsed: NetworkCapability = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, cap);
+        }
+
+        #[test]
+        fn protocol_port_roundtrips(proto in protocol_strategy(), port in port_strategy()) {
+            let input = format!("{}:{}", proto, port);
+            let cap = NetworkCapability::parse(&input).unwrap();
+            // roundtrip through serde
+            let json = serde_json::to_string(&cap).unwrap();
+            let parsed: NetworkCapability = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, cap);
+        }
+
+        #[test]
+        fn protocol_port_range_roundtrips(
+            proto in protocol_strategy(),
+            start in port_strategy(),
+            end in port_strategy()
+        ) {
+            let (start, end) = if start <= end { (start, end) } else { (end, start) };
+            let input = format!("{}:{}-{}", proto, start, end);
+            let cap = NetworkCapability::parse(&input).unwrap();
+            // roundtrip through serde
+            let json = serde_json::to_string(&cap).unwrap();
+            let parsed: NetworkCapability = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, cap);
+        }
+
+        #[test]
+        fn protocol_wildcard_roundtrips(proto in protocol_strategy()) {
+            let input = format!("{}:*", proto);
+            let cap = NetworkCapability::parse(&input).unwrap();
+            // roundtrip through serde
+            let json = serde_json::to_string(&cap).unwrap();
+            let parsed: NetworkCapability = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, cap);
+        }
+
+        #[test]
+        fn arbitrary_string_never_panics(s in ".*") {
+            // parsing arbitrary strings should never panic
+            let _ = NetworkCapability::parse(&s);
+        }
+
+        #[test]
+        fn port_overflow_rejected(n in 65536u32..=100000) {
+            // port numbers > 65535 should be rejected
+            let input = n.to_string();
+            let result = NetworkCapability::parse(&input);
+            prop_assert!(result.is_err());
+        }
+
+        #[test]
+        fn invalid_protocol_rejected(proto in "[a-z]{1,10}") {
+            // skip valid protocol names
+            let valid = ["tcp", "udp", "icmp", "gre", "esp", "ah", "sctp", "igmp", "ipv4"];
+            if !valid.contains(&proto.as_str()) {
+                let input = format!("{}:443", proto);
+                let result = NetworkCapability::parse(&input);
+                prop_assert!(result.is_err());
+            }
+        }
+
+        #[test]
+        fn allows_is_consistent_with_parse(port in port_strategy()) {
+            // wildcard allows everything
+            let wildcard = NetworkCapability::Wildcard;
+            prop_assert!(wildcard.allows(Protocol::Tcp, port));
+            prop_assert!(wildcard.allows(Protocol::Udp, port));
+
+            // single port allows only that port
+            let single = NetworkCapability::Port(port);
+            prop_assert!(single.allows(Protocol::Tcp, port));
+            if port > 1 {
+                prop_assert!(!single.allows(Protocol::Tcp, port - 1));
+            }
+        }
     }
 }

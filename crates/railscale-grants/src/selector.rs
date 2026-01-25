@@ -174,3 +174,135 @@ mod tests {
         assert!(result.is_err());
     }
 }
+
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // strategy for valid tag names (lowercase alphanumeric + hyphens/underscores)
+    fn tag_name_strategy() -> impl Strategy<Value = String> {
+        "[a-z][a-z0-9_-]{0,49}".prop_map(|s| s)
+    }
+
+    // strategy for valid group names
+    fn group_name_strategy() -> impl Strategy<Value = String> {
+        "[a-z][a-z0-9_-]{0,49}".prop_map(|s| s)
+    }
+
+    // strategy for valid email-like strings
+    fn email_strategy() -> impl Strategy<Value = String> {
+        "[a-z]{1,10}@[a-z]{1,10}\\.[a-z]{2,4}".prop_map(|s| s)
+    }
+
+    // strategy for valid cidr strings
+    fn cidr_v4_strategy() -> impl Strategy<Value = String> {
+        (0u8..=255, 0u8..=255, 0u8..=255, 0u8..=255, 0u8..=32)
+            .prop_map(|(a, b, c, d, prefix)| format!("{}.{}.{}.{}/{}", a, b, c, d, prefix))
+    }
+
+    // strategy for valid autogroup names
+    fn autogroup_strategy() -> impl Strategy<Value = &'static str> {
+        prop_oneof![
+            Just("admin"),
+            Just("member"),
+            Just("owner"),
+            Just("tagged"),
+            Just("shared"),
+            Just("internet"),
+            Just("self"),
+        ]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(1000))]
+
+        #[test]
+        fn wildcard_roundtrips(s in Just("*")) {
+            let selector = Selector::parse(&s).unwrap();
+            prop_assert_eq!(&selector, &Selector::Wildcard);
+            // roundtrip through serde
+            let json = serde_json::to_string(&selector).unwrap();
+            let parsed: Selector = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, selector);
+        }
+
+        #[test]
+        fn tag_roundtrips(name in tag_name_strategy()) {
+            let input = format!("tag:{}", name);
+            let selector = Selector::parse(&input).unwrap();
+            prop_assert_eq!(&selector, &Selector::Tag(name.clone()));
+            // roundtrip through serde
+            let json = serde_json::to_string(&selector).unwrap();
+            let parsed: Selector = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, selector);
+        }
+
+        #[test]
+        fn group_roundtrips(name in group_name_strategy()) {
+            let input = format!("group:{}", name);
+            let selector = Selector::parse(&input).unwrap();
+            prop_assert_eq!(&selector, &Selector::Group(name.clone()));
+            // roundtrip through serde
+            let json = serde_json::to_string(&selector).unwrap();
+            let parsed: Selector = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, selector);
+        }
+
+        #[test]
+        fn autogroup_roundtrips(name in autogroup_strategy()) {
+            let input = format!("autogroup:{}", name);
+            let selector = Selector::parse(&input).unwrap();
+            // roundtrip through serde
+            let json = serde_json::to_string(&selector).unwrap();
+            let parsed: Selector = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, selector);
+        }
+
+        #[test]
+        fn user_roundtrips(email in email_strategy()) {
+            let selector = Selector::parse(&email).unwrap();
+            prop_assert_eq!(&selector, &Selector::User(email.clone()));
+            // roundtrip through serde
+            let json = serde_json::to_string(&selector).unwrap();
+            let parsed: Selector = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, selector);
+        }
+
+        #[test]
+        fn cidr_roundtrips(cidr in cidr_v4_strategy()) {
+            // roundtrip through serde
+            if let Ok(selector) = Selector::parse(&cidr) {
+                if let Selector::Cidr(net) = &selector {
+                    // verify it's still a cidr
+                    let json = serde_json::to_string(&selector).unwrap();
+                    let parsed: Selector = serde_json::from_str(&json).unwrap();
+                    // verify it's still a cidr
+                    prop_assert!(matches!(parsed, Selector::Cidr(_)));
+                    if let Selector::Cidr(parsed_net) = parsed {
+                        prop_assert_eq!(net.network(), parsed_net.network());
+                        prop_assert_eq!(net.prefix_len(), parsed_net.prefix_len());
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn arbitrary_string_never_panics(s in ".*") {
+            // parsing arbitrary strings should never panic
+            let _ = Selector::parse(&s);
+        }
+
+        #[test]
+        fn invalid_autogroup_rejected(name in "[a-z]{1,20}") {
+            // skip valid autogroup names
+            if !["admin", "member", "owner", "tagged", "shared", "internet", "self"]
+                .contains(&name.as_str())
+            {
+                let input = format!("autogroup:{}", name);
+                let result = Selector::parse(&input);
+                prop_assert!(result.is_err());
+            }
+        }
+    }
+}
