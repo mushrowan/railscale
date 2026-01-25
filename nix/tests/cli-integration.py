@@ -378,7 +378,8 @@ with subtest("Verify reusable key is marked correctly"):
     print(f"Created reusable key: {reusable_key[:20]}...")
 
     keys = railscale_json("preauthkeys list")
-    the_key = next((k for k in keys if k["key"] == reusable_key), None)
+    # List returns only prefix, so check if full key starts with the stored prefix
+    the_key = next((k for k in keys if reusable_key.startswith(k["key"])), None)
     assert the_key is not None, "Key should be in list"
     assert the_key.get("reusable") == True, "Key should be marked reusable"
 
@@ -389,7 +390,8 @@ with subtest("Verify ephemeral key creation"):
     print(f"Created ephemeral key: {ephemeral_key[:20]}...")
 
     keys = railscale_json("preauthkeys list")
-    the_key = next((k for k in keys if k["key"] == ephemeral_key), None)
+    # List returns only prefix, so check if full key starts with the stored prefix
+    the_key = next((k for k in keys if ephemeral_key.startswith(k["key"])), None)
     assert the_key is not None, "Key should be in list"
     assert the_key.get("ephemeral") == True, "Key should be marked ephemeral"
 
@@ -450,7 +452,8 @@ with subtest("Expired key cannot be used"):
     print(f"Created key to expire: {key_to_expire[:20]}...")
 
     keys = railscale_json("preauthkeys list")
-    the_key = next(k for k in keys if k["key"] == key_to_expire)
+    # List returns only prefix, so check if full key starts with the stored prefix
+    the_key = next(k for k in keys if key_to_expire.startswith(k["key"]))
     key_id = the_key["id"]
     railscale(f"preauthkeys expire {key_id}")
     print(f"Expired key {key_id}")
