@@ -43,6 +43,7 @@ message User {
   string email = 2;
   string display_name = 3;
   string created_at = 4;  // RFC3339
+  repeated string oidc_groups = 5;  // OIDC group memberships
 }
 
 message Node {

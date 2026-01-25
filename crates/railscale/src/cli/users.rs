@@ -1,4 +1,4 @@
-//! the `users` subcommand - manage users via admin socket
+//! the `users` subcommand - manage users via admin socket.
 
 use clap::{Args, Subcommand};
 use color_eyre::eyre::{Context, Result};
@@ -134,10 +134,10 @@ async fn list_users(args: ListUsersArgs) -> Result<()> {
     }
 
     println!(
-        "{:<6} {:<30} {:<25} {:<20}",
-        "ID", "EMAIL", "DISPLAY NAME", "CREATED"
+        "{:<6} {:<30} {:<25} {:<25} {:<20}",
+        "ID", "EMAIL", "DISPLAY NAME", "OIDC GROUPS", "CREATED"
     );
-    println!("{}", "-".repeat(85));
+    println!("{}", "-".repeat(110));
 
     for user in users {
         // parse and format created_at
@@ -145,8 +145,21 @@ async fn list_users(args: ListUsersArgs) -> Result<()> {
             .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
             .unwrap_or_else(|_| user.created_at.clone());
 
+        // format oidc groups (truncate if too many)
+        let oidc_groups = if user.oidc_groups.is_empty() {
+            "-".to_string()
+        } else if user.oidc_groups.len() <= 2 {
+            user.oidc_groups.join(", ")
+        } else {
+            format!(
+                "{}, +{}",
+                user.oidc_groups[..2].join(", "),
+                user.oidc_groups.len() - 2
+            )
+        };
+
         println!(
-            "{:<6} {:<30} {:<25} {:<20}",
+            "{:<6} {:<30} {:<25} {:<25} {:<20}",
             user.id,
             user.email,
             if user.display_name.is_empty() {
@@ -154,6 +167,7 @@ async fn list_users(args: ListUsersArgs) -> Result<()> {
             } else {
                 &user.display_name
             },
+            oidc_groups,
             created,
         );
     }

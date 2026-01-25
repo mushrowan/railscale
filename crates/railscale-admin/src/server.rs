@@ -669,6 +669,7 @@ fn user_to_pb(user: &railscale_types::User) -> pb::User {
         email: user.email.clone().unwrap_or_else(|| user.name.clone()),
         display_name: user.display_name.clone().unwrap_or_default(),
         created_at: user.created_at.to_rfc3339(),
+        oidc_groups: user.oidc_groups.clone(),
     }
 }
 
