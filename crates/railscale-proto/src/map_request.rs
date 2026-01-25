@@ -15,6 +15,7 @@ fn is_zero(n: &i32) -> bool {
 use railscale_types::{DiscoKey, HostInfo, MachineKey, NodeKey};
 
 use crate::CapabilityVersion;
+use crate::ssh::SshPolicy;
 
 /// a maprequest from a tailscale client.
 ///
@@ -100,6 +101,10 @@ pub struct MapResponse {
     /// control server time (for clock sync).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_time: Option<String>,
+
+    /// ssh policy for incoming connections
+    #[serde(rename = "SSHPolicy", default, skip_serializing_if = "Option::is_none")]
+    pub ssh_policy: Option<SshPolicy>,
 }
 
 impl MapResponse {
@@ -114,6 +119,7 @@ impl MapResponse {
             packet_filter: vec![],
             user_profiles: vec![],
             control_time: None,
+            ssh_policy: None,
         }
     }
 }
@@ -470,6 +476,7 @@ mod proptests {
                 packet_filter,
                 user_profiles: vec![],
                 control_time: None,
+                ssh_policy: None,
             })
     }
 

@@ -304,6 +304,8 @@ async fn build_map_response(
         packet_filter,
         user_profiles,
         control_time: Some(chrono::Utc::now().to_rfc3339()),
+        // TODO: compile ssh policy per-node from grants
+        ssh_policy: None,
     })
 }
 
