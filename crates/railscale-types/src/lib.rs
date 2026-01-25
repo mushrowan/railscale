@@ -16,6 +16,7 @@ mod keys;
 mod node;
 mod node_name;
 mod oidc;
+mod oidc_group_prefix;
 mod policy_json;
 mod preauth_key;
 mod preauth_key_token;
@@ -37,6 +38,7 @@ pub use keys::{DiscoKey, MachineKey, NodeKey};
 pub use node::{HostInfo, NetInfo, Node, NodeId, NodeView, RegisterMethod};
 pub use node_name::{MAX_NODE_NAME_LEN, NodeName, NodeNameError};
 pub use oidc::{OidcClaims, RegistrationId};
+pub use oidc_group_prefix::{MAX_OIDC_GROUP_PREFIX_LEN, OidcGroupPrefix, OidcGroupPrefixError};
 pub use policy_json::{MAX_POLICY_SIZE, PolicyJson, PolicyJsonError};
 pub use preauth_key::PreAuthKey;
 pub use preauth_key_token::{

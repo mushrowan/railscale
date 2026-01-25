@@ -439,6 +439,7 @@ mod tests {
             allowed_domains: vec![],
             allowed_users: vec![],
             allowed_groups: vec![],
+            group_prefix: None,
             expiry_secs: 180 * 24 * 3600,
             use_expiry_from_token: false,
             extra_params: std::collections::HashMap::new(),

@@ -6,6 +6,8 @@ use ipnet::IpNet;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
+use crate::oidc_group_prefix::OidcGroupPrefix;
+
 /// main configuration for railscale.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -477,6 +479,15 @@ pub struct OidcConfig {
     #[serde(default)]
     pub allowed_groups: Vec<String>,
 
+    /// "oidc-engineering" for matching against `group:oidc-engineering` in grants
+    ///
+    /// if not set, oidc groups are used as-is
+    /// "oidc-engineering" for matching against `group:oidc-engineering` in grants.
+    ///
+    /// if not set, oidc groups are used as-is.
+    #[serde(default)]
+    pub group_prefix: Option<OidcGroupPrefix>,
+
     /// node expiry in seconds (default: 180 days).
     #[serde(default = "default_expiry_secs")]
     pub expiry_secs: u64,
@@ -511,6 +522,7 @@ impl std::fmt::Debug for OidcConfig {
             .field("allowed_domains", &self.allowed_domains)
             .field("allowed_users", &self.allowed_users)
             .field("allowed_groups", &self.allowed_groups)
+            .field("group_prefix", &self.group_prefix)
             .field("expiry_secs", &self.expiry_secs)
             .field("use_expiry_from_token", &self.use_expiry_from_token)
             .field("extra_params", &self.extra_params)
@@ -599,15 +611,15 @@ impl Default for TuningConfig {
 #[serde(default)]
 pub struct ApiConfig {
     /// whether the rest api is enabled.
-    /// host/IP to bind the api listener to
+    /// disabled by default for security.
     pub enabled: bool,
 
-    /// if `Some`, the api runs on a separate listener at `listen_host:listen_port`
+    /// host/ip to bind the api listener to.
+    ///
+    /// if `none` (default), the api routes are served on the main server port.
+    /// if `some`, the api runs on a separate listener at `listen_host:listen_port`.
     ///
     /// examples:
-    /// - `None` - api on same port as protocol (simple setup)
-    ///- `Some("127.0.0.1")` - api on localhost only (secure)
-    /// - `Some("0.0.0.0")` - api on all interfaces
     /// - `None` - API on same port as protocol (simple setup)
     /// - `Some("127.0.0.1")` - API on localhost only (secure)
     /// - `Some("0.0.0.0")` - API on all interfaces
@@ -883,6 +895,7 @@ mod tests {
             allowed_domains: vec!["example.com".to_string()],
             allowed_users: vec!["alice@example.com".to_string()],
             allowed_groups: vec!["headscale_users".to_string()],
+            group_prefix: None,
             expiry_secs: 180 * 24 * 3600, // 180 days in seconds
             use_expiry_from_token: false,
             extra_params: std::collections::HashMap::new(),
@@ -969,6 +982,7 @@ mod tests {
             allowed_domains: vec![],
             allowed_users: vec![],
             allowed_groups: vec![],
+            group_prefix: None,
             expiry_secs: default_expiry_secs(),
             use_expiry_from_token: false,
             extra_params: std::collections::HashMap::new(),
@@ -998,6 +1012,7 @@ mod tests {
             allowed_domains: vec![],
             allowed_users: vec![],
             allowed_groups: vec![],
+            group_prefix: None,
             expiry_secs: default_expiry_secs(),
             use_expiry_from_token: false,
             extra_params: std::collections::HashMap::new(),
