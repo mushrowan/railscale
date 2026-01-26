@@ -1,0 +1,187 @@
+# railscale
+if you're reading this, it means i just pushed this because i tend to put off publicising code and i just wanted to get it out there into the world. half of this readme could be completely wrong as it's almost 3am and i am tired and just typed it all up like a moron. i will come back and fix i promise
+
+> [!CAUTION] **this has not been properly audited.** for something that is meant
+> to be secure like a zero trust mesh vpn, that should scream out to you as a
+> red flag. if you are serious about security, you should **NOT** use this until
+> further notice.
+
+> PLEASE PAY ATTENTION TO THE LICENCE. FOR NOW IT IS NOT "OPEN SOURCE". YOU
+> CANNOT USE (YET) USE IT IN A COMMERCIAL SETTING. the reason for this is just
+> an additional measure against some well-meaning fool trying to use this in a
+> security-sensitive scenario. i do not want someone to start using this, get
+> hacked, and leak a bunch of customer data or something. if/when this gets a
+> proper security audit, i will change this to something else more permissive.
+> prolly mit or gpl or whatever.
+
+> before you try to be helpful and use your codex credits to audit, yes i have
+> already done this. but this is not a substitute for a proper audit.
+
+## a self-hosted tailscale control server written in rust
+
+they told me i couldn't do it
+
+## features
+
+- **full ts2021 protocol support** - works with official tailscale clients
+- **oidc authentication** - sign in with google, github, whatever
+- **grants policy system** - acls but swaggier
+- **embedded derp server** - built-in relay
+- **rest api** - manage users, nodes, keys
+- **nixos module** - first-class nix support
+- **too much other stuff** - it's 2am and i cannot be bothered to remember
+
+## quickstart
+
+### nix
+
+```nix
+# flake.nix
+{
+  inputs.railscale.url = "github:mushrowan/railscale";
+
+  outputs = { self, nixpkgs, railscale }: {
+    nixosConfigurations.myserver = nixpkgs.lib.nixosSystem {
+      modules = [
+        railscale.nixosModules.default
+        {
+          services.railscale = {
+            enable = true;
+            settings = {
+              server_url = "https://vpn.gaming.epic";
+              listen_addr = "0.0.0.0:443";
+              database_url = "sqlite:///var/lib/railscale/db.sqlite";
+
+              # optional: oidc login
+              oidc = {
+                issuer_url = "https://accounts.google.com";
+                client_id = "your-client-id";
+                client_secret_path = "/run/secrets/oidc-secret"; # use sops-nix
+              };
+            };
+          };
+        }
+      ];
+    };
+  };
+}
+```
+
+### config file
+
+```toml
+# config.toml
+server_url = "https://vpn.gaming.epic"
+listen_addr = "0.0.0.0:443"
+database_url = "sqlite:///var/lib/railscale/db.sqlite"
+
+[derp.embedded_derp]
+enabled = true
+region_id = 900
+region_name = "my-derp"
+
+# optional oidc
+[oidc]
+issuer_url = "https://accounts.google.com"
+client_id = "your-client-id"
+client_secret = "your-client-secret"
+```
+
+### docker
+
+not yet
+
+## connecting clients
+
+```bash
+# on your tailscale client
+tailscale up --login-server=https://vpn.example.com
+```
+
+## cli
+
+```bash
+# run the server
+railscale serve --config /etc/railscale/config.toml
+
+# manage users
+railscale users list
+railscale users create alice
+
+# manage preauth keys
+railscale preauthkeys create --user alice --reusable
+railscale preauthkeys list
+
+# manage nodes
+railscale nodes list
+railscale nodes delete 12345
+
+# reload policy without restart
+railscale policy reload
+```
+
+## policy (grants)
+
+```json
+{
+  "groups": {
+    "group:dev": ["alice@example.com", "bob@example.com"]
+  },
+  "grants": [
+    { "src": ["group:dev"], "dst": ["autogroup:member"], "ip": ["*"] }
+  ],
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["group:dev"],
+      "dst": ["tag:servers"],
+      "users": ["root"]
+    }
+  ]
+}
+```
+
+## status
+
+my current status is that i am in bed and i am comfy, thank you for asking
+
+okay but actually, the status is that i'm going to continue actively working on
+this. there are many things indeedy which need to be fixed, ironed out, added.
+
+current limitations:
+
+- no taildrop
+- ssh policy works-ish but i'll be honest i only realised that i forgot to
+  properly implement it today and then madly wrote it all in like 4 hours so
+  yeah it might be broken
+- app connectors - not yet
+- probably like 50 million other things
+
+cool stuff:
+
+- nixos vm tests that make sure core functionality works
+  - can i just quickly say, nixos vm tests are insane. like they are nuts.
+    you're telling me i can just simulate a little cluster of servers or
+    whatever and then tell them exactly what output/exit codes i expect and then
+    qemu just figures it all out? that's insaneo style
+
+## license
+
+PolyForm Noncommercial License 1.0.0
+
+see the top of the readme for the reason for this. tldr; i will change this in
+the future but for now i do not what to be worrying about some silly person
+leaking social security numbers with a piece of software i made
+
+## see also
+
+- [headscale](https://github.com/juanfont/headscale) - the og self-hosted
+  tailscale server (go)
+- [tailscale](https://tailscale.com) - the real deal
+- [shellac](https://github.com/she-llac) - the cherished friend who kept telling
+  me to keep going while i built this
+
+### the name
+
+the railscale fandom is dying. reply "i love to get railed" to affirm your love
+for railscale
