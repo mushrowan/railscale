@@ -4,13 +4,14 @@
 //! - `GET /api/v1/preauthkey` - list all preauth keys
 //! - `POST /api/v1/preauthkey` - create a preauth key
 //! - `POST /api/v1/preauthkey/expire` - expire a preauth key
-//! - `DELETE /api/v1/preauthkey` - delete a preauth key
+//! - `DELETE /api/v1/preauthkey` - delete a preauth key (json body, legacy)
+//! - `DELETE /api/v1/preauthkey/{id}` - delete a preauth key (path param, preferred)
 
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -130,16 +131,15 @@ pub fn router() -> Router<AppState> {
             "/",
             get(list_preauth_keys)
                 .post(create_preauth_key)
-                .delete(delete_preauth_key),
+                .delete(delete_preauth_key_json), // legacy json body
         )
+        .route("/{id}", delete(delete_preauth_key_path)) // preferred path param
         .route("/expire", post(expire_preauth_key))
 }
 
 /// list all preauth keys.
-///note: Only returns the key prefix for security. The full key is only
-/// available at creation time
 ///
-/// NOTE: only returns the key prefix for security. the full key is only
+/// note: only returns the key prefix for security. the full key is only
 /// available at creation time.
 async fn list_preauth_keys(
     _auth: ApiKeyContext,
@@ -240,10 +240,13 @@ async fn expire_preauth_key(
     Ok(Json(ExpirePreAuthKeyResponse {}))
 }
 
-/// delete a preauth key.
+/// delete a preauth key (legacy json body).
 ///
-/// `DELETE /api/v1/preauthkey`
-async fn delete_preauth_key(
+/// `DELETE /api/v1/preauthkey` with `{"id": N}`
+///
+/// note: some http clients don't support DELETE with body.
+/// prefer `DELETE /api/v1/preauthkey/{id}` instead.
+async fn delete_preauth_key_json(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
     Json(req): Json<DeletePreAuthKeyRequest>,
@@ -251,6 +254,23 @@ async fn delete_preauth_key(
     state
         .db
         .delete_preauth_key(req.id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    Ok(Json(DeletePreAuthKeyResponse {}))
+}
+
+/// delete a preauth key (path param, preferred).
+///
+/// `DELETE /api/v1/preauthkey/{id}`
+async fn delete_preauth_key_path(
+    _auth: ApiKeyContext,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<Json<DeletePreAuthKeyResponse>, ApiError> {
+    state
+        .db
+        .delete_preauth_key(id)
         .await
         .map_err(ApiError::internal)?;
 
