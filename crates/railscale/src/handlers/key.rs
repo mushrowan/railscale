@@ -4,7 +4,7 @@
 
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
-use tracing::info;
+use tracing::debug;
 
 use crate::AppState;
 
@@ -41,10 +41,9 @@ fn format_machine_public_key(key: &[u8]) -> String {
 /// static public key before initiating the TS2021 Noise handshake.
 pub async fn key(State(state): State<AppState>) -> Json<KeyResponse> {
     let public_key = format_machine_public_key(&state.noise_public_key);
-    info!(
-        public_key = %public_key,
-        "GET /key - returning server's Noise public key"
-    );
+    // log short prefix only to reduce noise
+    let key_prefix = &public_key[..14.min(public_key.len())];
+    debug!(key_prefix = %key_prefix, "returning noise public key");
     Json(KeyResponse {
         // legacy key is zero-valued (must still have mkey: prefix + 64 hex zeros)
         legacy_public_key: format_machine_public_key(&ZERO_KEY),
