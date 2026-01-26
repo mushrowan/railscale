@@ -51,10 +51,10 @@ No code changes were made for this audit.
    - **Recommendation**: consider optional signature verification (if using an owned DERP map), or allow pinning to known fingerprints/ETags with integrity checks.
 
 ### Medium
-1. **Non‑Noise registration toggle is dangerous**
+1. **Non‑Noise registration toggle is dangerous** ✅ IMPROVED
    - `allow_non_noise_registration` allows registration without Noise context (with a zero machine key).
    - **Impact**: if enabled accidentally, it weakens cryptographic binding and may allow spoofing.
-   - **Recommendation**: keep disabled by default (already), but consider an additional runtime guard (e.g., explicit `--allow-non-noise` CLI flag that must be paired with `--insecure`).
+   - **Fix**: enhanced startup warnings with visual separators and clearer danger messaging.
 
 2. **`encode_length_prefixed` size overflow behaviour** ✅ FIXED
    - On oversized payloads, it clamps length to `u32::MAX` rather than returning an error, potentially confusing clients.
@@ -78,9 +78,9 @@ No code changes were made for this audit.
 2. **Repeated comments and inconsistent casing**
    - Several files contain duplicated/partially duplicated doc comments (e.g., DNS modules). This reduces clarity and can confuse audits.
 
-3. **DELETE with JSON body**
+3. **DELETE with JSON body** ✅ FIXED
    - `DELETE /api/v1/preauthkey` uses a JSON body, which some clients and proxies do not forward reliably.
-   - Consider a path‑param or POST to a `/delete` route for maximal compatibility.
+   - **Fix**: added `DELETE /api/v1/preauthkey/{id}` path-param route while keeping legacy route.
 
 ## Refactoring opportunities (behaviour‑preserving)
 1. **Extract rate‑limit config helper**
