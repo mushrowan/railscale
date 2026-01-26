@@ -1,3 +1,6 @@
+in case you're confused reading this,
+this was done by codex. possibly a buncha bullshit but who knows
+
 # Railscale audit
 
 ## Executive summary
