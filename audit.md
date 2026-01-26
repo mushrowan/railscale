@@ -30,20 +30,20 @@ No code changes were made for this audit.
 ## Findings by severity
 
 ### High
-1. **IPv4 allocator materialises all hosts**
+1. **IPv4 allocator materialises all hosts** ✅ FIXED
    - `IpAllocator::allocate_v4` collects `prefix.hosts()` into a `Vec`, which is **very large** for the default /10 (≈16 million addresses). This can spike memory and degrade performance or trigger OOM in large deployments.
    - **Impact**: potential DoS if the allocator is hit frequently or on startup with large prefixes.
-   - **Recommendation**: iterate over the host iterator without collecting; track offsets using arithmetic on network base + index, or use `IpNet::iter` with a cursor.
+   - **Fix**: now computes addresses arithmetically from network base + offset.
 
 2. **Unauthenticated `/verify` relies on external controls**
    - `/verify` is intentionally unauthenticated, but the code does not provide optional allowlists or built‑in rate limiting.
    - **Impact**: allows unauthenticated enumeration attempts or database load (if reachable externally).
    - **Recommendation**: add optional allowlist/IP filtering in config, plus optional rate limiting on `/verify` at the app layer, while preserving compatibility.
 
-3. **Map generation loads full tailnet state per request**
+3. **Map generation loads full tailnet state per request** ✅ FIXED
    - `build_map_response` always loads all nodes/users, ignoring `MapRequest.omit_peers` and `MapRequest.is_read_only`.
    - **Impact**: elevated load, and an attacker could force repeated full scans.
-   - **Recommendation**: avoid full peer list work when `omit_peers` is set or when `is_read_only` indicates no state updates. Introduce caching or incremental update pathways.
+   - **Fix**: now respects `omit_peers` flag and skips peer/filter/ssh computation when set.
 
 4. **Remote DERP map lacks integrity validation**
    - `fetch_derp_map_from_url` trusts a remote URL without content signing or pinning (TLS only).
@@ -56,14 +56,14 @@ No code changes were made for this audit.
    - **Impact**: if enabled accidentally, it weakens cryptographic binding and may allow spoofing.
    - **Recommendation**: keep disabled by default (already), but consider an additional runtime guard (e.g., explicit `--allow-non-noise` CLI flag that must be paired with `--insecure`).
 
-2. **`encode_length_prefixed` size overflow behaviour**
+2. **`encode_length_prefixed` size overflow behaviour** ✅ FIXED
    - On oversized payloads, it clamps length to `u32::MAX` rather than returning an error, potentially confusing clients.
-   - **Recommendation**: return an explicit error when payload > `u32::MAX` (even if unlikely today).
+   - **Fix**: now returns `None` (error) when payload exceeds `u32::MAX`.
 
-3. **`/bootstrap-dns` concurrency and cache‑miss amplification**
+3. **`/bootstrap-dns` concurrency and cache‑miss amplification** ✅ FIXED
    - All DERP hostnames are resolved concurrently without an explicit concurrency cap.
    - **Impact**: large DERP maps can create transient DNS pressure.
-   - **Recommendation**: cap concurrency (e.g., with a semaphore) and cache negative results for a short TTL.
+   - **Fix**: now capped at 10 concurrent lookups using `buffer_unordered`.
 
 4. **Policy updates not persisted**
    - REST API policy updates are in‑memory only.
@@ -71,8 +71,9 @@ No code changes were made for this audit.
    - **Recommendation**: document clearly, or persist to a policy file/DB with a revision marker and reload on startup.
 
 ### Low
-1. **`/key` endpoint logs the full public key**
+1. **`/key` endpoint logs the full public key** ✅ FIXED
    - Public key is not secret, but logs may be noisy; consider logging only a short prefix for hygiene.
+   - **Fix**: now logs at debug level with short key prefix only.
 
 2. **Repeated comments and inconsistent casing**
    - Several files contain duplicated/partially duplicated doc comments (e.g., DNS modules). This reduces clarity and can confuse audits.
@@ -104,11 +105,11 @@ No code changes were made for this audit.
 - **Taildrop flag** exists but feature is not implemented; ensure callers don’t assume it is active.
 
 ## Suggested quick wins
-- Fix `IpAllocator` to avoid `hosts().collect()`.
+- ~~Fix `IpAllocator` to avoid `hosts().collect()`.~~ ✅ Fixed
 - Add optional config allowlist + rate limit for `/verify`.
-- Respect `MapRequest.omit_peers` (skip expensive peer computation).
-- Add a small `payload too large` error in `encode_length_prefixed`.
-- Add concurrency limits to `bootstrap-dns` lookups.
+- ~~Respect `MapRequest.omit_peers` (skip expensive peer computation).~~ ✅ Fixed
+- ~~Add a small `payload too large` error in `encode_length_prefixed`.~~ ✅ Fixed
+- ~~Add concurrency limits to `bootstrap-dns` lookups.~~ ✅ Fixed
 
 ## Longer‑term improvements
 - Introduce a **policy persistence mechanism** (DB table or file snapshot).
