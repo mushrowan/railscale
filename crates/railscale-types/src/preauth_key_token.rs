@@ -23,11 +23,11 @@ pub const PREAUTH_KEY_PREFIX: &str = "tskey-auth-";
 /// - Start with "tskey-auth-"
 /// - Have exactly 48 hex characters after the prefix
 ///
-/// # Example
+/// # example
 /// ```
-/// use railscale_types::preauthkeytoken;
+/// use railscale_types::PreAuthKeyToken;
 ///
-/// let token: preauthkeytoken = "tskey-auth-0123456789abcdef0123456789abcdef0123456789abcdef".parse().unwrap();
+/// let token: PreAuthKeyToken = "tskey-auth-0123456789abcdef0123456789abcdef0123456789abcdef".parse().unwrap();
 /// assert_eq!(token.hex_part(), "0123456789abcdef0123456789abcdef0123456789abcdef");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

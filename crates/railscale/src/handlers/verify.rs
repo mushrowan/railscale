@@ -1,38 +1,35 @@
 //! derp client verification endpoint handler.
 //!
-//! # Security Considerations
-//! is registered with this control server before allowing relay connections.
-//!**This endpoint is intentionally unauthenticated** for compatibility with
-//! tailscale's `derper --verify-client-url` flag. The derp server calls this
-//!endpoint to check if a client should be allowed to connect
-//! **This endpoint is intentionally unauthenticated** for compatibility with
-//! ## Deployment Recommendations
-//! endpoint to check if a client should be allowed to connect.
-//!since this endpoint has no authentication, it should be protected at the
+//! # security considerations
+//!
+//! **this endpoint is intentionally unauthenticated** for compatibility with
+//! tailscale's `derper --verify-client-url` flag. the derp server calls this
+//! endpoint to check if a client is registered with this control server before
+//! allowing relay connections.
+//!
+//! ## deployment recommendations
+//!
+//! since this endpoint has no authentication, it should be protected at the
 //! network layer:
 //!
-//! 1. **Firewall rules**: Restrict access to only your derp server IPs
-//! 2. **Reverse proxy ACLs**: If behind nginx/caddy, limit by source IP
-//!3. **Internal network**: Deploy on a private network segment
-//! 1. **Firewall rules**: Restrict access to only your DERP server IPs
-//! ## Example nginx configuration
-//! 3. **Internal network**: Deploy on a private network segment
-//!```nginx
+//! 1. **firewall rules**: restrict access to only your derp server IPs
+//! 2. **reverse proxy ACLs**: if behind nginx/caddy, limit by source IP
+//! 3. **internal network**: deploy on a private network segment
+//!
+//! ## example nginx configuration
+//!
+//! ```nginx
 //! location /verify {
-//!# Only allow from derp servers
-//! allow 10.0.0.0/8;      # Internal network
-//! allow 192.168.0.0/16;  # Local network
-//! deny all;
-//!     allow 10.0.0.0/8;      # Internal network
-//! proxy_pass http://localhost:8080;
-//! }
-//!```
+//!     # only allow from derp servers
+//!     allow 10.0.0.0/8;      # internal network
+//!     allow 192.168.0.0/16;  # local network
+//!     deny all;
 //!     proxy_pass http://localhost:8080;
-//! ## Rate limiting
+//! }
 //! ```
-//!this endpoint is covered by the protocol route body limit (64KB)
-//! for additional protection, consider adding rate limiting at your
-//!reverse proxy layer
+//!
+//! ## rate limiting
+//!
 //! this endpoint is covered by the protocol route body limit (64kb).
 //! for additional protection, consider adding rate limiting at your
 //! reverse proxy layer.
@@ -69,13 +66,10 @@ pub struct VerifyResponse {
 
 /// post /verify - verify a derp client is registered.
 ///
-/// # Security
-/// that a client's NodeKey is registered with this control server.
-///this endpoint is **intentionally unauthenticated** for derp server
-/// compatibility. Protect it via network-layer controls (firewalls,
-///reverse proxy ACLs) rather than application-level authentication
-/// see module documentation for deployment recommendations
-/// compatibility. Protect it via network-layer controls (firewalls,
+/// # security
+///
+/// this endpoint is **intentionally unauthenticated** for derp server
+/// compatibility. protect it via network-layer controls (firewalls,
 /// reverse proxy ACLs) rather than application-level authentication.
 /// see module documentation for deployment recommendations.
 pub async fn verify(

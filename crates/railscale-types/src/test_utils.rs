@@ -9,10 +9,10 @@ use crate::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, Tag, Us
 
 /// builder for creating test [`node`] instances.
 ///
-/// # Example
+/// # example
 /// ```
 /// use railscale_types::test_utils::TestNodeBuilder;
-///.with_tags(vec!["tag:server".parse().unwrap()])
+///
 /// let node = TestNodeBuilder::new(1).build();
 /// let tagged = TestNodeBuilder::new(2)
 ///     .with_tags(vec!["tag:server".parse().unwrap()])
