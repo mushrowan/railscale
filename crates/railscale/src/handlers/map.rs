@@ -92,7 +92,7 @@ pub async fn map(
         Ok(streaming_response(state, node.node_key, compression).into_response())
     } else {
         // non-streaming mode: return single length-prefixed response
-        let response = build_map_response(&state, &req.node_key).await?;
+        let response = build_map_response(&state, &req.node_key, req.omit_peers).await?;
         // use length-prefixed framing - client expects 4-byte le size prefix
         let bytes = encode_length_prefixed(&response, &compression)
             .ok_or_else(|| super::ApiError::internal("failed to encode response"))?;
@@ -155,7 +155,8 @@ fn streaming_response(state: AppState, node_key: NodeKey, compression: Compressi
 
             match message_type {
                 StreamMessage::FullUpdate => {
-                    let response = match build_map_response(&state, &node_key).await {
+                    // streaming mode always sends full peer list
+                    let response = match build_map_response(&state, &node_key, false).await {
                         Ok(r) => r,
                         Err(_) => return None,
                     };
@@ -236,9 +237,13 @@ async fn wait_for_next_message(
 }
 
 /// build a mapresponse for the given node.
+///
+/// when `omit_peers` is true, skips expensive peer computation and returns
+/// only the node's own info. used for lightweight state-reporting requests.
 async fn build_map_response(
     state: &AppState,
     node_key: &NodeKey,
+    omit_peers: bool,
 ) -> Result<MapResponse, super::ApiError> {
     let node = state
         .db
@@ -246,6 +251,25 @@ async fn build_map_response(
         .await
         .map_internal()?
         .or_unauthorized("node not found")?;
+
+    // use shared derp map from state (generated once at startup)
+    let derp_map = state.derp_map.read().await.clone();
+    let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1);
+
+    // when omit_peers is set, skip expensive peer/filter/ssh computation
+    if omit_peers {
+        return Ok(MapResponse {
+            keep_alive: false,
+            node: Some(node_to_map_response_node(&node, home_derp)),
+            peers: vec![],
+            dns_config: crate::dns::generate_dns_config(&state.config),
+            derp_map: Some(derp_map),
+            packet_filter: vec![],
+            user_profiles: vec![],
+            control_time: Some(chrono::Utc::now().to_rfc3339()),
+            ssh_policy: None,
+        });
+    }
 
     let all_nodes = state.db.list_nodes().await.map_internal()?;
     let users = state.db.list_users().await.map_internal()?;
@@ -288,10 +312,6 @@ async fn build_map_response(
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);
 
-    // use shared derp map from state (generated once at startup)
-    let derp_map = state.derp_map.read().await.clone();
-    let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1);
-
     Ok(MapResponse {
         // keep_alive=false signals "this response has real data, process it"
         // keep_alive=true (only in MapResponse::keepalive()) signals "just a ping, skip processing"
@@ -313,6 +333,7 @@ async fn build_map_response(
 
 /// encode a mapresponse with a 4-byte little-endian length prefix.
 /// if compression is zstd, the json payload is zstd-compressed before framing.
+/// returns None if serialisation fails or payload exceeds u32::MAX bytes.
 fn encode_length_prefixed(response: &MapResponse, compression: &Compression) -> Option<Bytes> {
     let json_bytes = serde_json::to_vec(response).ok()?;
 
@@ -321,7 +342,8 @@ fn encode_length_prefixed(response: &MapResponse, compression: &Compression) -> 
         Compression::None => json_bytes,
     };
 
-    let len = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+    // reject payloads that exceed framing limit
+    let len = u32::try_from(payload.len()).ok()?;
 
     let mut body = Vec::with_capacity(4 + payload.len());
     body.extend_from_slice(&len.to_le_bytes());
