@@ -1,18 +1,14 @@
-//! bootstrap dns endpoint handler
+//! bootstrap dns endpoint handler.
 //!
 //! # security considerations
-//! is broken, allowing them to bootstrap DERP connections by directly connecting
+//!
 //! this endpoint is unauthenticated by design (clients need dns before they can
-//!authenticate). to mitigate abuse:
-//! # Security Considerations
-//!- dns lookups have a 5-second timeout to prevent slow loris attacks
+//! authenticate). to mitigate abuse:
+//!
+//! - dns lookups have a 5-second timeout to prevent slow loris attacks
 //! - results are cached for 60 seconds to avoid repeated lookups
-//! - concurrent resolution prevents sequential blocking
-//!- only hostnames from the configured derp map are resolved (not arbitrary input)
-//! - DNS lookups have a 5-second timeout to prevent slow loris attacks
-//! for additional protection, restrict this endpoint at the network layer
-//! - Concurrent resolution prevents sequential blocking
-//! - Only hostnames from the configured DERP map are resolved (not arbitrary input)
+//! - concurrent resolution is capped to prevent dns amplification
+//! - only hostnames from the configured derp map are resolved (not arbitrary input)
 //!
 //! for additional protection, restrict this endpoint at the network layer.
 
@@ -21,7 +17,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use axum::{Json, extract::State};
-use futures_util::stream::{FuturesUnordered, StreamExt};
+use futures_util::stream::StreamExt;
 use tokio::net::lookup_host;
 use tokio::time::timeout;
 
@@ -29,6 +25,9 @@ use crate::AppState;
 
 /// dns lookup timeout - prevents slow dns servers from blocking requests
 const DNS_LOOKUP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// max concurrent dns lookups - prevents dns amplification
+const MAX_CONCURRENT_LOOKUPS: usize = 10;
 
 /// get /bootstrap-dns - resolve derp hostnames for dns fallback.
 ///
@@ -62,10 +61,9 @@ pub async fn bootstrap_dns(State(state): State<AppState>) -> Json<HashMap<String
         }
     }
 
-    // resolve uncached hostnames concurrently with timeout
+    // resolve uncached hostnames with bounded concurrency
     if !to_resolve.is_empty() {
-        let futures: FuturesUnordered<_> = to_resolve
-            .into_iter()
+        let results: Vec<_> = futures_util::stream::iter(to_resolve)
             .map(|hostname| async move {
                 let addr_str = format!("{}:0", hostname);
                 let result = timeout(DNS_LOOKUP_TIMEOUT, lookup_host(&addr_str)).await;
@@ -73,25 +71,24 @@ pub async fn bootstrap_dns(State(state): State<AppState>) -> Json<HashMap<String
                 // process result immediately to avoid lifetime issues
                 let ips: Option<Vec<IpAddr>> = match result {
                     Ok(Ok(addrs)) => {
-                        let ips: Vec<IpAddr> = addrs
-                            .map(|addr: std::net::SocketAddr| addr.ip())
-                            .collect();
+                        let ips: Vec<IpAddr> =
+                            addrs.map(|addr: std::net::SocketAddr| addr.ip()).collect();
                         if ips.is_empty() { None } else { Some(ips) }
                     }
                     Ok(Err(e)) => {
-                        tracing::debug!(hostname = %hostname, error = %e, "failed to resolve DERP hostname");
+                        tracing::debug!(hostname = %hostname, error = %e, "dns lookup failed");
                         None
                     }
                     Err(_) => {
-                        tracing::debug!(hostname = %hostname, "DNS lookup timed out");
+                        tracing::debug!(hostname = %hostname, "dns lookup timed out");
                         None
                     }
                 };
                 (hostname, ips)
             })
-            .collect();
-
-        let results: Vec<_> = futures.collect().await;
+            .buffer_unordered(MAX_CONCURRENT_LOOKUPS)
+            .collect()
+            .await;
 
         for (hostname, ips) in results {
             if let Some(ips) = ips {
