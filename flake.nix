@@ -116,9 +116,14 @@
         };
 
       # Flake-wide outputs (not per-system)
-      flake = {
+      flake = self: {
         nixosModules = rec {
-          railscale = ./nix/module.nix;
+          railscale =
+            { pkgs, ... }:
+            {
+              imports = [ ./nix/module.nix ];
+              services.railscale.package = self.packages.${pkgs.stdenv.hostPlatform.system}.railscale;
+            };
           default = railscale;
         };
       };
