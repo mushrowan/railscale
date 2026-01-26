@@ -58,12 +58,12 @@ pub struct Config {
     ///
     /// when false (default), `/machine/register` requires a valid noise handshake
     /// context which cryptographically binds the machine key to the request.
+    /// **DANGEROUS**: allow registration without noise protocol.
     ///
     /// when true, registration without noise context is allowed with a zero
-    /// machine key. This is insecure and should only be used for testing.
+    /// machine key. this bypasses cryptographic binding and may allow spoofing.
     ///
-    /// **Security Warning**: Setting this to true allows nodes to register
-    /// without cryptographic proof of machine identity.
+    /// **NEVER enable in production** - only for testing without real clients.
     #[serde(default)]
     pub allow_non_noise_registration: bool,
 }

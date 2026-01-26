@@ -344,11 +344,13 @@ impl ServeCommand {
 
         // security warning for insecure configuration
         if config.allow_non_noise_registration {
-            warn!("SECURITY WARNING: allow_non_noise_registration=true is enabled!");
-            warn!(
-                "This bypasses cryptographic binding between registration requests and machine keys."
-            );
-            warn!("Only use this setting in test environments, never in production.");
+            warn!("============================================================");
+            warn!("SECURITY WARNING: allow_non_noise_registration is enabled!");
+            warn!("============================================================");
+            warn!("this bypasses cryptographic binding between registration");
+            warn!("requests and machine keys, allowing potential spoofing.");
+            warn!("ONLY use this in test environments, NEVER in production.");
+            warn!("============================================================");
         }
 
         // ensure parent directory exists for sqlite databases
