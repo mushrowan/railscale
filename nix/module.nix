@@ -13,14 +13,12 @@ let
   settingsFormat = pkgs.formats.toml { };
 
   # Filter out null values and NixOS-specific options from settings before generating TOML
-  # - client_secret_path: handled via environment variable
   # - openFirewall: NixOS-specific, controls firewall module
   filterSettings =
     settings:
     lib.filterAttrsRecursive (
       n: v:
       v != null
-      && n != "client_secret_path"
       && n != "openFirewall"
       && !(lib.isList v && v == [ ])
       && !(lib.isAttrs v && v == { })
@@ -543,10 +541,6 @@ in
       wantedBy = [ "multi-user.target" ];
 
       script = ''
-        ${lib.optionalString (cfg.settings.oidc.client_secret_path or null != null) ''
-          export RAILSCALE_OIDC_CLIENT_SECRET="$(cat ${lib.escapeShellArg cfg.settings.oidc.client_secret_path})"
-        ''}
-
         exec ${lib.getExe cfg.package} serve \
           --config ${configFile} \
           --admin-socket ${cfg.adminSocket.path} \
