@@ -18,10 +18,7 @@ let
     settings:
     lib.filterAttrsRecursive (
       n: v:
-      v != null
-      && n != "openFirewall"
-      && !(lib.isList v && v == [ ])
-      && !(lib.isAttrs v && v == { })
+      v != null && n != "openFirewall" && !(lib.isList v && v == [ ]) && !(lib.isAttrs v && v == { })
     ) settings;
 
   configFile = settingsFormat.generate "config.toml" (filterSettings cfg.settings);
