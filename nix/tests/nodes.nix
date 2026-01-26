@@ -41,6 +41,15 @@ in
             ip = [ "*" ];
           }
         ];
+        # SSH policy: same-user devices can SSH to each other (except root)
+        ssh = [
+          {
+            action = "accept";
+            src = [ "autogroup:member" ];
+            dst = [ "autogroup:self" ];
+            users = [ "autogroup:nonroot" ];
+          }
+        ];
       };
 
       services.railscale = {

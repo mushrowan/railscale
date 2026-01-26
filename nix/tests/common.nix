@@ -43,6 +43,23 @@ in
       systemd.services.tailscaled.environment = commonClientEnv;
 
       environment.systemPackages = [ pkgs.tailscale ] ++ extraPackages;
+
+      # enable openssh for tailscale ssh tests
+      services.openssh = {
+        enable = true;
+        settings = {
+          PermitRootLogin = "no";
+          PasswordAuthentication = false;
+        };
+      };
+
+      # test user for ssh tests (non-root, as per autogroup:nonroot policy)
+      users.users.testuser = {
+        isNormalUser = true;
+        home = "/home/testuser";
+        # empty password for testing - ssh key auth will be used via tailscale ssh
+        initialPassword = "";
+      };
     };
 
   # Base server settings for embedded DERP

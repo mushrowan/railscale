@@ -45,7 +45,7 @@ def connect_client(client, key, hostname, expect_success=True):
     )
     time.sleep(2)  # Give it time to connect
     if expect_success:
-        # Wait a bit more for registration to complete
+        # wait a bit more for registration to complete
         time.sleep(3)
 
 
@@ -209,3 +209,51 @@ def create_api_key_for_user(user_id, name="test-api-key"):
     """Create an API key via CLI and return the full key"""
     output = railscale(f"apikeys create -u {user_id} --name '{name}'")
     return extract_key(output)
+
+
+# ============================================================================
+# ssh test helpers
+# ============================================================================
+
+def connect_client_with_ssh(client, key, hostname, expect_success=True):
+    """Connect a tailscale client with SSH enabled"""
+    client.execute(
+        f"timeout 15 tailscale up --login-server={SERVER_URL} "
+        f"--authkey={key} --hostname={hostname} --ssh 2>&1 || true"
+    )
+    time.sleep(2)  # Give it time to connect
+    if expect_success:
+        # Wait a bit more for registration to complete
+        time.sleep(3)
+
+
+def try_ssh(src_client, dst_ip, user, timeout=10):
+    """
+    Attempt SSH connection from src_client to dst_ip as user.
+    
+    Returns tuple (success: bool, output: str)
+    - success: True if SSH connection succeeded (exit code 0)
+    - output: Command output/error message
+    
+    Uses Tailscale SSH proxy (port 22 via tailscale interface).
+    The command runs 'echo SUCCESS' to verify actual shell access.
+    """
+    # use a short connection timeout and disable host key checking for tests
+    ssh_opts = "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5"
+    cmd = f"timeout {timeout} ssh {ssh_opts} {user}@{dst_ip} 'echo SUCCESS' 2>&1"
+    result = src_client.execute(cmd)
+    exit_code = result[0]
+    output = result[1].strip() if result[1] else ""
+    return (exit_code == 0 and "SUCCESS" in output, output)
+
+
+def assert_ssh_works(src_client, dst_ip, user, msg=""):
+    """Assert that SSH connection succeeds"""
+    success, output = try_ssh(src_client, dst_ip, user)
+    assert success, f"SSH should succeed {msg}: {output}"
+
+
+def assert_ssh_blocked(src_client, dst_ip, user, msg=""):
+    """Assert that SSH connection is blocked/denied"""
+    success, output = try_ssh(src_client, dst_ip, user)
+    assert not success, f"SSH should be blocked {msg}: {output}"
