@@ -117,7 +117,8 @@ pub struct SetTagsResponse {
 /// request for setting approved routes.
 #[derive(Debug, Deserialize)]
 pub struct SetRoutesRequest {
-    pub routes: Vec<String>,
+    /// routes validated as CIDR during deserialization.
+    pub routes: Vec<IpNet>,
 }
 
 /// response for set routes endpoint.
@@ -345,6 +346,8 @@ async fn set_routes(
 ) -> Result<Json<SetRoutesResponse>, ApiError> {
     let node_id = NodeId(id);
 
+    // routes validated as CIDR during deserialization
+
     let mut node = state
         .db
         .get_node(node_id)
@@ -352,17 +355,7 @@ async fn set_routes(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    // parse routes
-    let mut routes = Vec::new();
-    for route_str in &req.routes {
-        let route: IpNet = route_str.parse().map_err(|e| {
-            tracing::warn!("Invalid route submitted: '{}': {}", route_str, e);
-            ApiError::bad_request("invalid CIDR route format")
-        })?;
-        routes.push(route);
-    }
-
-    node.approved_routes = routes;
+    node.approved_routes = req.routes;
     let node = state
         .db
         .update_node(&node)
