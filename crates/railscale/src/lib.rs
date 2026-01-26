@@ -417,16 +417,9 @@ fn build_api_router(state: &AppState) -> Router {
 
     // apply rate limiting if enabled
     let router = if state.config.api.rate_limit_enabled {
-        // convert per-minute rate to per-second (gcra algorithm works in seconds)
-        let requests_per_minute = state.config.api.rate_limit_per_minute;
-        let replenish_interval_ms = if requests_per_minute > 0 {
-            60_000 / requests_per_minute as u64
-        } else {
-            1000 // Default to 1 request/second if somehow 0
-        };
-
-        // allow burst of ~10 seconds worth of requests, capped at 50
-        let burst_size = (requests_per_minute / 6).clamp(5, 50);
+        let params = rate_limit::RateLimitParams::from_requests_per_minute(
+            state.config.api.rate_limit_per_minute,
+        );
 
         // use proxy-aware key extractor if behind a reverse proxy
         if state.config.api.behind_proxy {
@@ -434,20 +427,20 @@ fn build_api_router(state: &AppState) -> Router {
                 rate_limit::TrustedProxyKeyExtractor::new(&state.config.api.trusted_proxies);
 
             let governor_conf = GovernorConfigBuilder::default()
-                .per_millisecond(replenish_interval_ms)
-                .burst_size(burst_size)
+                .per_millisecond(params.replenish_interval_ms)
+                .burst_size(params.burst_size)
                 .key_extractor(key_extractor)
                 .use_headers()
                 .finish()
                 .expect("valid governor config");
 
-            // start background task to clean up rate limiter storage
-            let governor_limiter = governor_conf.limiter().clone();
+            // cleanup task for rate limiter storage
+            let limiter = governor_conf.limiter().clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(60));
                 loop {
                     interval.tick().await;
-                    governor_limiter.retain_recent();
+                    limiter.retain_recent();
                 }
             });
 
@@ -458,19 +451,19 @@ fn build_api_router(state: &AppState) -> Router {
         } else {
             // direct connection mode - use peer ip directly
             let governor_conf = GovernorConfigBuilder::default()
-                .per_millisecond(replenish_interval_ms)
-                .burst_size(burst_size)
+                .per_millisecond(params.replenish_interval_ms)
+                .burst_size(params.burst_size)
                 .use_headers()
                 .finish()
                 .expect("valid governor config");
 
-            // start background task to clean up rate limiter storage
-            let governor_limiter = governor_conf.limiter().clone();
+            // cleanup task for rate limiter storage
+            let limiter = governor_conf.limiter().clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(60));
                 loop {
                     interval.tick().await;
-                    governor_limiter.retain_recent();
+                    limiter.retain_recent();
                 }
             });
 

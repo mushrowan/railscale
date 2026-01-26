@@ -1,7 +1,7 @@
-//! rate limiting utilities with proxy-aware IP extraction
+//! rate limiting utilities with proxy-aware IP extraction.
 //!
 //! this module provides a secure key extractor for rate limiting that
-//! properly handles X-Forwarded-For headers when behind a trusted proxy
+//! properly handles X-Forwarded-For headers when behind a trusted proxy.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -10,6 +10,28 @@ use axum::extract::ConnectInfo;
 use axum::http::Request;
 use ipnet::IpNet;
 use tower_governor::key_extractor::KeyExtractor;
+
+/// rate limit parameters computed from requests-per-minute config.
+pub struct RateLimitParams {
+    /// interval between token replenishments in milliseconds.
+    pub replenish_interval_ms: u64,
+    /// burst size (max tokens).
+    pub burst_size: u32,
+}
+
+impl RateLimitParams {
+    /// compute rate limit params from requests-per-minute.
+    ///
+    /// burst is ~10 seconds worth of requests, capped at 5-50.
+    pub fn from_requests_per_minute(rpm: u32) -> Self {
+        let replenish_interval_ms = if rpm > 0 { 60_000 / rpm as u64 } else { 1000 };
+        let burst_size = (rpm / 6).clamp(5, 50);
+        Self {
+            replenish_interval_ms,
+            burst_size,
+        }
+    }
+}
 
 /// a rate limit key extractor that securely handles reverse proxy setups
 ///
