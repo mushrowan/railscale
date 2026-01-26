@@ -17,8 +17,8 @@ base64 = "0.22"
 hex = "0.4"
 rand = "0.9"
 sha2 = "0.10"
-subtle = "2.5"
+subtle = "2.6"
 zeroize = { version = "1.8", features = ["derive"] }
 
 [dev-dependencies]
-proptest = "1.5"
+proptest = "1.9"

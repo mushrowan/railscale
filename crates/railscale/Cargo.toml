@@ -86,7 +86,7 @@ tower_governor = { version = "0.8", default-features = false, features = [
 ] }
 
 # Rate limiting for DERP/STUN
-governor = "0.8"
+governor = "0.10"
 
 [dev-dependencies]
 tower = "0.5"

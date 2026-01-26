@@ -16,4 +16,4 @@ humantime-serde = { workspace = true }
 
 [dev-dependencies]
 chrono = { workspace = true }
-proptest = "1.5"
+proptest = "1.9"

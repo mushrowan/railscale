@@ -16,4 +16,4 @@ chrono = { workspace = true }
 snow = "0.10"
 
 [dev-dependencies]
-proptest = "1.5"
+proptest = "1.9"
