@@ -90,9 +90,9 @@ pub struct CreatePreAuthKeyRequest {
     #[serde(default)]
     pub expiration: Option<String>,
     /// tags to apply to nodes registered with this key.
-    /// validated during deserialization via the tag type.
+    /// format and count validated by Tags newtype during deserialization.
     #[serde(default, rename = "aclTags")]
-    pub acl_tags: Vec<railscale_types::Tag>,
+    pub acl_tags: railscale_types::Tags,
 }
 
 /// response for create preauth key endpoint.
@@ -179,14 +179,7 @@ async fn create_preauth_key(
         return Err(ApiError::not_found(format!("user {} not found", req.user)));
     }
 
-    // tags are validated during deserialization via the tag type
-    // just check the count limit
-    if req.acl_tags.len() > railscale_types::MAX_TAGS {
-        return Err(ApiError::bad_request(format!(
-            "too many tags (max {})",
-            railscale_types::MAX_TAGS
-        )));
-    }
+    // tags validated by Tags newtype during deserialization
 
     // parse expiration or default to 90 days
     let expiration = if let Some(exp_str) = req.expiration {
@@ -205,7 +198,7 @@ async fn create_preauth_key(
     let mut key = PreAuthKey::from_token(0, &token, user_id);
     key.reusable = req.reusable;
     key.ephemeral = req.ephemeral;
-    key.tags = req.acl_tags;
+    key.tags = req.acl_tags.into_inner();
     key.expiration = expiration;
 
     let key = state

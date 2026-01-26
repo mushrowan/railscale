@@ -144,6 +144,8 @@ pub enum TagError {
     NameTooLong(usize),
     /// tag name contains invalid characters.
     InvalidCharacters,
+    /// too many tags in collection.
+    TooManyTags(usize),
 }
 
 impl fmt::Display for TagError {
@@ -164,11 +166,105 @@ impl fmt::Display for TagError {
                     "tag name must be lowercase alphanumeric with hyphens or underscores"
                 )
             }
+            TagError::TooManyTags(count) => {
+                write!(f, "too many tags ({} provided, max {})", count, MAX_TAGS)
+            }
         }
     }
 }
 
 impl std::error::Error for TagError {}
+
+/// a validated collection of tags with count limit enforcement.
+///
+/// guarantees that:
+/// - all tags are valid (via `Tag` newtype)
+/// - count does not exceed `MAX_TAGS`
+///
+/// use this in api request types to avoid manual validation.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Tags(Vec<Tag>);
+
+impl Tags {
+    /// create a new tags collection, validating the count.
+    pub fn new(tags: Vec<Tag>) -> Result<Self, TagError> {
+        if tags.len() > MAX_TAGS {
+            return Err(TagError::TooManyTags(tags.len()));
+        }
+        Ok(Self(tags))
+    }
+
+    /// get the inner vec.
+    pub fn into_inner(self) -> Vec<Tag> {
+        self.0
+    }
+
+    /// get a reference to the inner vec.
+    pub fn as_slice(&self) -> &[Tag] {
+        &self.0
+    }
+
+    /// check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// get the count.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+impl AsRef<[Tag]> for Tags {
+    fn as_ref(&self) -> &[Tag] {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for Tags {
+    type Target = [Tag];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl IntoIterator for Tags {
+    type Item = Tag;
+    type IntoIter = std::vec::IntoIter<Tag>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a Tags {
+    type Item = &'a Tag;
+    type IntoIter = std::slice::Iter<'a, Tag>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'de> Deserialize<'de> for Tags {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let tags = Vec::<Tag>::deserialize(deserializer)?;
+        Tags::new(tags).map_err(serde::de::Error::custom)
+    }
+}
+
+impl Serialize for Tags {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.0.serialize(serializer)
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -227,6 +323,54 @@ mod tests {
     #[test]
     fn test_serde_invalid() {
         let result: Result<Tag, _> = serde_json::from_str("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tags_valid() {
+        let tags = Tags::new(vec![
+            Tag::new("tag:web").unwrap(),
+            Tag::new("tag:prod").unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(tags.len(), 2);
+        assert!(!tags.is_empty());
+    }
+
+    #[test]
+    fn test_tags_empty() {
+        let tags = Tags::new(vec![]).unwrap();
+        assert!(tags.is_empty());
+        assert_eq!(tags.len(), 0);
+    }
+
+    #[test]
+    fn test_tags_too_many() {
+        let many_tags: Vec<Tag> = (0..=MAX_TAGS)
+            .map(|i| Tag::new(format!("tag:t{}", i)).unwrap())
+            .collect();
+        let result = Tags::new(many_tags);
+        assert!(matches!(result.unwrap_err(), TagError::TooManyTags(_)));
+    }
+
+    #[test]
+    fn test_tags_serde_roundtrip() {
+        let tags = Tags::new(vec![
+            Tag::new("tag:web").unwrap(),
+            Tag::new("tag:prod").unwrap(),
+        ])
+        .unwrap();
+        let json = serde_json::to_string(&tags).unwrap();
+        let parsed: Tags = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, tags);
+    }
+
+    #[test]
+    fn test_tags_serde_too_many_rejected() {
+        // create json with too many tags
+        let many: Vec<String> = (0..=MAX_TAGS).map(|i| format!("tag:t{}", i)).collect();
+        let json = serde_json::to_string(&many).unwrap();
+        let result: Result<Tags, _> = serde_json::from_str(&json);
         assert!(result.is_err());
     }
 }

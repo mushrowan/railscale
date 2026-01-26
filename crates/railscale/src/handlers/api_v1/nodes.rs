@@ -104,8 +104,8 @@ pub struct ExpireNodeRequest {
 /// request for setting tags.
 #[derive(Debug, Deserialize)]
 pub struct SetTagsRequest {
-    /// tags are validated during deserialization via the tag type.
-    pub tags: Vec<railscale_types::Tag>,
+    /// tags validated during deserialization (format and count).
+    pub tags: railscale_types::Tags,
 }
 
 /// response for set tags endpoint.
@@ -303,13 +303,7 @@ async fn set_tags(
 ) -> Result<Json<SetTagsResponse>, ApiError> {
     let node_id = NodeId(id);
 
-    // check tag count limit (individual tags validated by tag type during deserialization)
-    if req.tags.len() > railscale_types::MAX_TAGS {
-        return Err(ApiError::bad_request(format!(
-            "too many tags (max {})",
-            railscale_types::MAX_TAGS
-        )));
-    }
+    // tag format and count validated by Tags newtype during deserialization
 
     let mut node = state
         .db
@@ -325,7 +319,7 @@ async fn set_tags(
         ));
     }
 
-    node.tags = req.tags;
+    node.tags = req.tags.into_inner();
     let node = state
         .db
         .update_node(&node)

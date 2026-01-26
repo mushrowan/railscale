@@ -44,7 +44,7 @@ pub use preauth_key::PreAuthKey;
 pub use preauth_key_token::{
     PREAUTH_KEY_HEX_LEN, PREAUTH_KEY_PREFIX, PreAuthKeyToken, PreAuthKeyTokenError,
 };
-pub use tag::{MAX_TAG_NAME_LEN, MAX_TAGS, Tag, TagError};
+pub use tag::{MAX_TAG_NAME_LEN, MAX_TAGS, Tag, TagError, Tags};
 pub use user::{User, UserId};
 pub use username::{MAX_USERNAME_LEN, Username, UsernameError};
 
