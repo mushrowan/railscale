@@ -45,9 +45,7 @@ expand-tilde = "0.6"
 # OIDC
 openidconnect = { workspace = true }
 moka = { workspace = true }
-axum-extra = { version = "0.12", features = ["cookie"] }
 secrecy = { workspace = true }
-rand = "0.9"
 
 # Streaming
 futures-util = "0.3"
