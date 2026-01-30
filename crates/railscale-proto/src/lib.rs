@@ -22,7 +22,38 @@ pub use map_request::{
 pub use noise::{NoiseHandshake, NoiseTransport, generate_keypair};
 pub use snow::Keypair;
 pub use ssh::{SshAction, SshPolicy, SshPrincipal, SshRecorderFailureAction, SshRule};
-pub use tka::TkaInfo;
+pub use tka::{
+    TkaBootstrapRequest, TkaBootstrapResponse, TkaDisableRequest, TkaDisableResponse, TkaInfo,
+    TkaInitBeginRequest, TkaInitBeginResponse, TkaInitFinishRequest, TkaInitFinishResponse,
+    TkaSignInfo, TkaSubmitSignatureRequest, TkaSubmitSignatureResponse, TkaSyncOfferRequest,
+    TkaSyncOfferResponse, TkaSyncSendRequest, TkaSyncSendResponse,
+};
+
+/// serde helper for base64-encoded byte vectors.
+pub mod base64_bytes {
+    use base64::prelude::*;
+    use serde::{Deserialize, Deserializer, Serializer, de};
+
+    /// serialize bytes as base64.
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&BASE64_STANDARD.encode(bytes))
+    }
+
+    /// deserialize base64 to bytes.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        if s.is_empty() {
+            return Ok(Vec::new());
+        }
+        BASE64_STANDARD.decode(&s).map_err(de::Error::custom)
+    }
+}
 
 /// result type for protocol operations.
 pub type Result<T> = std::result::Result<T, Error>;
