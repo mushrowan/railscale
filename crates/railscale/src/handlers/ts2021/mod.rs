@@ -291,6 +291,14 @@ async fn handle_ts2021_connection(
     let router: Router = Router::new()
         .route("/machine/register", post(super::register))
         .route("/machine/map", post(super::map))
+        // tka (tailnet lock) endpoints
+        .route("/machine/tka/init/begin", post(super::tka_init_begin))
+        .route("/machine/tka/init/finish", post(super::tka_init_finish))
+        .route("/machine/tka/bootstrap", post(super::tka_bootstrap))
+        .route("/machine/tka/sync/offer", post(super::tka_sync_offer))
+        .route("/machine/tka/sync/send", post(super::tka_sync_send))
+        .route("/machine/tka/disable", post(super::tka_disable))
+        .route("/machine/tka/sign", post(super::tka_sign))
         .with_state(state);
 
     // run http/2 server over the encrypted stream
@@ -443,6 +451,14 @@ async fn handle_ts2021_http_connection(
     let router: Router = Router::new()
         .route("/machine/register", post(super::register))
         .route("/machine/map", post(super::map))
+        // tka (tailnet lock) endpoints
+        .route("/machine/tka/init/begin", post(super::tka_init_begin))
+        .route("/machine/tka/init/finish", post(super::tka_init_finish))
+        .route("/machine/tka/bootstrap", post(super::tka_bootstrap))
+        .route("/machine/tka/sync/offer", post(super::tka_sync_offer))
+        .route("/machine/tka/sync/send", post(super::tka_sync_send))
+        .route("/machine/tka/disable", post(super::tka_disable))
+        .route("/machine/tka/sign", post(super::tka_sign))
         .with_state(state);
 
     // run http/2 server over the encrypted stream

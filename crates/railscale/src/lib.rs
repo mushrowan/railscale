@@ -369,6 +369,14 @@ fn build_protocol_router(state: &AppState) -> Router {
         )
         .route("/machine/register", post(handlers::register))
         .route("/machine/map", post(handlers::map))
+        // tka (tailnet lock) endpoints
+        .route("/machine/tka/init/begin", post(handlers::tka_init_begin))
+        .route("/machine/tka/init/finish", post(handlers::tka_init_finish))
+        .route("/machine/tka/bootstrap", post(handlers::tka_bootstrap))
+        .route("/machine/tka/sync/offer", post(handlers::tka_sync_offer))
+        .route("/machine/tka/sync/send", post(handlers::tka_sync_send))
+        .route("/machine/tka/disable", post(handlers::tka_disable))
+        .route("/machine/tka/sign", post(handlers::tka_sign))
         .layer(DefaultBodyLimit::max(64 * 1024));
 
     let mut router = Router::new()

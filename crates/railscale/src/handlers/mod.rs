@@ -10,6 +10,7 @@ mod machine_key_context;
 mod map;
 pub mod oidc;
 mod register;
+mod tka;
 mod ts2021;
 mod verify;
 mod version;
@@ -22,6 +23,10 @@ pub use key::key;
 pub use machine_key_context::{MachineKeyContext, OptionalMachineKeyContext};
 pub use map::map;
 pub use register::{RegisterResponse, register};
+pub use tka::{
+    tka_bootstrap, tka_disable, tka_init_begin, tka_init_finish, tka_sign, tka_sync_offer,
+    tka_sync_send,
+};
 pub use ts2021::{ts2021, ts2021_http_upgrade};
 pub use verify::verify;
 pub use version::version;
