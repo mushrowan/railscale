@@ -12,6 +12,7 @@ serde_json = { workspace = true }
 secrecy = { workspace = true }
 zeroize = { version = "1.8", features = ["derive"] }
 hex = "0.4"
+base64 = { workspace = true }
 
 # crypto
 blake2 = "0.10"
