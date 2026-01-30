@@ -5,6 +5,7 @@
 //! - TKA data structures (AUM, NodeKeySignature, etc.)
 //! - signature verification and state management
 
+pub mod aum;
 pub mod aum_hash;
 pub mod disablement;
 pub mod error;
@@ -13,7 +14,9 @@ pub mod key_id;
 pub mod marshaled;
 pub mod nl_key;
 pub mod signature;
+pub mod state;
 
+pub use aum::{Aum, AumKind, AumSignature};
 pub use aum_hash::AumHash;
 pub use disablement::DisablementSecret;
 pub use error::Error;
@@ -22,6 +25,7 @@ pub use key_id::TkaKeyId;
 pub use marshaled::{MarshaledAum, MarshaledSignature};
 pub use nl_key::{NlPrivateKey, NlPublicKey};
 pub use signature::{NodeKeySignature, SigKind};
+pub use state::State;
 
 /// result type for TKA operations.
 pub type Result<T> = std::result::Result<T, Error>;
