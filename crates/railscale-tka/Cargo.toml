@@ -18,6 +18,7 @@ base64 = { workspace = true }
 blake2 = "0.10"
 ed25519-consensus = "2.1"
 rand = "0.9"
+subtle = "2.6"
 
 # cbor with integer keys
 minicbor = { version = "0.25", features = ["derive", "alloc"] }
