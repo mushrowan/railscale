@@ -24,4 +24,16 @@ pub enum Error {
     /// signature verification failed
     #[error("signature verification failed")]
     InvalidSignature,
+
+    /// AUM chain is invalid (prev_aum_hash doesn't match)
+    #[error("invalid AUM chain: prev_aum_hash doesn't match current head")]
+    InvalidAumChain,
+
+    /// missing required field in AUM
+    #[error("missing required AUM field: {0}")]
+    MissingAumField(&'static str),
+
+    /// AUM has no signatures
+    #[error("AUM has no signatures")]
+    MissingSignature,
 }

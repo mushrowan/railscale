@@ -7,6 +7,7 @@
 
 pub mod aum;
 pub mod aum_hash;
+pub mod authority;
 pub mod disablement;
 pub mod error;
 pub mod key;
@@ -18,6 +19,7 @@ pub mod state;
 
 pub use aum::{Aum, AumKind, AumSignature};
 pub use aum_hash::AumHash;
+pub use authority::Authority;
 pub use disablement::DisablementSecret;
 pub use error::Error;
 pub use key::{Key, KeyKind};
