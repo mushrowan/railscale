@@ -14,7 +14,7 @@ use railscale_db::Database;
 use railscale_proto::{
     TkaBootstrapRequest, TkaBootstrapResponse, TkaDisableRequest, TkaDisableResponse,
     TkaInitBeginRequest, TkaInitBeginResponse, TkaInitFinishRequest, TkaInitFinishResponse,
-    TkaSubmitSignatureRequest, TkaSubmitSignatureResponse, TkaSyncOfferRequest,
+    TkaSignInfo, TkaSubmitSignatureRequest, TkaSubmitSignatureResponse, TkaSyncOfferRequest,
     TkaSyncOfferResponse, TkaSyncSendRequest, TkaSyncSendResponse,
 };
 use tracing::{debug, info};
@@ -26,16 +26,84 @@ use crate::AppState;
 /// start tka initialisation by submitting genesis aum.
 /// returns list of nodes that need signatures.
 pub async fn tka_init_begin(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<TkaInitBeginRequest>,
 ) -> impl IntoResponse {
-    info!(
+    debug!(
         node_key = ?req.node_key,
-        "tka init begin request (not yet implemented)"
+        genesis_len = req.genesis_aum.as_bytes().len(),
+        "tka init begin request"
+    );
+
+    // verify requesting node exists
+    let _node = match state.db.get_node_by_node_key(&req.node_key).await {
+        Ok(Some(n)) => n,
+        Ok(None) => {
+            info!(node_key = ?req.node_key, "tka init begin: node not found");
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(TkaInitBeginResponse::default()),
+            );
+        }
+        Err(e) => {
+            info!(error = %e, "tka init begin: db error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaInitBeginResponse::default()),
+            );
+        }
+    };
+
+    // store genesis AUM in database (not enabled yet, just storing)
+    let now = chrono::Utc::now();
+    let tka_state = railscale_db::TkaState {
+        id: 0,
+        enabled: false, // not enabled until init_finish
+        head: None,
+        state_checkpoint: None,
+        disablement_secrets: None,
+        genesis_aum: Some(req.genesis_aum.as_bytes().to_vec()),
+        created_at: now,
+        updated_at: now,
+    };
+
+    if let Err(e) = state.db.upsert_tka_state(&tka_state).await {
+        info!(error = %e, "tka init begin: failed to store genesis");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TkaInitBeginResponse::default()),
+        );
+    }
+
+    // get all nodes that need signatures
+    let nodes = match state.db.list_nodes().await {
+        Ok(n) => n,
+        Err(e) => {
+            info!(error = %e, "tka init begin: failed to list nodes");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaInitBeginResponse::default()),
+            );
+        }
+    };
+
+    // convert to TkaSignInfo
+    let need_signatures: Vec<TkaSignInfo> = nodes
+        .into_iter()
+        .map(|n| TkaSignInfo {
+            node_id: n.id,
+            node_public: n.node_key,
+            rotation_pubkey: vec![], // TODO: rotation keys not implemented
+        })
+        .collect();
+
+    debug!(
+        nodes = need_signatures.len(),
+        "tka init begin: returning nodes needing signatures"
     );
     (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(TkaInitBeginResponse::default()),
+        StatusCode::OK,
+        Json(TkaInitBeginResponse { need_signatures }),
     )
 }
 
@@ -200,9 +268,75 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tka_init_begin_returns_not_implemented() {
+    async fn tka_init_begin_returns_nodes_needing_signatures() {
+        use railscale_db::Database;
+        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
+
+        // create a user and node
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+        };
+        let node = db.create_node(&node).await.unwrap();
+
+        // create a valid genesis AUM
+        let nl_private = NlPrivateKey::generate();
+        let nl_public = nl_private.public_key();
+        let key = Key {
+            kind: KeyKind::Ed25519,
+            public: nl_public.as_bytes().to_vec(),
+            votes: 1,
+            meta: None,
+        };
+        let key_id = key.id().unwrap();
+
+        let genesis = Aum {
+            message_kind: AumKind::AddKey,
+            prev_aum_hash: None,
+            key: Some(key),
+            key_id: None,
+            state: None,
+            votes: None,
+            meta: None,
+            signatures: vec![],
+        };
+        let hash = genesis.hash().unwrap();
+        let sig = nl_private.sign(hash.as_bytes());
+        let signed_genesis = Aum {
+            signatures: vec![AumSignature {
+                key_id: key_id.as_bytes().to_vec(),
+                signature: sig.to_vec(),
+            }],
+            ..genesis
+        };
+        let genesis_bytes = signed_genesis.to_cbor().unwrap();
 
         let config = railscale_types::Config::default();
         let app = crate::create_app(
@@ -217,8 +351,8 @@ mod tests {
 
         let req = TkaInitBeginRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0u8; 32]),
-            genesis_aum: Default::default(),
+            node_key: node_key.clone(),
+            genesis_aum: genesis_bytes.into(),
         };
 
         let response = app
@@ -233,7 +367,17 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: TkaInitBeginResponse = serde_json::from_slice(&body).unwrap();
+
+        // should return the node needing a signature
+        assert_eq!(resp.need_signatures.len(), 1);
+        assert_eq!(resp.need_signatures[0].node_id, node.id);
+        assert_eq!(resp.need_signatures[0].node_public, node_key);
     }
 
     #[tokio::test]

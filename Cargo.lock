@@ -3049,6 +3049,7 @@ dependencies = [
  "railscale-db",
  "railscale-grants",
  "railscale-proto",
+ "railscale-tka",
  "railscale-types",
  "rcgen",
  "reqwest 0.13.1",

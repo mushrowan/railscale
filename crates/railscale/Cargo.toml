@@ -106,6 +106,8 @@ secrecy = { workspace = true }
 # Crypto crates for Noise handshake testing
 snow = "0.10"
 zstd = "0.13"
+# TKA testing
+railscale-tka = { workspace = true }
 
 [build-dependencies]
 chrono = "0.4"
