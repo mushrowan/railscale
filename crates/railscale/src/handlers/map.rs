@@ -13,7 +13,7 @@ use axum::{
 use bytes::Bytes;
 use futures_util::stream::{self, StreamExt};
 use railscale_db::Database;
-use railscale_proto::{MapRequest, MapResponse, MapResponseNode, UserProfile};
+use railscale_proto::{MapRequest, MapResponse, MapResponseNode, TkaInfo, UserProfile};
 use railscale_types::{Node, NodeKey, UserId};
 use tokio::sync::broadcast;
 
@@ -256,6 +256,9 @@ async fn build_map_response(
     let derp_map = state.derp_map.read().await.clone();
     let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1);
 
+    // fetch tka info from database
+    let tka_info = get_tka_info(&state.db).await;
+
     // when omit_peers is set, skip expensive peer/filter/ssh computation
     if omit_peers {
         return Ok(MapResponse {
@@ -268,7 +271,7 @@ async fn build_map_response(
             user_profiles: vec![],
             control_time: Some(chrono::Utc::now().to_rfc3339()),
             ssh_policy: None,
-            tka_info: None,
+            tka_info,
         });
     }
 
@@ -329,7 +332,7 @@ async fn build_map_response(
         user_profiles,
         control_time: Some(chrono::Utc::now().to_rfc3339()),
         ssh_policy,
-        tka_info: None,
+        tka_info,
     })
 }
 
@@ -405,5 +408,18 @@ fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
         user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).0,
         // nodes in the database that respond to map requests are authorized
         machine_authorized: true,
+    }
+}
+
+/// fetch tka info from the database.
+///
+/// returns `Some(TkaInfo)` if tka is enabled with a head hash,
+/// `None` otherwise (tka not enabled or no state).
+async fn get_tka_info(db: &impl Database) -> Option<TkaInfo> {
+    let tka_state = db.get_tka_state().await.ok()??;
+    if tka_state.enabled {
+        tka_state.head.map(TkaInfo::new)
+    } else {
+        None
     }
 }

@@ -259,3 +259,82 @@ async fn test_map_response_node_includes_machine_authorized() {
         "MachineAuthorized should be true for registered nodes"
     );
 }
+
+#[tokio::test]
+async fn test_map_response_includes_tka_info_when_enabled() {
+    use railscale_db::TkaState;
+
+    let fixture = MapTestFixture::new().await;
+
+    // enable tka with a head hash
+    let tka_state = TkaState {
+        id: 0,
+        enabled: true,
+        head: Some("abc123deadbeef".to_string()),
+        state_checkpoint: None,
+        disablement_secrets: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    fixture.db.upsert_tka_state(&tka_state).await.unwrap();
+
+    let map_request = fixture.map_request();
+
+    let response = fixture
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let (map_response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
+
+    // should include tka_info when enabled
+    let tka_info = map_response.tka_info.expect("Missing TkaInfo in response");
+    assert_eq!(tka_info.head, "abc123deadbeef");
+    assert!(!tka_info.disabled);
+}
+
+#[tokio::test]
+async fn test_map_response_tka_info_none_when_disabled() {
+    let fixture = MapTestFixture::new().await;
+    // no tka state set, so it should be disabled by default
+
+    let map_request = fixture.map_request();
+
+    let response = fixture
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let (map_response, _) =
+        read_length_prefixed_response(&body).expect("failed to parse length-prefixed response");
+
+    // tka_info should be none when tka is not enabled
+    assert!(map_response.tka_info.is_none());
+}
