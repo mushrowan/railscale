@@ -7,9 +7,11 @@
 
 pub mod aum_hash;
 pub mod error;
+pub mod nl_key;
 
 pub use aum_hash::AumHash;
 pub use error::Error;
+pub use nl_key::{NlPrivateKey, NlPublicKey};
 
 /// result type for TKA operations.
 pub type Result<T> = std::result::Result<T, Error>;

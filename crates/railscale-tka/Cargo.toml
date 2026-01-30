@@ -16,6 +16,7 @@ hex = "0.4"
 # crypto
 blake2 = "0.10"
 ed25519-consensus = "2.1"
+rand = "0.9"
 
 # cbor with integer keys
 minicbor = { version = "0.25", features = ["derive", "alloc"] }
