@@ -268,6 +268,7 @@ async fn build_map_response(
             user_profiles: vec![],
             control_time: Some(chrono::Utc::now().to_rfc3339()),
             ssh_policy: None,
+            tka_info: None,
         });
     }
 
@@ -328,6 +329,7 @@ async fn build_map_response(
         user_profiles,
         control_time: Some(chrono::Utc::now().to_rfc3339()),
         ssh_policy,
+        tka_info: None,
     })
 }
 
@@ -398,6 +400,7 @@ fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
         tags: node.tags.iter().map(|t| t.to_string()).collect(),
         primary_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
         key_expiry: node.expiry.as_ref().map(|e| e.to_rfc3339()),
+        key_signature: Default::default(), // tka signature not yet implemented
         expired: node.is_expired(),
         user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).0,
         // nodes in the database that respond to map requests are authorized

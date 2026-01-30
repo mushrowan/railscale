@@ -12,6 +12,7 @@ mod error;
 mod map_request;
 mod noise;
 mod ssh;
+mod tka;
 
 pub use error::Error;
 pub use map_request::{
@@ -21,6 +22,7 @@ pub use map_request::{
 pub use noise::{NoiseHandshake, NoiseTransport, generate_keypair};
 pub use snow::Keypair;
 pub use ssh::{SshAction, SshPolicy, SshPrincipal, SshRecorderFailureAction, SshRule};
+pub use tka::TkaInfo;
 
 /// result type for protocol operations.
 pub type Result<T> = std::result::Result<T, Error>;

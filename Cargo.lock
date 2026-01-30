@@ -3139,6 +3139,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "proptest",
+ "railscale-tka",
  "railscale-types",
  "serde",
  "serde_json",

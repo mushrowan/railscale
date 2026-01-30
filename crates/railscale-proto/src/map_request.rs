@@ -12,10 +12,12 @@ fn is_zero(n: &i32) -> bool {
     *n == 0
 }
 
+use railscale_tka::MarshaledSignature;
 use railscale_types::{DiscoKey, HostInfo, MachineKey, NodeKey};
 
 use crate::CapabilityVersion;
 use crate::ssh::SshPolicy;
+use crate::tka::TkaInfo;
 
 /// a maprequest from a tailscale client.
 ///
@@ -105,6 +107,14 @@ pub struct MapResponse {
     /// ssh policy for incoming connections
     #[serde(rename = "SSHPolicy", default, skip_serializing_if = "Option::is_none")]
     pub ssh_policy: Option<SshPolicy>,
+
+    /// tailnet key authority (tka) state.
+    ///
+    /// nil means no change (for delta responses).
+    /// non-nil with head means tka is enabled.
+    /// non-nil with disabled=true means tka should be disabled.
+    #[serde(rename = "TKAInfo", default, skip_serializing_if = "Option::is_none")]
+    pub tka_info: Option<TkaInfo>,
 }
 
 impl MapResponse {
@@ -120,6 +130,7 @@ impl MapResponse {
             user_profiles: vec![],
             control_time: None,
             ssh_policy: None,
+            tka_info: None,
         }
     }
 }
@@ -191,6 +202,13 @@ pub struct MapResponseNode {
     /// when the node key expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_expiry: Option<String>,
+
+    /// tka signature for this node's key.
+    ///
+    /// this is the serialized NodeKeySignature that proves this node's
+    /// key was signed by a trusted tka key.
+    #[serde(default, skip_serializing_if = "MarshaledSignature::is_empty")]
+    pub key_signature: MarshaledSignature,
 
     /// whether the node is expired.
     #[serde(default)]
@@ -477,6 +495,7 @@ mod proptests {
                 user_profiles: vec![],
                 control_time: None,
                 ssh_policy: None,
+                tka_info: None,
             })
     }
 
