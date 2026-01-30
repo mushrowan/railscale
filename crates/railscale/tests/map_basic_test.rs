@@ -273,6 +273,7 @@ async fn test_map_response_includes_tka_info_when_enabled() {
         head: Some("abc123deadbeef".to_string()),
         state_checkpoint: None,
         disablement_secrets: None,
+        genesis_aum: None,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
     };

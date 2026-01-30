@@ -27,6 +27,10 @@ pub struct Model {
     #[sea_orm(column_type = "VarBinary(StringLen::None)", nullable)]
     pub disablement_secrets: Option<Vec<u8>>,
 
+    /// cbor-serialized genesis aum for bootstrapping new nodes
+    #[sea_orm(column_type = "VarBinary(StringLen::None)", nullable)]
+    pub genesis_aum: Option<Vec<u8>>,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

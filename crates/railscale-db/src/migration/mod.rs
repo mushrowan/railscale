@@ -7,6 +7,7 @@ mod m20260106_000002_create_preauth_keys;
 mod m20260106_000003_create_nodes;
 mod m20260106_000004_create_api_keys;
 mod m20260130_000005_create_tka_state;
+mod m20260130_000006_add_genesis_aum;
 
 pub struct Migrator;
 
@@ -19,6 +20,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260106_000003_create_nodes::Migration),
             Box::new(m20260106_000004_create_api_keys::Migration),
             Box::new(m20260130_000005_create_tka_state::Migration),
+            Box::new(m20260130_000006_add_genesis_aum::Migration),
         ]
     }
 }

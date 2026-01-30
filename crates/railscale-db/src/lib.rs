@@ -43,6 +43,8 @@ pub struct TkaState {
     pub state_checkpoint: Option<Vec<u8>>,
     /// cbor-serialized hashed disablement secrets
     pub disablement_secrets: Option<Vec<u8>>,
+    /// cbor-serialized genesis aum for bootstrapping new nodes
+    pub genesis_aum: Option<Vec<u8>>,
     /// when this state was created
     pub created_at: DateTime<Utc>,
     /// when this state was last updated
@@ -57,6 +59,7 @@ impl From<entity::tka_state::Model> for TkaState {
             head: model.head,
             state_checkpoint: model.state_checkpoint,
             disablement_secrets: model.disablement_secrets,
+            genesis_aum: model.genesis_aum,
             created_at: model.created_at,
             updated_at: model.updated_at,
         }
@@ -75,6 +78,7 @@ impl From<&TkaState> for entity::tka_state::ActiveModel {
             head: Set(state.head.clone()),
             state_checkpoint: Set(state.state_checkpoint.clone()),
             disablement_secrets: Set(state.disablement_secrets.clone()),
+            genesis_aum: Set(state.genesis_aum.clone()),
             created_at: Set(state.created_at),
             updated_at: Set(state.updated_at),
         }
@@ -959,6 +963,7 @@ mod tests {
             head: Some("abc123".to_string()),
             state_checkpoint: Some(vec![1, 2, 3]),
             disablement_secrets: Some(vec![4, 5, 6]),
+            genesis_aum: Some(vec![7, 8, 9]),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

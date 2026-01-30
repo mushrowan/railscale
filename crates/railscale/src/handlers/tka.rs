@@ -10,13 +10,14 @@
 //! - /machine/tka/sign - submit node-key signature
 
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use railscale_db::Database;
 use railscale_proto::{
     TkaBootstrapRequest, TkaBootstrapResponse, TkaDisableRequest, TkaDisableResponse,
     TkaInitBeginRequest, TkaInitBeginResponse, TkaInitFinishRequest, TkaInitFinishResponse,
     TkaSubmitSignatureRequest, TkaSubmitSignatureResponse, TkaSyncOfferRequest,
     TkaSyncOfferResponse, TkaSyncSendRequest, TkaSyncSendResponse,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::AppState;
 
@@ -59,19 +60,47 @@ pub async fn tka_init_finish(
 /// POST /machine/tka/bootstrap
 ///
 /// get bootstrap info for enabling or disabling tka.
+///
+/// returns genesis aum if tka is enabled and client needs to bootstrap,
+/// or disablement secret if tka has been disabled.
 pub async fn tka_bootstrap(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<TkaBootstrapRequest>,
 ) -> impl IntoResponse {
-    info!(
+    debug!(
         node_key = ?req.node_key,
         head = %req.head,
-        "tka bootstrap request (not yet implemented)"
+        "tka bootstrap request"
     );
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(TkaBootstrapResponse::default()),
-    )
+
+    // fetch tka state from database
+    let tka_state = match state.db.get_tka_state().await {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            // no tka state, return empty response
+            debug!("tka not initialised");
+            return Json(TkaBootstrapResponse::default());
+        }
+        Err(e) => {
+            info!(error = %e, "failed to get tka state");
+            return Json(TkaBootstrapResponse::default());
+        }
+    };
+
+    if !tka_state.enabled {
+        // tka not enabled, return empty response
+        debug!("tka not enabled");
+        return Json(TkaBootstrapResponse::default());
+    }
+
+    // tka is enabled - return genesis_aum if available
+    let genesis_aum = tka_state.genesis_aum.map(|bytes| bytes.into());
+
+    debug!(head = ?tka_state.head, has_genesis = genesis_aum.is_some(), "tka bootstrap response");
+    Json(TkaBootstrapResponse {
+        genesis_aum,
+        disablement_secret: vec![],
+    })
 }
 
 /// POST /machine/tka/sync/offer
@@ -208,7 +237,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tka_bootstrap_returns_not_implemented() {
+    async fn tka_bootstrap_returns_empty_when_tka_not_enabled() {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
@@ -241,6 +270,77 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: TkaBootstrapResponse = serde_json::from_slice(&body).unwrap();
+
+        // when tka not enabled, both fields should be empty/none
+        assert!(resp.genesis_aum.is_none());
+        assert!(resp.disablement_secret.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tka_bootstrap_returns_genesis_when_tka_enabled() {
+        use railscale_db::{Database, TkaState};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // enable tka with a genesis aum
+        let genesis_bytes = vec![0xca, 0xfe, 0xba, 0xbe];
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some("abc123".to_string()),
+            state_checkpoint: None,
+            disablement_secrets: None,
+            genesis_aum: Some(genesis_bytes.clone()),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        let req = TkaBootstrapRequest {
+            version: CapabilityVersion(106),
+            node_key: NodeKey::from_bytes(vec![0u8; 32]),
+            head: String::new(), // client has no head, needs bootstrap
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/bootstrap")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: TkaBootstrapResponse = serde_json::from_slice(&body).unwrap();
+
+        // when tka enabled with genesis, should return genesis_aum
+        assert!(resp.genesis_aum.is_some());
+        assert_eq!(resp.genesis_aum.unwrap().as_bytes(), genesis_bytes);
     }
 }
