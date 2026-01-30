@@ -36,4 +36,8 @@ pub enum Error {
     /// AUM has no signatures
     #[error("AUM has no signatures")]
     MissingSignature,
+
+    /// unsupported signature kind
+    #[error("unsupported signature kind")]
+    UnsupportedSigKind,
 }
