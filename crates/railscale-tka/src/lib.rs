@@ -11,6 +11,7 @@ pub mod error;
 pub mod key_id;
 pub mod marshaled;
 pub mod nl_key;
+pub mod signature;
 
 pub use aum_hash::AumHash;
 pub use disablement::DisablementSecret;
@@ -18,6 +19,7 @@ pub use error::Error;
 pub use key_id::TkaKeyId;
 pub use marshaled::{MarshaledAum, MarshaledSignature};
 pub use nl_key::{NlPrivateKey, NlPublicKey};
+pub use signature::{NodeKeySignature, SigKind};
 
 /// result type for TKA operations.
 pub type Result<T> = std::result::Result<T, Error>;
