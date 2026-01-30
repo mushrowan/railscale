@@ -1,0 +1,24 @@
+[package]
+name = "railscale-tka"
+description = "Tailnet Key Authority (TKA) implementation for railscale"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+secrecy = { workspace = true }
+zeroize = { version = "1.8", features = ["derive"] }
+hex = "0.4"
+
+# crypto
+blake2 = "0.10"
+ed25519-consensus = "2.1"
+
+# cbor with integer keys
+minicbor = { version = "0.25", features = ["derive", "alloc"] }
+
+[dev-dependencies]
+proptest = "1.9"
