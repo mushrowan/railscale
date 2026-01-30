@@ -5,6 +5,7 @@
 //! - Users
 //! - PreAuthKeys
 //! - API Keys
+//! - TKA State
 //!
 //! it also handles ip address allocation for new nodes.
 
@@ -20,14 +21,65 @@ pub use ip_allocator::IpAllocator;
 
 use std::future::Future;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Database as SeaOrmDatabase, DatabaseConnection, EntityTrait,
-    QueryFilter, Set,
+    ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Database as SeaOrmDatabase,
+    DatabaseConnection, EntityTrait, QueryFilter, Set,
 };
 use sea_orm_migration::MigratorTrait;
 
 use railscale_types::{ApiKey, Config, Node, NodeId, PreAuthKey, PreAuthKeyToken, User, UserId};
+
+/// tailnet key authority state.
+#[derive(Clone, Debug, Default)]
+pub struct TkaState {
+    /// database id (always 1 for single-tenant)
+    pub id: u64,
+    /// whether tka is enabled
+    pub enabled: bool,
+    /// current head aum hash (hex)
+    pub head: Option<String>,
+    /// cbor-serialized State checkpoint
+    pub state_checkpoint: Option<Vec<u8>>,
+    /// cbor-serialized hashed disablement secrets
+    pub disablement_secrets: Option<Vec<u8>>,
+    /// when this state was created
+    pub created_at: DateTime<Utc>,
+    /// when this state was last updated
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<entity::tka_state::Model> for TkaState {
+    fn from(model: entity::tka_state::Model) -> Self {
+        Self {
+            id: model.id as u64,
+            enabled: model.enabled,
+            head: model.head,
+            state_checkpoint: model.state_checkpoint,
+            disablement_secrets: model.disablement_secrets,
+            created_at: model.created_at,
+            updated_at: model.updated_at,
+        }
+    }
+}
+
+impl From<&TkaState> for entity::tka_state::ActiveModel {
+    fn from(state: &TkaState) -> Self {
+        Self {
+            id: if state.id == 0 {
+                NotSet
+            } else {
+                Set(state.id as i64)
+            },
+            enabled: Set(state.enabled),
+            head: Set(state.head.clone()),
+            state_checkpoint: Set(state.state_checkpoint.clone()),
+            disablement_secrets: Set(state.disablement_secrets.clone()),
+            created_at: Set(state.created_at),
+            updated_at: Set(state.updated_at),
+        }
+    }
+}
 
 /// result type for database operations.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -168,6 +220,27 @@ pub trait Database: Send + Sync {
 
     /// update the `last_used_at` timestamp for an api key.
     fn touch_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    // ─── TKA Operations ────────────────────────────────────────────────────────
+
+    /// get the current tka state, or none if not initialised.
+    fn get_tka_state(&self) -> impl Future<Output = Result<Option<TkaState>>> + Send;
+
+    /// create or update the tka state.
+    fn upsert_tka_state(&self, state: &TkaState) -> impl Future<Output = Result<TkaState>> + Send;
+
+    /// get a node's key signature.
+    fn get_node_key_signature(
+        &self,
+        node_id: NodeId,
+    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+
+    /// set a node's key signature.
+    fn set_node_key_signature(
+        &self,
+        node_id: NodeId,
+        signature: &[u8],
+    ) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// the main database implementation using sea-orm.
@@ -546,6 +619,60 @@ impl Database for RailscaleDb {
             .await?;
         Ok(())
     }
+
+    // tka operations
+
+    async fn get_tka_state(&self) -> Result<Option<TkaState>> {
+        let result = entity::tka_state::Entity::find_by_id(1i64)
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(Into::into))
+    }
+
+    async fn upsert_tka_state(&self, state: &TkaState) -> Result<TkaState> {
+        // check if state exists
+        let existing = entity::tka_state::Entity::find_by_id(1i64)
+            .one(&self.conn)
+            .await?;
+
+        let mut model: entity::tka_state::ActiveModel = state.into();
+        model.id = Set(1); // always use id 1 for single-tenant
+        model.updated_at = Set(Utc::now());
+
+        let result = if existing.is_some() {
+            model.update(&self.conn).await?
+        } else {
+            model.created_at = Set(Utc::now());
+            model.insert(&self.conn).await?
+        };
+
+        Ok(result.into())
+    }
+
+    async fn get_node_key_signature(&self, node_id: NodeId) -> Result<Option<Vec<u8>>> {
+        let result = entity::node::Entity::find_by_id(node_id.0 as i64)
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .one(&self.conn)
+            .await?;
+        Ok(result.and_then(|m| m.key_signature))
+    }
+
+    async fn set_node_key_signature(&self, node_id: NodeId, signature: &[u8]) -> Result<()> {
+        entity::node::Entity::update_many()
+            .col_expr(
+                entity::node::Column::KeySignature,
+                sea_orm::sea_query::Expr::value(signature.to_vec()),
+            )
+            .col_expr(
+                entity::node::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::node::Column::Id.eq(node_id.0 as i64))
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .exec(&self.conn)
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -815,5 +942,89 @@ mod tests {
         db.delete_node(created.id).await.unwrap();
         let deleted = db.get_node(created.id).await.unwrap();
         assert!(deleted.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_tka_state_crud() {
+        let db = setup_test_db().await;
+
+        // initially no tka state
+        let state = db.get_tka_state().await.unwrap();
+        assert!(state.is_none());
+
+        // create tka state
+        let new_state = TkaState {
+            id: 0, // will be set to 1
+            enabled: true,
+            head: Some("abc123".to_string()),
+            state_checkpoint: Some(vec![1, 2, 3]),
+            disablement_secrets: Some(vec![4, 5, 6]),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        let created = db.upsert_tka_state(&new_state).await.unwrap();
+        assert_eq!(created.id, 1);
+        assert!(created.enabled);
+        assert_eq!(created.head, Some("abc123".to_string()));
+
+        // get tka state
+        let fetched = db.get_tka_state().await.unwrap().unwrap();
+        assert!(fetched.enabled);
+        assert_eq!(fetched.head, Some("abc123".to_string()));
+
+        // update tka state
+        let mut updated_state = fetched;
+        updated_state.head = Some("def456".to_string());
+        let updated = db.upsert_tka_state(&updated_state).await.unwrap();
+        assert_eq!(updated.head, Some("def456".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_node_key_signature() {
+        use railscale_types::{DiscoKey, MachineKey, NodeKey, RegisterMethod};
+
+        let db = setup_test_db().await;
+
+        // create user and node
+        let user = User::new(UserId(0), "sigowner".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![1, 2, 3, 4]),
+            node_key: NodeKey::from_bytes(vec![5, 6, 7, 8]),
+            disco_key: DiscoKey::from_bytes(vec![9, 10, 11, 12]),
+            endpoints: vec![],
+            hostinfo: None,
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            hostname: "sig-node".to_string(),
+            given_name: "sig-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            expiry: None,
+            last_seen: None,
+            approved_routes: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            is_online: None,
+        };
+        let created = db.create_node(&node).await.unwrap();
+
+        // initially no signature
+        let sig = db.get_node_key_signature(created.id).await.unwrap();
+        assert!(sig.is_none());
+
+        // set signature
+        let signature = vec![0xde, 0xad, 0xbe, 0xef];
+        db.set_node_key_signature(created.id, &signature)
+            .await
+            .unwrap();
+
+        // get signature
+        let fetched = db.get_node_key_signature(created.id).await.unwrap();
+        assert_eq!(fetched, Some(signature));
     }
 }

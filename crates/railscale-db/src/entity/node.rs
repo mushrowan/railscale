@@ -69,6 +69,10 @@ pub struct Model {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+
+    /// tka node-key signature (cbor-encoded)
+    #[sea_orm(column_type = "VarBinary(StringLen::None)", nullable)]
+    pub key_signature: Option<Vec<u8>>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -214,6 +218,7 @@ impl From<&Node> for ActiveModel {
             created_at: Set(node.created_at),
             updated_at: Set(node.updated_at),
             deleted_at: NotSet,
+            key_signature: NotSet, // managed separately via TKA operations
         }
     }
 }
