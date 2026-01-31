@@ -2,23 +2,45 @@
 
 use std::convert::Infallible;
 use std::io::Write;
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::{
     body::Body,
-    extract::State,
-    http::{StatusCode, header},
+    extract::{ConnectInfo, FromRequestParts, State},
+    http::{StatusCode, header, request::Parts},
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use futures_util::Stream;
 use futures_util::stream::{self, StreamExt};
 use railscale_db::Database;
+use railscale_grants::GeoIpResolver;
 use railscale_proto::{MapRequest, MapResponse, MapResponseNode, TkaInfo, UserProfile};
 use railscale_types::{Node, NodeId, NodeKey, UserId};
 use tokio::sync::broadcast;
+
+/// extractor for optional client socket address.
+/// returns Some(addr) if ConnectInfo is available, None otherwise.
+/// useful for handlers that need to work in both production and test contexts.
+pub struct OptionalClientAddr(pub Option<SocketAddr>);
+
+impl<S> FromRequestParts<S> for OptionalClientAddr
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let addr = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|ci| ci.0);
+        Ok(OptionalClientAddr(addr))
+    }
+}
 
 use super::{OptionExt, ResultExt};
 use crate::AppState;
@@ -54,6 +76,7 @@ impl From<Option<&String>> for Compression {
 /// tailscale client does not send a content-type header over ts2021/http/2.
 pub async fn map(
     State(state): State<AppState>,
+    OptionalClientAddr(client_addr): OptionalClientAddr,
     body: Bytes,
 ) -> Result<impl IntoResponse, super::ApiError> {
     // parse json manually since tailscale client doesn't send content-type header
@@ -69,6 +92,7 @@ pub async fn map(
 
     // update node with disco_key and hostinfo from request if provided
     let mut needs_update = false;
+    let mut country_changed = false;
 
     if let Some(ref disco_key) = req.disco_key
         && node.disco_key.as_bytes() != disco_key.as_bytes()
@@ -82,9 +106,34 @@ pub async fn map(
         needs_update = true;
     }
 
+    // lookup country from client IP if geoip is configured
+    if let (Some(geoip), Some(addr)) = (&state.geoip, client_addr) {
+        let client_ip = addr.ip();
+        if let Some(country) = geoip.lookup_country(client_ip) {
+            if node.last_seen_country.as_ref() != Some(&country) {
+                tracing::debug!(
+                    node_id = node.id.0,
+                    old_country = ?node.last_seen_country,
+                    new_country = %country,
+                    "node country changed"
+                );
+                node.last_seen_country = Some(country);
+                needs_update = true;
+                country_changed = true;
+            }
+        }
+    }
+
     if needs_update {
         state.db.update_node(&node).await.map_internal()?;
         // notify streaming clients that node state has changed
+        // country changes affect other nodes' filter rules, so always notify
+        if country_changed {
+            tracing::debug!(
+                node_id = node.id.0,
+                "notifying state change due to country update"
+            );
+        }
         state.notifier.notify_state_changed();
     }
 
