@@ -599,3 +599,144 @@ async fn test_map_response_addresses_are_cidr() {
         response_node.allowed_ips
     );
 }
+
+#[tokio::test]
+async fn test_map_response_includes_file_sharing_cap_when_taildrop_enabled() {
+    // default config has taildrop_enabled = true
+    let fixture = MapTestFixture::new().await;
+    let map_request = fixture.map_request();
+
+    let response = fixture
+        .app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let (map_response, _) = read_length_prefixed_response(&body).expect("Should be valid response");
+
+    let response_node = map_response.node.expect("Should have self node");
+
+    // when taildrop_enabled, self node should have CapabilityFileSharing in CapMap
+    assert!(
+        response_node.cap_map.is_some(),
+        "Self node should have cap_map when taildrop enabled"
+    );
+
+    let cap_map = response_node.cap_map.unwrap();
+    assert!(
+        cap_map.contains_key(railscale_proto::CAP_FILE_SHARING),
+        "Self node cap_map should contain file-sharing capability, got: {:?}",
+        cap_map.keys().collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
+    use railscale_types::Config;
+
+    let db = RailscaleDb::new_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+
+    let user = User::new(UserId(1), "test-user".to_string());
+    let user = db.create_user(&user).await.unwrap();
+
+    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+
+    let now = chrono::Utc::now();
+    let node = Node {
+        id: NodeId(0),
+        machine_key: MachineKey::from_bytes(vec![1u8; 32]),
+        node_key: node_key.clone(),
+        disco_key: disco_key.clone(),
+        ipv4: Some("100.64.0.1".parse().unwrap()),
+        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
+        endpoints: vec![],
+        hostinfo: None,
+        hostname: "test-node".to_string(),
+        given_name: "test-node".to_string(),
+        user_id: Some(user.id),
+        register_method: RegisterMethod::AuthKey,
+        tags: vec![],
+        auth_key_id: None,
+        last_seen: Some(now),
+        expiry: None,
+        approved_routes: vec![],
+        created_at: now,
+        updated_at: now,
+        is_online: None,
+    };
+
+    db.create_node(&node).await.unwrap();
+
+    // config with taildrop DISABLED
+    let mut config = Config::default();
+    config.taildrop_enabled = false;
+
+    let grants = GrantsEngine::new(map_common::wildcard_policy());
+    let app = railscale::create_app(
+        db.clone(),
+        grants,
+        config,
+        None,
+        StateNotifier::default(),
+        None,
+    )
+    .await;
+
+    let map_request = MapRequest {
+        version: railscale_proto::CapabilityVersion::CURRENT,
+        node_key: node_key.clone(),
+        disco_key: Some(disco_key.clone()),
+        endpoints: vec![],
+        hostinfo: None,
+        omit_peers: false,
+        stream: false,
+        debug_flags: vec![],
+        compress: None,
+    };
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/machine/map")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&map_request).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let (map_response, _) = read_length_prefixed_response(&body).expect("Should be valid response");
+
+    let response_node = map_response.node.expect("Should have self node");
+
+    // when taildrop_disabled, self node should NOT have file-sharing capability
+    if let Some(cap_map) = &response_node.cap_map {
+        assert!(
+            !cap_map.contains_key(railscale_proto::CAP_FILE_SHARING),
+            "Self node should NOT have file-sharing capability when taildrop disabled"
+        );
+    }
+    // cap_map being None is also acceptable when taildrop is disabled
+}

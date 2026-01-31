@@ -19,6 +19,26 @@ use crate::CapabilityVersion;
 use crate::ssh::SshPolicy;
 use crate::tka::TkaInfo;
 
+/// node capability for file sharing (taildrop).
+///
+/// when present in a node's CapMap, enables same-user file sharing between
+/// devices. the tailscale client checks `self.CapMap().Contains(CapabilityFileSharing)`
+/// to determine if taildrop is available.
+///
+/// note: the tailscale client also supports cross-user file sharing via peer
+/// capabilities (PeerCapabilityFileSharingTarget, PeerCapabilityFileSharingSend)
+/// granted through CapGrant on FilterRules. the client checks:
+/// - IsSelfUntagged(): both sender/receiver untagged + same user
+/// - OR PeerHasCap(PeerCapabilityFileSharingTarget) for cross-user
+///
+/// currently we only implement same-user sharing. cross-user would require:
+/// - CapGrant field on FilterRule with PeerCapMap
+/// - grants engine to emit file-sharing app capabilities as CapGrants
+///
+/// TODO: implement cross-user file sharing via app capabilities when we add
+/// proper CapGrant support to FilterRule
+pub const CAP_FILE_SHARING: &str = "https://tailscale.com/cap/file-sharing";
+
 /// a maprequest from a tailscale client.
 ///
 /// clients send maprequests periodically (every 15-60 seconds) to:
@@ -221,6 +241,16 @@ pub struct MapResponseNode {
     /// defaults to false if not present.
     #[serde(default)]
     pub machine_authorized: bool,
+
+    /// node capability map.
+    ///
+    /// maps capability URLs to optional parameter arrays. capabilities with no
+    /// params use an empty array. example:
+    /// ```json
+    /// {"https://tailscale.com/cap/file-sharing": []}
+    /// ```
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap_map: Option<std::collections::HashMap<String, Vec<serde_json::Value>>>,
 }
 
 /// a dns resolver entry (matches tailscale's dnstype.resolver).
@@ -574,5 +604,103 @@ mod proptests {
             let expected = req.endpoints.is_empty() && req.hostinfo.is_none();
             prop_assert_eq!(req.is_read_only(), expected);
         }
+    }
+
+    #[test]
+    fn cap_map_serialises_as_pascal_case() {
+        use std::collections::HashMap;
+
+        let mut cap_map = HashMap::new();
+        cap_map.insert(CAP_FILE_SHARING.to_string(), vec![]);
+
+        let node = MapResponseNode {
+            cap_map: Some(cap_map),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&node).unwrap();
+        assert!(json.contains("CapMap"), "expected CapMap in json: {}", json);
+        assert!(
+            json.contains(CAP_FILE_SHARING),
+            "expected capability in json: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn cap_map_empty_vec_serialises_correctly() {
+        // tailscale uses empty arrays for capabilities with no params
+        // e.g. {"https://tailscale.com/cap/file-sharing": []}
+        use std::collections::HashMap;
+
+        let mut cap_map = HashMap::new();
+        cap_map.insert(CAP_FILE_SHARING.to_string(), vec![]);
+
+        let node = MapResponseNode {
+            cap_map: Some(cap_map),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&node).unwrap();
+        // should contain the capability with empty array
+        assert!(
+            json.contains(r#""https://tailscale.com/cap/file-sharing":[]"#),
+            "expected empty array for capability: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn cap_map_none_omitted_from_json() {
+        let node = MapResponseNode {
+            cap_map: None,
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&node).unwrap();
+        assert!(
+            !json.contains("CapMap"),
+            "expected CapMap to be omitted: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn cap_map_roundtrips() {
+        use std::collections::HashMap;
+
+        let mut cap_map = HashMap::new();
+        cap_map.insert(CAP_FILE_SHARING.to_string(), vec![]);
+
+        let node = MapResponseNode {
+            id: 123,
+            stable_id: "stable123".to_string(),
+            name: "test-node".to_string(),
+            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            addresses: vec!["100.64.0.1".to_string()],
+            allowed_ips: vec!["100.64.0.1/32".to_string()],
+            endpoints: vec![],
+            derp: String::new(),
+            home_derp: 1,
+            hostinfo: None,
+            online: Some(true),
+            tags: vec![],
+            primary_routes: vec![],
+            key_expiry: None,
+            key_signature: Default::default(),
+            expired: false,
+            user: 1,
+            machine_authorized: true,
+            cap_map: Some(cap_map),
+        };
+
+        let json = serde_json::to_string(&node).unwrap();
+        let parsed: MapResponseNode = serde_json::from_str(&json).unwrap();
+
+        assert!(parsed.cap_map.is_some());
+        let parsed_cap_map = parsed.cap_map.unwrap();
+        assert!(parsed_cap_map.contains_key(CAP_FILE_SHARING));
     }
 }

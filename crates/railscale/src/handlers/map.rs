@@ -261,9 +261,12 @@ async fn build_map_response(
 
     // when omit_peers is set, skip expensive peer/filter/ssh computation
     if omit_peers {
+        let mut self_node = node_to_map_response_node(&node, home_derp);
+        self_node.cap_map = build_self_cap_map(&state.config);
+
         return Ok(MapResponse {
             keep_alive: false,
-            node: Some(node_to_map_response_node(&node, home_derp)),
+            node: Some(self_node),
             peers: vec![],
             dns_config: crate::dns::generate_dns_config(&state.config),
             derp_map: Some(derp_map),
@@ -316,12 +319,16 @@ async fn build_map_response(
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);
 
+    // build self node with capabilities
+    let mut self_node = node_to_map_response_node(&node, home_derp);
+    self_node.cap_map = build_self_cap_map(&state.config);
+
     Ok(MapResponse {
         // keep_alive=false signals "this response has real data, process it"
         // keep_alive=true (only in MapResponse::keepalive()) signals "just a ping, skip processing"
         // tailscale client skips netmap callback when keep_alive=true
         keep_alive: false,
-        node: Some(node_to_map_response_node(&node, home_derp)),
+        node: Some(self_node),
         peers: visible_peers
             .iter()
             .map(|n| node_to_map_response_node(n, home_derp))
@@ -408,6 +415,23 @@ fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
         user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).0,
         // nodes in the database that respond to map requests are authorized
         machine_authorized: true,
+        // cap_map is populated separately for self node based on config
+        cap_map: None,
+    }
+}
+
+/// build capability map for self node based on config.
+///
+/// currently only includes file-sharing capability when taildrop_enabled.
+fn build_self_cap_map(
+    config: &railscale_types::Config,
+) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
+    if config.taildrop_enabled {
+        let mut cap_map = std::collections::HashMap::new();
+        cap_map.insert(railscale_proto::CAP_FILE_SHARING.to_string(), vec![]);
+        Some(cap_map)
+    } else {
+        None
     }
 }
 
