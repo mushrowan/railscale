@@ -688,6 +688,267 @@ impl AdminService for AdminServiceImpl {
 
         Ok(Response::new(pb::DeleteApiKeyResponse {}))
     }
+
+    // ============ Tailnet Lock (TKA) ============
+
+    async fn tka_get_status(
+        &self,
+        _request: Request<pb::TkaGetStatusRequest>,
+    ) -> Result<Response<pb::TkaStatus>, Status> {
+        let tka_state = self
+            .db
+            .get_tka_state()
+            .await
+            .map_err(|e| Status::internal(format!("failed to get TKA state: {}", e)))?;
+
+        let Some(state) = tka_state else {
+            // TKA not initialised
+            return Ok(Response::new(pb::TkaStatus {
+                enabled: false,
+                head: None,
+                keys: vec![],
+            }));
+        };
+
+        // parse genesis to extract keys if enabled
+        let keys = if state.enabled {
+            if let Some(ref genesis_bytes) = state.genesis_aum {
+                extract_tka_keys(genesis_bytes)
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        Ok(Response::new(pb::TkaStatus {
+            enabled: state.enabled,
+            head: state.head,
+            keys,
+        }))
+    }
+
+    async fn tka_init(
+        &self,
+        request: Request<pb::TkaInitRequest>,
+    ) -> Result<Response<pb::TkaInitResponse>, Status> {
+        let req = request.into_inner();
+
+        // parse genesis AUM to validate it
+        let genesis = railscale_tka::Aum::from_cbor(&req.genesis_aum)
+            .map_err(|e| Status::invalid_argument(format!("invalid genesis AUM: {}", e)))?;
+
+        // must be an AddKey AUM
+        if genesis.message_kind != railscale_tka::AumKind::AddKey {
+            return Err(Status::invalid_argument("genesis AUM must be AddKey type"));
+        }
+
+        // compute genesis hash for head
+        let genesis_hash = genesis
+            .hash()
+            .map_err(|e| Status::internal(format!("failed to compute genesis hash: {}", e)))?;
+
+        // store genesis in AUM chain
+        self.db
+            .store_aum(&genesis_hash.to_string(), None, &req.genesis_aum)
+            .await
+            .map_err(|e| Status::internal(format!("failed to store genesis AUM: {}", e)))?;
+
+        // create TKA state
+        let now = chrono::Utc::now();
+        let tka_state = railscale_db::TkaState {
+            id: 0,
+            enabled: true,
+            head: Some(genesis_hash.to_string()),
+            state_checkpoint: None,
+            disablement_secrets: if req.disablement_secrets.is_empty() {
+                None
+            } else {
+                // store as JSON array of hex strings (as bytes)
+                let secrets: Vec<String> = req
+                    .disablement_secrets
+                    .iter()
+                    .map(|s| hex::encode(s))
+                    .collect();
+                Some(serde_json::to_vec(&secrets).unwrap_or_default())
+            },
+            genesis_aum: Some(req.genesis_aum.clone()),
+            created_at: now,
+            updated_at: now,
+        };
+
+        self.db
+            .upsert_tka_state(&tka_state)
+            .await
+            .map_err(|e| Status::internal(format!("failed to store TKA state: {}", e)))?;
+
+        // process node signatures
+        let mut nodes_signed = 0u32;
+        for sig in req.signatures {
+            let node_id = railscale_types::NodeId(sig.node_id);
+
+            // check node exists
+            match self.db.get_node(node_id).await {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    info!(
+                        "TKA init: node {} not found, skipping signature",
+                        sig.node_id
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    info!("TKA init: failed to get node {}: {}", sig.node_id, e);
+                    continue;
+                }
+            };
+
+            // validate signature
+            if let Err(e) = railscale_tka::NodeKeySignature::from_cbor(&sig.signature) {
+                info!(
+                    "TKA init: invalid signature for node {}: {}",
+                    sig.node_id, e
+                );
+                continue;
+            }
+
+            // store signature on node
+            if let Err(e) = self
+                .db
+                .set_node_key_signature(node_id, &sig.signature)
+                .await
+            {
+                info!("TKA init: failed to update node {}: {}", sig.node_id, e);
+                continue;
+            }
+
+            nodes_signed += 1;
+        }
+
+        info!(
+            "TKA initialised via admin API ({} nodes signed)",
+            nodes_signed
+        );
+
+        Ok(Response::new(pb::TkaInitResponse {
+            success: true,
+            message: "TKA initialised".to_string(),
+            nodes_signed,
+        }))
+    }
+
+    async fn tka_sign_node(
+        &self,
+        request: Request<pb::TkaSignNodeRequest>,
+    ) -> Result<Response<pb::TkaSignNodeResponse>, Status> {
+        let req = request.into_inner();
+        let node_id = railscale_types::NodeId(req.node_id);
+
+        // check TKA is enabled
+        let tka_state = self
+            .db
+            .get_tka_state()
+            .await
+            .map_err(|e| Status::internal(format!("failed to get TKA state: {}", e)))?;
+
+        match tka_state {
+            Some(s) if s.enabled => {}
+            _ => {
+                return Err(Status::failed_precondition("TKA is not enabled"));
+            }
+        }
+
+        // check node exists
+        let _node = self
+            .db
+            .get_node(node_id)
+            .await
+            .map_err(|e| Status::internal(format!("failed to get node: {}", e)))?
+            .ok_or_else(|| Status::not_found("node not found"))?;
+
+        // validate signature
+        if let Err(e) = railscale_tka::NodeKeySignature::from_cbor(&req.signature) {
+            return Err(Status::invalid_argument(format!(
+                "invalid signature: {}",
+                e
+            )));
+        }
+
+        // store signature on node
+        self.db
+            .set_node_key_signature(node_id, &req.signature)
+            .await
+            .map_err(|e| Status::internal(format!("failed to update node: {}", e)))?;
+
+        info!("TKA: signed node {} via admin API", req.node_id);
+
+        Ok(Response::new(pb::TkaSignNodeResponse {
+            success: true,
+            message: format!("node {} signed", req.node_id),
+        }))
+    }
+
+    async fn tka_disable(
+        &self,
+        request: Request<pb::TkaDisableRequest>,
+    ) -> Result<Response<pb::TkaDisableResponse>, Status> {
+        let req = request.into_inner();
+
+        // get current TKA state
+        let tka_state = self
+            .db
+            .get_tka_state()
+            .await
+            .map_err(|e| Status::internal(format!("failed to get TKA state: {}", e)))?
+            .ok_or_else(|| Status::failed_precondition("TKA is not initialised"))?;
+
+        if !tka_state.enabled {
+            return Err(Status::failed_precondition("TKA is already disabled"));
+        }
+
+        // verify disablement secret
+        let stored_secrets: Vec<String> = tka_state
+            .disablement_secrets
+            .as_ref()
+            .and_then(|s| serde_json::from_slice(s).ok())
+            .unwrap_or_default();
+
+        if stored_secrets.is_empty() {
+            return Err(Status::failed_precondition(
+                "no disablement secrets configured",
+            ));
+        }
+
+        // hash the provided secret and check if it matches any stored hash
+        let secret_bytes: [u8; 32] = req
+            .disablement_secret
+            .as_slice()
+            .try_into()
+            .map_err(|_| Status::invalid_argument("disablement secret must be 32 bytes"))?;
+        let provided_secret = railscale_tka::DisablementSecret::from(secret_bytes);
+        let provided_hash_hex = hex::encode(provided_secret.hash());
+
+        if !stored_secrets.contains(&provided_hash_hex) {
+            return Err(Status::permission_denied("invalid disablement secret"));
+        }
+
+        // disable TKA
+        let mut updated = tka_state;
+        updated.enabled = false;
+        updated.updated_at = chrono::Utc::now();
+
+        self.db
+            .upsert_tka_state(&updated)
+            .await
+            .map_err(|e| Status::internal(format!("failed to update TKA state: {}", e)))?;
+
+        info!("TKA disabled via admin API");
+
+        Ok(Response::new(pb::TkaDisableResponse {
+            success: true,
+            message: "TKA disabled".to_string(),
+        }))
+    }
 }
 
 // ============ Conversion helpers ============
@@ -764,4 +1025,24 @@ fn api_key_to_pb(key: &railscale_types::ApiKey) -> pb::ApiKey {
         last_used_at: key.last_used_at.map(|t| t.to_rfc3339()),
         created_at: key.created_at.to_rfc3339(),
     }
+}
+
+/// extract TKA signing keys from genesis AUM
+fn extract_tka_keys(genesis_bytes: &[u8]) -> Vec<pb::TkaKey> {
+    let Ok(genesis) = railscale_tka::Aum::from_cbor(genesis_bytes) else {
+        return vec![];
+    };
+
+    let Some(ref key) = genesis.key else {
+        return vec![];
+    };
+
+    let Ok(key_id) = key.id() else {
+        return vec![];
+    };
+
+    vec![pb::TkaKey {
+        key_id: hex::encode(key_id.as_bytes()),
+        votes: key.votes as u32,
+    }]
 }

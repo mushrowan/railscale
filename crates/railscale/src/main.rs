@@ -30,5 +30,6 @@ async fn main() -> Result<()> {
         Command::Apikeys(cmd) => cmd.run().await,
         Command::Users(cmd) => cmd.run().await,
         Command::Nodes(cmd) => cmd.run().await,
+        Command::Lock(cmd) => cmd.run().await,
     }
 }

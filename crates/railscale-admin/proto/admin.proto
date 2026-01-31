@@ -34,6 +34,12 @@ service AdminService {
   rpc ListApiKeys(ListApiKeysRequest) returns (ListApiKeysResponse);
   rpc ExpireApiKey(ExpireApiKeyRequest) returns (ExpireApiKeyResponse);
   rpc DeleteApiKey(DeleteApiKeyRequest) returns (DeleteApiKeyResponse);
+
+  // Tailnet Lock (TKA)
+  rpc TkaGetStatus(TkaGetStatusRequest) returns (TkaStatus);
+  rpc TkaInit(TkaInitRequest) returns (TkaInitResponse);
+  rpc TkaSignNode(TkaSignNodeRequest) returns (TkaSignNodeResponse);
+  rpc TkaDisable(TkaDisableRequest) returns (TkaDisableResponse);
 }
 
 // ============ Common Types ============
@@ -248,3 +254,54 @@ message DeleteApiKeyRequest {
 }
 
 message DeleteApiKeyResponse {}
+
+// ============ Tailnet Lock (TKA) ============
+
+message TkaGetStatusRequest {}
+
+message TkaStatus {
+  bool enabled = 1;
+  optional string head = 2;  // hex-encoded AUM hash
+  repeated TkaKey keys = 3;  // trusted signing keys
+}
+
+message TkaKey {
+  string key_id = 1;  // hex-encoded key ID
+  uint32 votes = 2;
+}
+
+message TkaInitRequest {
+  bytes genesis_aum = 1;  // CBOR-encoded genesis AUM
+  repeated bytes disablement_secrets = 2;  // hashed disablement secrets
+  repeated TkaNodeSignature signatures = 3;  // signatures for existing nodes
+}
+
+message TkaNodeSignature {
+  uint64 node_id = 1;
+  bytes signature = 2;  // CBOR-encoded NodeKeySignature
+}
+
+message TkaInitResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 nodes_signed = 3;
+}
+
+message TkaSignNodeRequest {
+  uint64 node_id = 1;
+  bytes signature = 2;  // CBOR-encoded NodeKeySignature
+}
+
+message TkaSignNodeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message TkaDisableRequest {
+  bytes disablement_secret = 1;  // raw disablement secret (unhashed)
+}
+
+message TkaDisableResponse {
+  bool success = 1;
+  string message = 2;
+}

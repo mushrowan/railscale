@@ -22,6 +22,7 @@ let
   testGroups = builtins.readFile ./test_groups.py;
   testRestApi = builtins.readFile ./test_rest_api.py;
   testSsh = builtins.readFile ./test_ssh.py;
+  testLock = builtins.readFile ./test_lock.py;
 in
 pkgs.testers.runNixOSTest {
   name = "railscale-cli-integration";
@@ -65,6 +66,9 @@ pkgs.testers.runNixOSTest {
 
     # ssh policy tests
     ${testSsh}
+
+    # tailnet lock (TKA) tests
+    ${testLock}
 
     # ==========================================================================
     # done!

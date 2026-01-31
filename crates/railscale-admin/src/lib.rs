@@ -322,4 +322,55 @@ impl AdminClient {
         let request = tonic::Request::new(pb::DeleteApiKeyRequest { id });
         self.inner.delete_api_key(request).await.map(|_| ())
     }
+
+    // ============ Tailnet Lock (TKA) ============
+
+    /// get TKA status.
+    pub async fn tka_get_status(&mut self) -> Result<pb::TkaStatus, tonic::Status> {
+        let request = tonic::Request::new(pb::TkaGetStatusRequest {});
+        self.inner
+            .tka_get_status(request)
+            .await
+            .map(|r| r.into_inner())
+    }
+
+    /// initialise TKA with genesis AUM and signatures.
+    pub async fn tka_init(
+        &mut self,
+        genesis_aum: Vec<u8>,
+        disablement_secrets: Vec<Vec<u8>>,
+        signatures: Vec<pb::TkaNodeSignature>,
+    ) -> Result<pb::TkaInitResponse, tonic::Status> {
+        let request = tonic::Request::new(pb::TkaInitRequest {
+            genesis_aum,
+            disablement_secrets,
+            signatures,
+        });
+        self.inner.tka_init(request).await.map(|r| r.into_inner())
+    }
+
+    /// sign a node's key with TKA.
+    pub async fn tka_sign_node(
+        &mut self,
+        node_id: u64,
+        signature: Vec<u8>,
+    ) -> Result<pb::TkaSignNodeResponse, tonic::Status> {
+        let request = tonic::Request::new(pb::TkaSignNodeRequest { node_id, signature });
+        self.inner
+            .tka_sign_node(request)
+            .await
+            .map(|r| r.into_inner())
+    }
+
+    /// disable TKA with a disablement secret.
+    pub async fn tka_disable(
+        &mut self,
+        disablement_secret: Vec<u8>,
+    ) -> Result<pb::TkaDisableResponse, tonic::Status> {
+        let request = tonic::Request::new(pb::TkaDisableRequest { disablement_secret });
+        self.inner
+            .tka_disable(request)
+            .await
+            .map(|r| r.into_inner())
+    }
 }

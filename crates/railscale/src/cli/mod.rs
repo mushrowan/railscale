@@ -9,6 +9,7 @@
 //! - etc.
 
 mod apikeys;
+mod lock;
 mod nodes;
 mod policy;
 mod preauthkeys;
@@ -17,6 +18,7 @@ pub mod serve;
 mod users;
 
 pub use apikeys::ApikeysCommand;
+pub use lock::LockCommand;
 pub use nodes::NodesCommand;
 pub use policy::{PolicyCommand, SocketArgs};
 pub use preauthkeys::PreauthkeysCommand;
@@ -61,4 +63,8 @@ pub enum Command {
     /// manage nodes
     #[command(subcommand)]
     Nodes(NodesCommand),
+
+    /// manage tailnet lock (TKA)
+    #[command(subcommand)]
+    Lock(LockCommand),
 }

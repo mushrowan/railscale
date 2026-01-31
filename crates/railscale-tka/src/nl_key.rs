@@ -101,9 +101,25 @@ impl NlPrivateKey {
     /// generate a new random private key.
     pub fn generate() -> Self {
         let seed: [u8; 32] = rand::random();
+        Self::from_seed(seed)
+    }
+
+    /// create from a 32-byte seed.
+    pub fn from_seed(seed: [u8; NL_PRIVATE_KEY_LEN]) -> Self {
         Self {
             key: SigningKey::from(seed),
         }
+    }
+
+    /// get the seed bytes for serialization.
+    ///
+    /// warning: handle with care - this is sensitive key material.
+    pub fn to_seed(&self) -> [u8; NL_PRIVATE_KEY_LEN] {
+        // SigningKey stores the seed internally - we can get it via as_ref
+        let bytes: &[u8] = self.key.as_ref();
+        bytes[..NL_PRIVATE_KEY_LEN]
+            .try_into()
+            .expect("SigningKey seed is always 32 bytes")
     }
 
     /// get the corresponding public key.

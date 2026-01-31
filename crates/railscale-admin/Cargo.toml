@@ -9,6 +9,7 @@ license.workspace = true
 railscale-grants = { workspace = true }
 railscale-db = { workspace = true }
 railscale-types = { workspace = true }
+railscale-tka = { workspace = true }
 tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
