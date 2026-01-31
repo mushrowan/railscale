@@ -5,7 +5,7 @@
 
 use chrono::Utc;
 
-use crate::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, Tag, UserId};
+use crate::{DiscoKey, HostInfo, MachineKey, Node, NodeId, NodeKey, RegisterMethod, Tag, UserId};
 
 /// builder for creating test [`node`] instances.
 ///
@@ -29,6 +29,7 @@ pub struct TestNodeBuilder {
     machine_key: Option<MachineKey>,
     node_key: Option<NodeKey>,
     disco_key: Option<DiscoKey>,
+    hostinfo: Option<HostInfo>,
 }
 
 impl TestNodeBuilder {
@@ -44,6 +45,7 @@ impl TestNodeBuilder {
             machine_key: None,
             node_key: None,
             disco_key: None,
+            hostinfo: None,
         }
     }
 
@@ -99,6 +101,12 @@ impl TestNodeBuilder {
         self
     }
 
+    /// set host info (os, version, etc.).
+    pub fn with_hostinfo(mut self, hostinfo: HostInfo) -> Self {
+        self.hostinfo = Some(hostinfo);
+        self
+    }
+
     /// build the [`node`].
     pub fn build(self) -> Node {
         let hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
@@ -119,7 +127,7 @@ impl TestNodeBuilder {
             node_key: self.node_key.unwrap_or_default(),
             disco_key: self.disco_key.unwrap_or_default(),
             endpoints: vec![],
-            hostinfo: None,
+            hostinfo: self.hostinfo,
             ipv4: self.ipv4.or_else(|| Some("100.64.0.1".parse().unwrap())),
             ipv6: self.ipv6,
             hostname: hostname.clone(),

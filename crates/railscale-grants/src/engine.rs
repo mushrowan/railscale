@@ -10,6 +10,7 @@ use railscale_types::{Node, UserId};
 use crate::capability::NetworkCapability;
 use crate::grant::Grant;
 use crate::policy::Policy;
+use crate::posture::{PostureContext, PostureExpr};
 use crate::selector::{Autogroup, Selector};
 use crate::ssh::build_ssh_users_map;
 
@@ -216,9 +217,75 @@ impl GrantsEngine {
         dst: &Node,
         resolver: &R,
     ) -> impl Iterator<Item = &'a Grant> {
+        let src_posture_ctx = self.build_posture_context(src);
         self.policy.grants.iter().filter(move |grant| {
             self.node_matches_selectors(src, &grant.src, resolver, Some(dst))
                 && self.node_matches_selectors(dst, &grant.dst, resolver, Some(src))
+                && self.check_posture(grant, &src_posture_ctx)
+        })
+    }
+
+    /// build a posture context from a node's hostinfo
+    fn build_posture_context(&self, node: &Node) -> PostureContext {
+        let mut ctx = PostureContext::new();
+
+        if let Some(ref hostinfo) = node.hostinfo {
+            if let Some(ref os) = hostinfo.os {
+                ctx.set("node:os", os);
+            }
+            if let Some(ref os_version) = hostinfo.os_version {
+                ctx.set("node:osVersion", os_version);
+            }
+            if let Some(ref ipn_version) = hostinfo.ipn_version {
+                ctx.set("node:tsVersion", ipn_version);
+            }
+            // tsReleaseTrack - derive from version string
+            if let Some(ref version) = hostinfo.ipn_version {
+                let track = if version.contains("unstable") || version.contains("-") {
+                    "unstable"
+                } else {
+                    "stable"
+                };
+                ctx.set("node:tsReleaseTrack", track);
+            }
+            // tsAutoUpdate - not available in hostinfo, skip for now
+        }
+
+        ctx
+    }
+
+    /// check if a grant's posture conditions are satisfied
+    fn check_posture(&self, grant: &Grant, ctx: &PostureContext) -> bool {
+        // determine which postures to check
+        let posture_names = if grant.src_posture.is_empty() {
+            &self.policy.default_src_posture
+        } else {
+            &grant.src_posture
+        };
+
+        // if no postures defined, grant passes
+        if posture_names.is_empty() {
+            return true;
+        }
+
+        // OR semantics: any matching posture is sufficient
+        posture_names.iter().any(|name| {
+            if let Some(conditions) = self.policy.postures.get(name) {
+                self.evaluate_posture_conditions(conditions, ctx)
+            } else {
+                false // undefined posture fails
+            }
+        })
+    }
+
+    /// evaluate a list of posture conditions (AND semantics)
+    fn evaluate_posture_conditions(&self, conditions: &[String], ctx: &PostureContext) -> bool {
+        conditions.iter().all(|condition| {
+            if let Ok(expr) = condition.parse::<PostureExpr>() {
+                expr.evaluate(ctx)
+            } else {
+                false // invalid expression fails
+            }
         })
     }
 
@@ -893,5 +960,194 @@ mod tests {
             builder = builder.with_user_id(uid);
         }
         builder.build()
+    }
+
+    // posture integration tests
+
+    use railscale_types::HostInfo;
+
+    fn test_node_with_hostinfo(id: u64, os: &str, ts_version: &str) -> Node {
+        let hostinfo = HostInfo {
+            os: Some(os.to_string()),
+            ipn_version: Some(ts_version.to_string()),
+            ..Default::default()
+        };
+        TestNodeBuilder::new(id).with_hostinfo(hostinfo).build()
+    }
+
+    #[test]
+    fn test_posture_blocks_non_matching() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:latestMac".to_string(),
+            vec!["node:os == 'macos'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:latestMac".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // linux node should be blocked by posture
+        let linux_node = test_node_with_hostinfo(1, "linux", "1.50.0");
+        let dst_node = test_node(2, vec![]);
+
+        assert!(!engine.can_see(&linux_node, &dst_node, &resolver));
+    }
+
+    #[test]
+    fn test_posture_allows_matching() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:latestMac".to_string(),
+            vec!["node:os == 'macos'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:latestMac".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // macos node should pass posture check
+        let mac_node = test_node_with_hostinfo(1, "macos", "1.50.0");
+        let dst_node = test_node(2, vec![]);
+
+        assert!(engine.can_see(&mac_node, &dst_node, &resolver));
+    }
+
+    #[test]
+    fn test_multiple_postures_or_semantics() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:mac".to_string(),
+            vec!["node:os == 'macos'".to_string()],
+        );
+        policy.postures.insert(
+            "posture:linux".to_string(),
+            vec!["node:os == 'linux'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            // either mac OR linux posture is ok
+            src_posture: vec!["posture:mac".to_string(), "posture:linux".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let mac_node = test_node_with_hostinfo(1, "macos", "1.50.0");
+        let linux_node = test_node_with_hostinfo(2, "linux", "1.50.0");
+        let windows_node = test_node_with_hostinfo(3, "windows", "1.50.0");
+        let dst_node = test_node(4, vec![]);
+
+        assert!(engine.can_see(&mac_node, &dst_node, &resolver));
+        assert!(engine.can_see(&linux_node, &dst_node, &resolver));
+        assert!(!engine.can_see(&windows_node, &dst_node, &resolver));
+    }
+
+    #[test]
+    fn test_default_src_posture_applied() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:baseline".to_string(),
+            vec!["node:os IN ['macos', 'linux']".to_string()],
+        );
+        policy.default_src_posture = vec!["posture:baseline".to_string()];
+        // grant without explicit srcPosture - should use default
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![], // empty - uses defaultSrcPosture
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let linux_node = test_node_with_hostinfo(1, "linux", "1.50.0");
+        let windows_node = test_node_with_hostinfo(2, "windows", "1.50.0");
+        let dst_node = test_node(3, vec![]);
+
+        // linux passes default posture
+        assert!(engine.can_see(&linux_node, &dst_node, &resolver));
+        // windows fails default posture
+        assert!(!engine.can_see(&windows_node, &dst_node, &resolver));
+    }
+
+    #[test]
+    fn test_explicit_posture_overrides_default() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:strict".to_string(),
+            vec!["node:os == 'macos'".to_string()],
+        );
+        policy.postures.insert(
+            "posture:relaxed".to_string(),
+            vec!["node:os IN ['macos', 'linux', 'windows']".to_string()],
+        );
+        policy.default_src_posture = vec!["posture:strict".to_string()];
+        // grant with explicit srcPosture overrides default
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:relaxed".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // windows would fail strict default, but this grant uses relaxed
+        let windows_node = test_node_with_hostinfo(1, "windows", "1.50.0");
+        let dst_node = test_node(2, vec![]);
+
+        assert!(engine.can_see(&windows_node, &dst_node, &resolver));
+    }
+
+    #[test]
+    fn test_posture_version_comparison() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:latest".to_string(),
+            vec!["node:tsVersion >= '1.50'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:latest".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let new_node = test_node_with_hostinfo(1, "linux", "1.60.0");
+        let old_node = test_node_with_hostinfo(2, "linux", "1.40.0");
+        let dst_node = test_node(3, vec![]);
+
+        assert!(engine.can_see(&new_node, &dst_node, &resolver));
+        assert!(!engine.can_see(&old_node, &dst_node, &resolver));
     }
 }
