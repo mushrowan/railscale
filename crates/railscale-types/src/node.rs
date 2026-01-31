@@ -103,6 +103,10 @@ pub struct Node {
     /// last time the node contacted the server.
     pub last_seen: Option<DateTime<Utc>>,
 
+    /// ISO 3166-1 alpha-2 country code from geoip lookup of connection IP.
+    /// used for ip:country posture checks. updated when node connects.
+    pub last_seen_country: Option<String>,
+
     /// routes this node is approved to announce as a subnet router.
     pub approved_routes: Vec<IpNet>,
 

@@ -10,6 +10,7 @@ mod m20260130_000005_create_tka_state;
 mod m20260130_000006_add_genesis_aum;
 mod m20260131_000007_create_tka_aums;
 mod m20260131_000008_add_posture_attributes;
+mod m20260131_000009_add_last_seen_country;
 
 pub struct Migrator;
 
@@ -25,6 +26,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260130_000006_add_genesis_aum::Migration),
             Box::new(m20260131_000007_create_tka_aums::Migration),
             Box::new(m20260131_000008_add_posture_attributes::Migration),
+            Box::new(m20260131_000009_add_last_seen_country::Migration),
         ]
     }
 }

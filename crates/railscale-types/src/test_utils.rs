@@ -30,6 +30,7 @@ pub struct TestNodeBuilder {
     node_key: Option<NodeKey>,
     disco_key: Option<DiscoKey>,
     hostinfo: Option<HostInfo>,
+    last_seen_country: Option<String>,
 }
 
 impl TestNodeBuilder {
@@ -46,6 +47,7 @@ impl TestNodeBuilder {
             node_key: None,
             disco_key: None,
             hostinfo: None,
+            last_seen_country: None,
         }
     }
 
@@ -107,6 +109,12 @@ impl TestNodeBuilder {
         self
     }
 
+    /// set last seen country (ISO 3166-1 alpha-2 code).
+    pub fn with_country(mut self, country: impl Into<String>) -> Self {
+        self.last_seen_country = Some(country.into());
+        self
+    }
+
     /// build the [`node`].
     pub fn build(self) -> Node {
         let hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
@@ -138,6 +146,7 @@ impl TestNodeBuilder {
             auth_key_id: None,
             expiry: None,
             last_seen: Some(now),
+            last_seen_country: self.last_seen_country,
             approved_routes: vec![],
             created_at: now,
             updated_at: now,

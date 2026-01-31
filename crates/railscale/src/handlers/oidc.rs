@@ -218,6 +218,7 @@ pub async fn oidc_callback(
             tags: vec![],
             auth_key_id: None,
             last_seen: None,
+            last_seen_country: None,
             expiry: None,
             approved_routes: vec![],
             created_at: now,

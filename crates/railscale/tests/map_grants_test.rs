@@ -57,6 +57,7 @@ async fn test_map_request_respects_user_grants() {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            last_seen_country: None,
         })
         .await
         .unwrap();
@@ -84,6 +85,7 @@ async fn test_map_request_respects_user_grants() {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            last_seen_country: None,
         })
         .await
         .unwrap();
@@ -111,6 +113,7 @@ async fn test_map_request_respects_user_grants() {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            last_seen_country: None,
         })
         .await
         .unwrap();

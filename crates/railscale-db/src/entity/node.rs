@@ -78,6 +78,9 @@ pub struct Model {
     /// custom posture attributes (json object)
     #[sea_orm(column_type = "Text", nullable)]
     pub posture_attributes: Option<String>,
+
+    /// ISO 3166-1 alpha-2 country code from geoip lookup
+    pub last_seen_country: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -184,6 +187,7 @@ impl From<Model> for Node {
             auth_key_id: model.auth_key_id.map(|id| id as u64),
             expiry: model.expiry,
             last_seen: model.last_seen,
+            last_seen_country: model.last_seen_country,
             approved_routes,
             created_at: model.created_at,
             updated_at: model.updated_at,
@@ -243,6 +247,7 @@ impl From<&Node> for ActiveModel {
             deleted_at: NotSet,
             key_signature: NotSet, // managed separately via TKA operations
             posture_attributes: Set(posture_attributes_json),
+            last_seen_country: Set(node.last_seen_country.clone()),
         }
     }
 }

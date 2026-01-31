@@ -491,6 +491,7 @@ async fn handle_preauth_registration(
         tags: preauth_key.tags.clone(),
         auth_key_id: Some(preauth_key.id),
         last_seen: None,
+        last_seen_country: None,
         expiry: None,
         approved_routes: vec![],
         created_at: now,
