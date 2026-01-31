@@ -27,6 +27,8 @@ they told me i couldn't do it
 - **oidc authentication** - sign in with google, github, whatever
 - **grants policy system** - acls but swaggier
 - **embedded derp server** - built-in relay
+- **taildrop** - file sharing between nodes (same-user)
+- **tailnet lock** - cryptographic verification of node keys
 - **rest api** - manage users, nodes, keys
 - **nixos module** - first-class nix support
 - **too much other stuff** - it's 2am and i cannot be bothered to remember
@@ -118,6 +120,12 @@ railscale nodes delete 12345
 
 # reload policy without restart
 railscale policy reload
+
+# tailnet lock
+railscale lock init              # initialise tailnet lock
+railscale lock status            # show lock status
+railscale lock sign <node-key>   # sign a node key
+railscale lock disable           # disable tailnet lock
 ```
 
 ## policy (grants)
@@ -141,6 +149,45 @@ railscale policy reload
 }
 ```
 
+## taildrop
+
+file sharing between devices on the same tailnet. currently works for same-user
+transfers (alice's laptop -> alice's phone). cross-user transfers need grants
+support which isn't done yet.
+
+```bash
+# send a file
+tailscale file cp ~/photo.jpg myphone:
+
+# receive files
+tailscale file get ~/Downloads/
+```
+
+enable in config:
+
+```toml
+taildrop_enabled = true
+```
+
+## tailnet lock
+
+nodes can't join unless signed by trusted nodes - protects against compromised
+control server.
+
+```bash
+# initialise lock (generates signing key)
+railscale lock init
+
+# check status
+railscale lock status
+
+# sign a node
+railscale lock sign nodekey:abc123...
+
+# disable lock (requires disablement secret from init)
+railscale lock disable
+```
+
 ## status
 
 my current status is that i am in bed and i am comfy, thank you for asking
@@ -150,11 +197,11 @@ this. there are many things indeedy which need to be fixed, ironed out, added.
 
 current limitations:
 
-- no taildrop
 - ssh policy works-ish but i'll be honest i only realised that i forgot to
   properly implement it today and then madly wrote it all in like 4 hours so
   yeah it might be broken
 - app connectors - not yet
+- cross-user taildrop (needs grants support for peer capabilities)
 - probably like 50 million other things
 
 cool stuff:
