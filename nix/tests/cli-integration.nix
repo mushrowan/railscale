@@ -18,6 +18,7 @@ let
   testPreauthkeys = builtins.readFile ./test_preauthkeys.py;
   testApikeys = builtins.readFile ./test_apikeys.py;
   testNodes = builtins.readFile ./test_nodes.py;
+  testTaildrop = builtins.readFile ./test_taildrop.py;
   testKeysUsage = builtins.readFile ./test_keys_usage.py;
   testGroups = builtins.readFile ./test_groups.py;
   testRestApi = builtins.readFile ./test_rest_api.py;
@@ -54,6 +55,9 @@ pkgs.testers.runNixOSTest {
 
     # node management and connectivity tests
     ${testNodes}
+
+    # taildrop file sharing tests
+    ${testTaildrop}
 
     # key attribute and usage tests
     ${testKeysUsage}

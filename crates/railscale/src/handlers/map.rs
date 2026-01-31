@@ -2,6 +2,8 @@
 
 use std::convert::Infallible;
 use std::io::Write;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use axum::{
@@ -11,10 +13,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
+use futures_util::Stream;
 use futures_util::stream::{self, StreamExt};
 use railscale_db::Database;
 use railscale_proto::{MapRequest, MapResponse, MapResponseNode, TkaInfo, UserProfile};
-use railscale_types::{Node, NodeKey, UserId};
+use railscale_types::{Node, NodeId, NodeKey, UserId};
 use tokio::sync::broadcast;
 
 use super::{OptionExt, ResultExt};
@@ -89,7 +92,11 @@ pub async fn map(
 
     if req.stream {
         // streaming mode: keep connection open and push updates
-        Ok(streaming_response(state, node.node_key, compression).into_response())
+        Ok(
+            streaming_response(state, node.id, node.node_key, compression)
+                .await
+                .into_response(),
+        )
     } else {
         // non-streaming mode: return single length-prefixed response
         let response = build_map_response(&state, &req.node_key, req.omit_peers).await?;
@@ -122,8 +129,71 @@ enum StreamMessage {
     End,
 }
 
+/// stream wrapper that tracks presence and cleans up on drop.
+///
+/// when the stream is dropped (client disconnects), it marks the node as offline
+/// and notifies other clients of the state change.
+struct PresenceTrackingStream<S> {
+    inner: Pin<Box<S>>,
+    state: AppState,
+    node_id: NodeId,
+    connected: bool,
+}
+
+impl<S> PresenceTrackingStream<S> {
+    fn new(inner: S, state: AppState, node_id: NodeId) -> Self {
+        Self {
+            inner: Box::pin(inner),
+            state,
+            node_id,
+            connected: false,
+        }
+    }
+}
+
+impl<S, T> Stream for PresenceTrackingStream<S>
+where
+    S: Stream<Item = T>,
+{
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.inner.as_mut().poll_next(cx)
+    }
+}
+
+impl<S> Drop for PresenceTrackingStream<S> {
+    fn drop(&mut self) {
+        if self.connected {
+            let state = self.state.clone();
+            let node_id = self.node_id;
+
+            // spawn a task to mark the node as disconnected and notify peers
+            // we can't use async in drop, so we spawn a background task
+            tokio::spawn(async move {
+                state.presence.disconnect(node_id).await;
+                // notify other streaming clients that node went offline
+                state.notifier.notify_state_changed();
+            });
+        }
+    }
+}
+
 /// build a streaming response that pushes updates when state changes.
-fn streaming_response(state: AppState, node_key: NodeKey, compression: Compression) -> Response {
+///
+/// this function marks the node as online when the stream starts,
+/// and marks it offline when the stream ends (client disconnects).
+async fn streaming_response(
+    state: AppState,
+    node_id: NodeId,
+    node_key: NodeKey,
+    compression: Compression,
+) -> Response {
+    // mark node as connected before starting stream
+    state.presence.connect(node_id, node_key.clone()).await;
+    // notify other clients that this node came online
+    state.notifier.notify_state_changed();
+
     // subscribe to state changes before building initial response
     let receiver = state.notifier.subscribe();
 
@@ -136,9 +206,9 @@ fn streaming_response(state: AppState, node_key: NodeKey, compression: Compressi
     };
 
     // create a stream that yields length-prefixed responses
-    let stream = stream::unfold(
+    let inner_stream = stream::unfold(
         (
-            state,
+            state.clone(),
             node_key,
             receiver,
             true,
@@ -193,8 +263,12 @@ fn streaming_response(state: AppState, node_key: NodeKey, compression: Compressi
         },
     );
 
+    // wrap the stream to track presence - marks node offline on drop
+    let mut presence_stream = PresenceTrackingStream::new(inner_stream, state, node_id);
+    presence_stream.connected = true;
+
     // convert to a stream of result<bytes, infallible> for axum
-    let body_stream = stream.map(Ok::<_, Infallible>);
+    let body_stream = presence_stream.map(Ok::<_, Infallible>);
 
     Response::builder()
         .status(StatusCode::OK)
@@ -261,7 +335,8 @@ async fn build_map_response(
 
     // when omit_peers is set, skip expensive peer/filter/ssh computation
     if omit_peers {
-        let mut self_node = node_to_map_response_node(&node, home_derp);
+        // self is always online when making this request
+        let mut self_node = node_to_map_response_node(&node, home_derp, Some(true));
         self_node.cap_map = build_self_cap_map(&state.config);
 
         return Ok(MapResponse {
@@ -319,9 +394,22 @@ async fn build_map_response(
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);
 
-    // build self node with capabilities
-    let mut self_node = node_to_map_response_node(&node, home_derp);
+    // build self node with capabilities (self is always online if we're making this request)
+    let mut self_node = node_to_map_response_node(&node, home_derp, Some(true));
     self_node.cap_map = build_self_cap_map(&state.config);
+
+    // get online status for all visible peers
+    let peer_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
+    let online_statuses = state.presence.get_online_statuses(&peer_ids).await;
+
+    // build peer nodes with online status from presence tracker
+    let peers: Vec<MapResponseNode> = visible_peers
+        .iter()
+        .map(|n| {
+            let online = online_statuses.get(&n.id).copied();
+            node_to_map_response_node(n, home_derp, online)
+        })
+        .collect();
 
     Ok(MapResponse {
         // keep_alive=false signals "this response has real data, process it"
@@ -329,10 +417,7 @@ async fn build_map_response(
         // tailscale client skips netmap callback when keep_alive=true
         keep_alive: false,
         node: Some(self_node),
-        peers: visible_peers
-            .iter()
-            .map(|n| node_to_map_response_node(n, home_derp))
-            .collect(),
+        peers,
         dns_config,
         derp_map: Some(derp_map),
         packet_filter,
@@ -374,7 +459,11 @@ fn ip_to_cidr(ip: std::net::IpAddr) -> String {
 }
 
 /// convert a node to mapresponsenode.
-fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
+///
+/// `online` is the online status from presence tracking. if `Some(true)`, the node
+/// is currently connected via a streaming map session. if `Some(false)`, it's not.
+/// if `None`, the status is unknown (shouldn't happen in practice).
+fn node_to_map_response_node(node: &Node, home_derp: i32, online: Option<bool>) -> MapResponseNode {
     // addresses must be in cidr notation for tailscale client
     let mut addresses = Vec::new();
     if let Some(ip) = node.ipv4 {
@@ -406,7 +495,7 @@ fn node_to_map_response_node(node: &Node, home_derp: i32) -> MapResponseNode {
         // always include hostinfo (default to empty if none) to prevent nil pointer
         // crashes in Tailscale client when accessing Hostinfo.Hostname() on peers
         hostinfo: Some(node.hostinfo.clone().unwrap_or_default()),
-        online: node.is_online,
+        online,
         tags: node.tags.iter().map(|t| t.to_string()).collect(),
         primary_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
         key_expiry: node.expiry.as_ref().map(|e| e.to_rfc3339()),

@@ -23,6 +23,7 @@ mod noise_stream;
 mod notifier;
 /// openid connect authentication provider.
 pub mod oidc;
+mod presence;
 mod rate_limit;
 /// grants-based access control resolver.
 pub mod resolver;
@@ -34,6 +35,7 @@ pub use derp::{
 };
 pub use noise_stream::NoiseStream;
 pub use notifier::StateNotifier;
+pub use presence::PresenceTracker;
 pub use railscale_proto::Keypair;
 
 use std::path::Path;
@@ -124,6 +126,8 @@ pub struct AppState {
     /// dns resolution cache for /bootstrap-dns endpoint
     /// maps hostname -> resolved ip addresses. entries expire after 60 seconds.
     pub dns_cache: Cache<String, Vec<std::net::IpAddr>>,
+    /// presence tracker for connected nodes (for online status).
+    pub presence: PresenceTracker,
 }
 
 /// routers for the application, potentially running on separate listeners.
@@ -337,6 +341,7 @@ pub async fn create_app_routers_with_policy_handle(
         pending_registrations,
         derp_map,
         dns_cache,
+        presence: PresenceTracker::new(),
     };
 
     // build protocol router

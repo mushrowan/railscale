@@ -326,6 +326,47 @@ pub struct HostInfo {
     /// whether running app-connector service.
     #[serde(default)]
     pub app_connector: Option<bool>,
+
+    /// services advertised by this node (e.g., peerapi ports).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub services: Vec<Service>,
+}
+
+/// a service running on a node.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct Service {
+    /// service protocol type.
+    pub proto: ServiceProto,
+
+    /// port number.
+    pub port: u16,
+
+    /// textual description (e.g., process name).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+}
+
+/// service protocol type.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServiceProto {
+    /// tcp service
+    Tcp,
+    /// udp service
+    Udp,
+    /// peerapi on IPv4
+    #[serde(rename = "peerapi4")]
+    PeerApi4,
+    /// peerapi on IPv6
+    #[serde(rename = "peerapi6")]
+    PeerApi6,
+    /// peerapi DNS proxy
+    #[serde(rename = "peerapi-dns-proxy")]
+    PeerApiDnsProxy,
+    /// unknown protocol (forward compatibility)
+    #[serde(untagged)]
+    Other(String),
 }
 
 /// network information for a node.
