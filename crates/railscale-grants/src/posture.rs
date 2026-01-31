@@ -3,6 +3,7 @@
 //! posture conditions allow grants to be conditional on device attributes
 //! like OS version, tailscale version, or custom attributes
 
+use std::collections::HashMap;
 use std::str::FromStr;
 
 /// a namespaced posture attribute (e.g., `node:os`, `custom:tier`)
@@ -216,6 +217,117 @@ fn parse_list(s: &str) -> Result<Vec<String>, PostureParseError> {
         .collect()
 }
 
+/// context for evaluating posture expressions
+///
+/// holds the attribute values for a node that can be checked against posture conditions
+#[derive(Debug, Clone, Default)]
+pub struct PostureContext {
+    attrs: HashMap<String, String>,
+}
+
+impl PostureContext {
+    /// create an empty posture context
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// set an attribute value
+    pub fn set(&mut self, key: &str, value: impl Into<String>) {
+        self.attrs.insert(key.to_string(), value.into());
+    }
+
+    /// get an attribute value
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.attrs.get(key).map(|s| s.as_str())
+    }
+
+    /// check if an attribute is set
+    pub fn is_set(&self, key: &str) -> bool {
+        self.attrs.contains_key(key)
+    }
+}
+
+impl PostureExpr {
+    /// evaluate this expression against a posture context
+    pub fn evaluate(&self, ctx: &PostureContext) -> bool {
+        match self {
+            PostureExpr::Compare { attr, op, value } => {
+                let key = format!("{}:{}", attr.namespace, attr.name);
+                match ctx.get(&key) {
+                    None => false, // unset attribute always fails
+                    Some(actual) => match op {
+                        PostureOp::Eq => actual == value,
+                        PostureOp::Ne => actual != value,
+                        PostureOp::Lt => {
+                            compare_versions(actual, value) == std::cmp::Ordering::Less
+                        }
+                        PostureOp::Le => {
+                            compare_versions(actual, value) != std::cmp::Ordering::Greater
+                        }
+                        PostureOp::Gt => {
+                            compare_versions(actual, value) == std::cmp::Ordering::Greater
+                        }
+                        PostureOp::Ge => {
+                            compare_versions(actual, value) != std::cmp::Ordering::Less
+                        }
+                        _ => false, // In/NotIn/IsSet/NotSet handled elsewhere
+                    },
+                }
+            }
+            PostureExpr::InList { attr, op, values } => {
+                let key = format!("{}:{}", attr.namespace, attr.name);
+                match ctx.get(&key) {
+                    None => false, // unset attribute always fails
+                    Some(actual) => {
+                        let in_list = values.iter().any(|v| v == actual);
+                        match op {
+                            PostureOp::In => in_list,
+                            PostureOp::NotIn => !in_list,
+                            _ => false,
+                        }
+                    }
+                }
+            }
+            PostureExpr::Presence { attr, op } => {
+                let key = format!("{}:{}", attr.namespace, attr.name);
+                let is_set = ctx.is_set(&key);
+                match op {
+                    PostureOp::IsSet => is_set,
+                    PostureOp::NotSet => !is_set,
+                    _ => false,
+                }
+            }
+        }
+    }
+}
+
+/// compare two version strings
+///
+/// handles versions like "1.40", "1.40.0", "14.0", etc.
+/// uses lexicographic comparison of numeric parts
+fn compare_versions(a: &str, b: &str) -> std::cmp::Ordering {
+    let a_parts: Vec<u64> = a
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse().ok())
+        .collect();
+    let b_parts: Vec<u64> = b
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    for (a_part, b_part) in a_parts.iter().zip(b_parts.iter()) {
+        match a_part.cmp(b_part) {
+            std::cmp::Ordering::Equal => continue,
+            other => return other,
+        }
+    }
+
+    // if all compared parts are equal, longer version is greater
+    a_parts.len().cmp(&b_parts.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,5 +463,158 @@ mod tests {
                 values: vec!["US".to_string(), "CA".to_string(), "GB".to_string()],
             }
         );
+    }
+
+    // Phase 2: Evaluation tests
+
+    #[test]
+    fn test_evaluate_equality() {
+        let expr: PostureExpr = "node:os == 'linux'".parse().unwrap();
+        let mut ctx = PostureContext::new();
+        ctx.set("node:os", "linux");
+
+        assert!(expr.evaluate(&ctx));
+
+        ctx.set("node:os", "windows");
+        assert!(!expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_evaluate_inequality() {
+        let expr: PostureExpr = "node:os != 'windows'".parse().unwrap();
+        let mut ctx = PostureContext::new();
+        ctx.set("node:os", "linux");
+
+        assert!(expr.evaluate(&ctx));
+
+        ctx.set("node:os", "windows");
+        assert!(!expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_evaluate_version_gte() {
+        let expr: PostureExpr = "node:tsVersion >= '1.40'".parse().unwrap();
+        let mut ctx = PostureContext::new();
+
+        ctx.set("node:tsVersion", "1.50.0");
+        assert!(expr.evaluate(&ctx));
+
+        ctx.set("node:tsVersion", "1.40");
+        assert!(expr.evaluate(&ctx));
+
+        ctx.set("node:tsVersion", "1.39.9");
+        assert!(!expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_evaluate_in_list() {
+        let expr: PostureExpr = "node:os IN ['macos', 'linux']".parse().unwrap();
+        let mut ctx = PostureContext::new();
+
+        ctx.set("node:os", "linux");
+        assert!(expr.evaluate(&ctx));
+
+        ctx.set("node:os", "macos");
+        assert!(expr.evaluate(&ctx));
+
+        ctx.set("node:os", "windows");
+        assert!(!expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_evaluate_not_in_list() {
+        let expr: PostureExpr = "node:os NOT IN ['windows']".parse().unwrap();
+        let mut ctx = PostureContext::new();
+
+        ctx.set("node:os", "linux");
+        assert!(expr.evaluate(&ctx));
+
+        ctx.set("node:os", "windows");
+        assert!(!expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_evaluate_is_set() {
+        let expr: PostureExpr = "custom:managed IS SET".parse().unwrap();
+        let mut ctx = PostureContext::new();
+
+        // not set - should fail
+        assert!(!expr.evaluate(&ctx));
+
+        // set to any value - should pass
+        ctx.set("custom:managed", "true");
+        assert!(expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_evaluate_not_set() {
+        let expr: PostureExpr = "custom:tier NOT SET".parse().unwrap();
+        let mut ctx = PostureContext::new();
+
+        // not set - should pass
+        assert!(expr.evaluate(&ctx));
+
+        // set - should fail
+        ctx.set("custom:tier", "prod");
+        assert!(!expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_unset_attribute_fails_even_negative() {
+        // per tailscale docs: if attribute is unset, posture doesn't match
+        // even with negative conditions like !=
+        let expr: PostureExpr = "custom:tier != 'prod'".parse().unwrap();
+        let ctx = PostureContext::new();
+
+        // attribute not set - should NOT match (even though it's != 'prod')
+        assert!(!expr.evaluate(&ctx));
+    }
+
+    #[test]
+    fn test_evaluate_multiple_conditions_and() {
+        // a posture with multiple conditions uses AND semantics
+        let conditions = vec![
+            "node:os IN ['macos', 'linux']"
+                .parse::<PostureExpr>()
+                .unwrap(),
+            "node:tsVersion >= '1.40'".parse::<PostureExpr>().unwrap(),
+            "node:tsReleaseTrack == 'stable'"
+                .parse::<PostureExpr>()
+                .unwrap(),
+        ];
+
+        let mut ctx = PostureContext::new();
+        ctx.set("node:os", "linux");
+        ctx.set("node:tsVersion", "1.50.0");
+        ctx.set("node:tsReleaseTrack", "stable");
+
+        // all conditions met - passes
+        assert!(conditions.iter().all(|c| c.evaluate(&ctx)));
+
+        // one condition fails - overall fails
+        ctx.set("node:tsReleaseTrack", "unstable");
+        assert!(!conditions.iter().all(|c| c.evaluate(&ctx)));
+    }
+
+    #[test]
+    fn test_version_comparison_edge_cases() {
+        let expr: PostureExpr = "node:tsVersion >= '1.40'".parse().unwrap();
+        let mut ctx = PostureContext::new();
+
+        // exact match
+        ctx.set("node:tsVersion", "1.40");
+        assert!(expr.evaluate(&ctx));
+
+        // with patch version
+        ctx.set("node:tsVersion", "1.40.0");
+        assert!(expr.evaluate(&ctx));
+
+        // with suffix (like beta)
+        ctx.set("node:tsVersion", "1.40.0-beta1");
+        assert!(expr.evaluate(&ctx));
+
+        // major version bump
+        ctx.set("node:tsVersion", "2.0");
+        assert!(expr.evaluate(&ctx));
     }
 }
