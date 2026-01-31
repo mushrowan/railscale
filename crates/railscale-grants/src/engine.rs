@@ -1,5 +1,6 @@
 //! the main grants evaluation engine.
 
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use railscale_proto::{
@@ -8,6 +9,7 @@ use railscale_proto::{
 use railscale_types::{Node, UserId};
 
 use crate::capability::NetworkCapability;
+use crate::geoip::GeoIpResolver;
 use crate::grant::Grant;
 use crate::policy::Policy;
 use crate::posture::{PostureContext, PostureExpr};
@@ -72,7 +74,22 @@ impl GrantsEngine {
     ///
     /// returns true if any grant allows src to access dst.
     pub fn can_see<R: UserResolver>(&self, src: &Node, dst: &Node, resolver: &R) -> bool {
-        self.matching_grants(src, dst, resolver)
+        self.matching_grants::<R, crate::geoip::NoopGeoIpResolver>(src, dst, resolver, None, None)
+            .any(|g| !g.ip.is_empty() || !g.app.is_empty())
+    }
+
+    /// check if src_node can see dst_node with geoip context.
+    ///
+    /// like `can_see` but includes client IP for geolocation-based posture checks.
+    pub fn can_see_with_ip<R: UserResolver, G: GeoIpResolver>(
+        &self,
+        src: &Node,
+        dst: &Node,
+        resolver: &R,
+        client_ip: Option<IpAddr>,
+        geoip: &G,
+    ) -> bool {
+        self.matching_grants(src, dst, resolver, client_ip, Some(geoip))
             .any(|g| !g.ip.is_empty() || !g.app.is_empty())
     }
 
@@ -86,7 +103,9 @@ impl GrantsEngine {
         resolver: &R,
     ) -> Vec<NetworkCapability> {
         let mut caps = Vec::new();
-        for grant in self.matching_grants(src, dst, resolver) {
+        for grant in self
+            .matching_grants::<R, crate::geoip::NoopGeoIpResolver>(src, dst, resolver, None, None)
+        {
             caps.extend(grant.ip.iter().cloned());
         }
         caps
@@ -211,13 +230,15 @@ impl GrantsEngine {
     }
 
     /// find all grants where src matches src selectors and dst matches dst selectors.
-    fn matching_grants<'a, R: UserResolver>(
+    fn matching_grants<'a, R: UserResolver, G: GeoIpResolver>(
         &'a self,
         src: &Node,
         dst: &Node,
         resolver: &R,
+        client_ip: Option<IpAddr>,
+        geoip: Option<&G>,
     ) -> impl Iterator<Item = &'a Grant> {
-        let src_posture_ctx = self.build_posture_context(src);
+        let src_posture_ctx = self.build_posture_context(src, client_ip, geoip);
         self.policy.grants.iter().filter(move |grant| {
             self.node_matches_selectors(src, &grant.src, resolver, Some(dst))
                 && self.node_matches_selectors(dst, &grant.dst, resolver, Some(src))
@@ -226,8 +247,20 @@ impl GrantsEngine {
     }
 
     /// build a posture context from a node's hostinfo and custom attributes
-    fn build_posture_context(&self, node: &Node) -> PostureContext {
+    fn build_posture_context<G: GeoIpResolver>(
+        &self,
+        node: &Node,
+        client_ip: Option<IpAddr>,
+        geoip: Option<&G>,
+    ) -> PostureContext {
         let mut ctx = PostureContext::new();
+
+        // populate ip:country from geoip lookup
+        if let (Some(ip), Some(resolver)) = (client_ip, geoip) {
+            if let Some(country) = resolver.lookup_country(ip) {
+                ctx.set("ip:country", country);
+            }
+        }
 
         // populate node:* attributes from hostinfo
         if let Some(ref hostinfo) = node.hostinfo {
@@ -1272,5 +1305,64 @@ mod tests {
 
         assert!(engine.can_see(&compliant_node, &dst_node, &resolver));
         assert!(!engine.can_see(&non_compliant_node, &dst_node, &resolver));
+    }
+
+    // geoip posture tests
+    use crate::geoip::GeoIpResolver;
+
+    struct MockGeoIpResolver {
+        mappings: std::collections::HashMap<std::net::IpAddr, String>,
+    }
+
+    impl MockGeoIpResolver {
+        fn with_mapping(ip: &str, country: &str) -> Self {
+            let mut mappings = std::collections::HashMap::new();
+            mappings.insert(ip.parse().unwrap(), country.to_string());
+            Self { mappings }
+        }
+    }
+
+    impl GeoIpResolver for MockGeoIpResolver {
+        fn lookup_country(&self, ip: std::net::IpAddr) -> Option<String> {
+            self.mappings.get(&ip).cloned()
+        }
+    }
+
+    #[test]
+    fn test_ip_country_posture_condition() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:us_only".to_string(),
+            vec!["ip:country == 'US'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:us_only".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let user_resolver = EmptyResolver;
+        let geoip = MockGeoIpResolver::with_mapping("8.8.8.8", "US");
+
+        let src_node = test_node(1, vec![]);
+        let dst_node = test_node(2, vec![]);
+
+        // US IP should pass
+        let us_ip: std::net::IpAddr = "8.8.8.8".parse().unwrap();
+        assert!(engine.can_see_with_ip(&src_node, &dst_node, &user_resolver, Some(us_ip), &geoip));
+
+        // non-US IP should fail
+        let other_ip: std::net::IpAddr = "1.1.1.1".parse().unwrap();
+        assert!(!engine.can_see_with_ip(
+            &src_node,
+            &dst_node,
+            &user_resolver,
+            Some(other_ip),
+            &geoip
+        ));
     }
 }

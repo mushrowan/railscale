@@ -9,6 +9,7 @@
 pub mod capability;
 pub mod engine;
 pub mod error;
+pub mod geoip;
 pub mod grant;
 pub mod policy;
 pub mod posture;
@@ -18,6 +19,7 @@ pub mod ssh;
 pub use capability::{AppCapability, NetworkCapability, Protocol};
 pub use engine::{GrantsEngine, UserResolver};
 pub use error::{Error, ParseError, Result, ValidationError};
+pub use geoip::{GeoIpResolver, NoopGeoIpResolver};
 pub use grant::Grant;
 pub use policy::Policy;
 pub use posture::{PostureAttr, PostureContext, PostureExpr, PostureOp, PostureParseError};
