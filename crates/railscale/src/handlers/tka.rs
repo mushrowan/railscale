@@ -325,19 +325,87 @@ pub async fn tka_bootstrap(
 /// POST /machine/tka/sync/offer
 ///
 /// offer sync state to control plane.
+///
+/// compares client's tka state with server's and returns any aums the client is missing.
 pub async fn tka_sync_offer(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<TkaSyncOfferRequest>,
 ) -> impl IntoResponse {
-    info!(
+    debug!(
         node_key = ?req.node_key,
         head = %req.head,
         ancestors = req.ancestors.len(),
-        "tka sync offer request (not yet implemented)"
+        "tka sync offer request"
+    );
+
+    // get server's TKA state
+    let tka_state = match state.db.get_tka_state().await {
+        Ok(Some(s)) if s.enabled => s,
+        Ok(Some(_)) => {
+            // TKA not enabled, return empty
+            debug!("tka sync offer: tka not enabled");
+            return (StatusCode::OK, Json(TkaSyncOfferResponse::default()));
+        }
+        Ok(None) => {
+            debug!("tka sync offer: no tka state");
+            return (StatusCode::OK, Json(TkaSyncOfferResponse::default()));
+        }
+        Err(e) => {
+            info!(error = %e, "tka sync offer: db error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSyncOfferResponse::default()),
+            );
+        }
+    };
+
+    let server_head = tka_state.head.unwrap_or_default();
+
+    // if heads match, no sync needed
+    if req.head == server_head {
+        debug!("tka sync offer: heads match, no sync needed");
+        return (
+            StatusCode::OK,
+            Json(TkaSyncOfferResponse {
+                head: server_head,
+                ancestors: vec![],
+                missing_aums: vec![],
+            }),
+        );
+    }
+
+    // if client has no head (empty), they need the genesis
+    if req.head.is_empty() {
+        debug!("tka sync offer: client has no head, sending genesis");
+        let missing_aums = match &tka_state.genesis_aum {
+            Some(genesis) => vec![genesis.clone().into()],
+            None => vec![],
+        };
+        return (
+            StatusCode::OK,
+            Json(TkaSyncOfferResponse {
+                head: server_head,
+                ancestors: vec![],
+                missing_aums,
+            }),
+        );
+    }
+
+    // client has a different head - for now just return our head
+    // full sync would require storing the complete AUM chain
+    // TODO: implement full AUM chain sync when we store more than genesis
+    debug!(
+        client_head = %req.head,
+        server_head = %server_head,
+        "tka sync offer: heads differ, returning server state"
     );
     (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(TkaSyncOfferResponse::default()),
+        StatusCode::OK,
+        Json(TkaSyncOfferResponse {
+            head: server_head,
+            ancestors: vec![],
+            missing_aums: vec![], // would need full chain to determine missing
+        }),
     )
 }
 
@@ -1277,5 +1345,260 @@ mod tests {
         // verify TKA is now disabled
         let state = db.get_tka_state().await.unwrap().unwrap();
         assert!(!state.enabled);
+    }
+
+    #[tokio::test]
+    async fn tka_sync_offer_returns_genesis_when_client_has_no_head() {
+        use railscale_db::{Database, TkaState};
+        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a user and node
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+        };
+        db.create_node(&node).await.unwrap();
+
+        // create TKA key and genesis
+        let nl_private = NlPrivateKey::generate();
+        let nl_public = nl_private.public_key();
+        let tka_key = Key {
+            kind: KeyKind::Ed25519,
+            public: nl_public.as_bytes().to_vec(),
+            votes: 1,
+            meta: None,
+        };
+        let tka_key_id = tka_key.id().unwrap();
+
+        let genesis = Aum {
+            message_kind: AumKind::AddKey,
+            prev_aum_hash: None,
+            key: Some(tka_key),
+            key_id: None,
+            state: None,
+            votes: None,
+            meta: None,
+            signatures: vec![],
+        };
+        let genesis_hash = genesis.hash().unwrap();
+        let sig = nl_private.sign(genesis_hash.as_bytes());
+        let signed_genesis = Aum {
+            signatures: vec![AumSignature {
+                key_id: tka_key_id.as_bytes().to_vec(),
+                signature: sig.to_vec(),
+            }],
+            ..genesis
+        };
+        let genesis_bytes = signed_genesis.to_cbor().unwrap();
+
+        // enable TKA
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some(genesis_hash.to_string()),
+            state_checkpoint: None,
+            disablement_secrets: None,
+            genesis_aum: Some(genesis_bytes.clone()),
+            created_at: now,
+            updated_at: now,
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // client with no head requests sync
+        let req = TkaSyncOfferRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            head: String::new(), // client has no TKA state
+            ancestors: vec![],
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/sync/offer")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: TkaSyncOfferResponse = serde_json::from_slice(&body).unwrap();
+
+        // server should return its head and the genesis AUM
+        assert_eq!(resp.head, genesis_hash.to_string());
+        assert_eq!(resp.missing_aums.len(), 1);
+        assert_eq!(resp.missing_aums[0].as_bytes(), genesis_bytes);
+    }
+
+    #[tokio::test]
+    async fn tka_sync_offer_returns_empty_when_heads_match() {
+        use railscale_db::{Database, TkaState};
+        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a user and node
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+        };
+        db.create_node(&node).await.unwrap();
+
+        // create TKA key and genesis
+        let nl_private = NlPrivateKey::generate();
+        let nl_public = nl_private.public_key();
+        let tka_key = Key {
+            kind: KeyKind::Ed25519,
+            public: nl_public.as_bytes().to_vec(),
+            votes: 1,
+            meta: None,
+        };
+        let tka_key_id = tka_key.id().unwrap();
+
+        let genesis = Aum {
+            message_kind: AumKind::AddKey,
+            prev_aum_hash: None,
+            key: Some(tka_key),
+            key_id: None,
+            state: None,
+            votes: None,
+            meta: None,
+            signatures: vec![],
+        };
+        let genesis_hash = genesis.hash().unwrap();
+        let sig = nl_private.sign(genesis_hash.as_bytes());
+        let signed_genesis = Aum {
+            signatures: vec![AumSignature {
+                key_id: tka_key_id.as_bytes().to_vec(),
+                signature: sig.to_vec(),
+            }],
+            ..genesis
+        };
+        let genesis_bytes = signed_genesis.to_cbor().unwrap();
+
+        // enable TKA
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some(genesis_hash.to_string()),
+            state_checkpoint: None,
+            disablement_secrets: None,
+            genesis_aum: Some(genesis_bytes),
+            created_at: now,
+            updated_at: now,
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // client with same head as server
+        let req = TkaSyncOfferRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            head: genesis_hash.to_string(), // same as server
+            ancestors: vec![],
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/sync/offer")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: TkaSyncOfferResponse = serde_json::from_slice(&body).unwrap();
+
+        // heads match, no sync needed
+        assert_eq!(resp.head, genesis_hash.to_string());
+        assert!(resp.missing_aums.is_empty());
     }
 }
