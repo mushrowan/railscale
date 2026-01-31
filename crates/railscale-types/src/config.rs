@@ -54,6 +54,10 @@ pub struct Config {
     /// randomize client port (for nat traversal).
     pub randomize_client_port: bool,
 
+    /// path to the maxmind geoip database (GeoLite2-Country.mmdb).
+    /// when set, enables ip:country posture checks for geolocation-based access control.
+    pub geoip_database_path: Option<PathBuf>,
+
     /// allow registration without noise context (for testing only).
     ///
     /// when false (default), `/machine/register` requires a valid noise handshake
@@ -85,6 +89,7 @@ impl Default for Config {
             api: ApiConfig::default(),
             taildrop_enabled: true,
             randomize_client_port: false,
+            geoip_database_path: None,
             allow_non_noise_registration: false,
         }
     }

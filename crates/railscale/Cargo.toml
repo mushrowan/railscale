@@ -17,7 +17,7 @@ path = "src/main.rs"
 railscale-types = { workspace = true }
 railscale-db = { workspace = true }
 railscale-proto = { workspace = true }
-railscale-grants = { workspace = true }
+railscale-grants = { workspace = true, features = ["maxminddb"] }
 railscale-admin = { workspace = true }
 railscale-tka = { workspace = true }
 tokio = { workspace = true }
