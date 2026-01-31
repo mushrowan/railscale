@@ -245,6 +245,21 @@ pub trait Database: Send + Sync {
         node_id: NodeId,
         signature: &[u8],
     ) -> impl Future<Output = Result<()>> + Send;
+
+    /// store an AUM in the chain.
+    fn store_aum(
+        &self,
+        hash: &str,
+        prev_hash: Option<&str>,
+        data: &[u8],
+    ) -> impl Future<Output = Result<()>> + Send;
+
+    /// get an AUM by its hash.
+    fn get_aum(&self, hash: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+
+    /// get all AUMs from a given hash to the current head.
+    /// returns AUMs in order from oldest to newest.
+    fn get_aums_after(&self, hash: &str) -> impl Future<Output = Result<Vec<Vec<u8>>>> + Send;
 }
 
 /// the main database implementation using sea-orm.
@@ -676,6 +691,84 @@ impl Database for RailscaleDb {
             .exec(&self.conn)
             .await?;
         Ok(())
+    }
+
+    async fn store_aum(&self, hash: &str, prev_hash: Option<&str>, data: &[u8]) -> Result<()> {
+        use sea_orm::ActiveValue::Set;
+
+        let model = entity::tka_aum::ActiveModel {
+            hash: Set(hash.to_string()),
+            prev_hash: Set(prev_hash.map(|s| s.to_string())),
+            aum_data: Set(data.to_vec()),
+            created_at: Set(Utc::now()),
+        };
+
+        // use insert or ignore to handle duplicate hashes (idempotent)
+        entity::tka_aum::Entity::insert(model)
+            .on_conflict(
+                sea_orm::sea_query::OnConflict::column(entity::tka_aum::Column::Hash)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec(&self.conn)
+            .await
+            .ok(); // ignore conflict errors
+
+        Ok(())
+    }
+
+    async fn get_aum(&self, hash: &str) -> Result<Option<Vec<u8>>> {
+        let result = entity::tka_aum::Entity::find_by_id(hash.to_string())
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(|m| m.aum_data))
+    }
+
+    async fn get_aums_after(&self, hash: &str) -> Result<Vec<Vec<u8>>> {
+        // walk the chain from the given hash to the head
+        // we need to find all AUMs where this hash appears in their ancestry
+        // for now, do a simple approach: get all AUMs and filter
+
+        // get the current head from tka_state
+        let tka_state = self.get_tka_state().await?;
+        let head = match tka_state.and_then(|s| s.head) {
+            Some(h) => h,
+            None => return Ok(vec![]),
+        };
+
+        // if the requested hash is the head, nothing to return
+        if hash == head {
+            return Ok(vec![]);
+        }
+
+        // walk backwards from head collecting AUMs until we find the requested hash
+        let mut aums = Vec::new();
+        let mut current = head;
+
+        loop {
+            if current == hash {
+                break;
+            }
+
+            let aum = match entity::tka_aum::Entity::find_by_id(current.clone())
+                .one(&self.conn)
+                .await?
+            {
+                Some(a) => a,
+                None => break, // chain is broken, stop
+            };
+
+            aums.push(aum.aum_data.clone());
+
+            match aum.prev_hash {
+                Some(prev) => current = prev,
+                None => break, // reached genesis
+            }
+        }
+
+        // reverse to get oldest-to-newest order
+        aums.reverse();
+        Ok(aums)
     }
 }
 

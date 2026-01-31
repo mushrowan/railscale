@@ -6,5 +6,6 @@
 pub mod api_key;
 pub mod node;
 pub mod preauth_key;
+pub mod tka_aum;
 pub mod tka_state;
 pub mod user;

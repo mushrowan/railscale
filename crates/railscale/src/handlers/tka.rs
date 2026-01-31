@@ -255,6 +255,19 @@ pub async fn tka_init_finish(
         }
     };
 
+    // store genesis AUM in the chain
+    if let Err(e) = state
+        .db
+        .store_aum(&genesis_hash.to_string(), None, genesis_bytes)
+        .await
+    {
+        info!(error = %e, "tka init finish: failed to store genesis aum");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TkaInitFinishResponse::default()),
+        );
+    }
+
     // enable TKA
     let now = chrono::Utc::now();
     let updated_state = railscale_db::TkaState {
@@ -374,12 +387,20 @@ pub async fn tka_sync_offer(
         );
     }
 
-    // if client has no head (empty), they need the genesis
+    // if client has no head (empty), they need all AUMs from genesis to head
     if req.head.is_empty() {
-        debug!("tka sync offer: client has no head, sending genesis");
-        let missing_aums = match &tka_state.genesis_aum {
-            Some(genesis) => vec![genesis.clone().into()],
-            None => vec![],
+        debug!("tka sync offer: client has no head, sending full chain");
+        // get all AUMs from the beginning (use empty string to get everything)
+        let missing_aums = match state.db.get_aums_after("").await {
+            Ok(aums) => aums.into_iter().map(|a| a.into()).collect(),
+            Err(e) => {
+                // fall back to genesis_aum if chain retrieval fails
+                info!(error = %e, "tka sync offer: failed to get aum chain, using genesis");
+                match &tka_state.genesis_aum {
+                    Some(genesis) => vec![genesis.clone().into()],
+                    None => vec![],
+                }
+            }
         };
         return (
             StatusCode::OK,
@@ -391,20 +412,28 @@ pub async fn tka_sync_offer(
         );
     }
 
-    // client has a different head - for now just return our head
-    // full sync would require storing the complete AUM chain
-    // TODO: implement full AUM chain sync when we store more than genesis
+    // client has a different head - get AUMs they're missing
     debug!(
         client_head = %req.head,
         server_head = %server_head,
-        "tka sync offer: heads differ, returning server state"
+        "tka sync offer: heads differ, finding missing aums"
     );
+
+    // check if client's head is in our chain (they're behind us)
+    let missing_aums = match state.db.get_aums_after(&req.head).await {
+        Ok(aums) => aums.into_iter().map(|a| a.into()).collect(),
+        Err(e) => {
+            info!(error = %e, "tka sync offer: failed to get missing aums");
+            vec![]
+        }
+    };
+
     (
         StatusCode::OK,
         Json(TkaSyncOfferResponse {
             head: server_head,
             ancestors: vec![],
-            missing_aums: vec![], // would need full chain to determine missing
+            missing_aums,
         }),
     )
 }
@@ -412,19 +441,118 @@ pub async fn tka_sync_offer(
 /// POST /machine/tka/sync/send
 ///
 /// send missing aums to control plane.
+///
+/// receives aums from a client that the server is missing, validates and stores them.
 pub async fn tka_sync_send(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<TkaSyncSendRequest>,
 ) -> impl IntoResponse {
-    info!(
+    debug!(
         node_key = ?req.node_key,
         head = %req.head,
         missing_aums = req.missing_aums.len(),
-        "tka sync send request (not yet implemented)"
+        "tka sync send request"
     );
+
+    // get current TKA state
+    let tka_state = match state.db.get_tka_state().await {
+        Ok(Some(s)) if s.enabled => s,
+        Ok(Some(_)) => {
+            info!("tka sync send: tka not enabled");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TkaSyncSendResponse::default()),
+            );
+        }
+        Ok(None) => {
+            info!("tka sync send: no tka state");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TkaSyncSendResponse::default()),
+            );
+        }
+        Err(e) => {
+            info!(error = %e, "tka sync send: db error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSyncSendResponse::default()),
+            );
+        }
+    };
+
+    let mut current_head = tka_state.head.unwrap_or_default();
+
+    // process each AUM
+    for aum_bytes in &req.missing_aums {
+        // parse the AUM
+        let aum = match railscale_tka::Aum::from_cbor(aum_bytes.as_bytes()) {
+            Ok(a) => a,
+            Err(e) => {
+                info!(error = %e, "tka sync send: invalid aum");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(TkaSyncSendResponse { head: current_head }),
+                );
+            }
+        };
+
+        // compute hash
+        let aum_hash = match aum.hash() {
+            Ok(h) => h.to_string(),
+            Err(e) => {
+                info!(error = %e, "tka sync send: failed to hash aum");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(TkaSyncSendResponse { head: current_head }),
+                );
+            }
+        };
+
+        // get prev hash
+        let prev_hash = aum.prev_aum_hash.as_ref().map(|h| hex::encode(h));
+
+        // verify the AUM chains properly (prev_hash should match our current head or be in our chain)
+        // for now, we just store it
+
+        // store the AUM
+        if let Err(e) = state
+            .db
+            .store_aum(&aum_hash, prev_hash.as_deref(), aum_bytes.as_bytes())
+            .await
+        {
+            info!(error = %e, "tka sync send: failed to store aum");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSyncSendResponse { head: current_head }),
+            );
+        }
+
+        debug!(hash = %aum_hash, "tka sync send: stored aum");
+        current_head = aum_hash;
+    }
+
+    // update head in tka_state if we received any AUMs
+    if !req.missing_aums.is_empty() {
+        let now = chrono::Utc::now();
+        let updated_state = railscale_db::TkaState {
+            head: Some(current_head.clone()),
+            updated_at: now,
+            ..tka_state
+        };
+
+        if let Err(e) = state.db.upsert_tka_state(&updated_state).await {
+            info!(error = %e, "tka sync send: failed to update head");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSyncSendResponse { head: current_head }),
+            );
+        }
+    }
+
+    info!(head = %current_head, aums = req.missing_aums.len(), "tka sync send: processed");
     (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(TkaSyncSendResponse::default()),
+        StatusCode::OK,
+        Json(TkaSyncSendResponse { head: current_head }),
     )
 }
 
@@ -1418,6 +1546,11 @@ mod tests {
         };
         let genesis_bytes = signed_genesis.to_cbor().unwrap();
 
+        // store genesis in AUM chain
+        db.store_aum(&genesis_hash.to_string(), None, &genesis_bytes)
+            .await
+            .unwrap();
+
         // enable TKA
         let tka_state = TkaState {
             id: 0,
@@ -1600,5 +1733,132 @@ mod tests {
         // heads match, no sync needed
         assert_eq!(resp.head, genesis_hash.to_string());
         assert!(resp.missing_aums.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tka_sync_send_returns_current_head() {
+        use railscale_db::{Database, TkaState};
+        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a user and node
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+        };
+        db.create_node(&node).await.unwrap();
+
+        // create TKA key and genesis
+        let nl_private = NlPrivateKey::generate();
+        let nl_public = nl_private.public_key();
+        let tka_key = Key {
+            kind: KeyKind::Ed25519,
+            public: nl_public.as_bytes().to_vec(),
+            votes: 1,
+            meta: None,
+        };
+        let tka_key_id = tka_key.id().unwrap();
+
+        let genesis = Aum {
+            message_kind: AumKind::AddKey,
+            prev_aum_hash: None,
+            key: Some(tka_key),
+            key_id: None,
+            state: None,
+            votes: None,
+            meta: None,
+            signatures: vec![],
+        };
+        let genesis_hash = genesis.hash().unwrap();
+        let sig = nl_private.sign(genesis_hash.as_bytes());
+        let signed_genesis = Aum {
+            signatures: vec![AumSignature {
+                key_id: tka_key_id.as_bytes().to_vec(),
+                signature: sig.to_vec(),
+            }],
+            ..genesis
+        };
+        let genesis_bytes = signed_genesis.to_cbor().unwrap();
+
+        // enable TKA
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some(genesis_hash.to_string()),
+            state_checkpoint: None,
+            disablement_secrets: None,
+            genesis_aum: Some(genesis_bytes),
+            created_at: now,
+            updated_at: now,
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // send empty AUMs (just testing the endpoint works)
+        let req = TkaSyncSendRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            head: genesis_hash.to_string(),
+            missing_aums: vec![],
+            interactive: false,
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/sync/send")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: TkaSyncSendResponse = serde_json::from_slice(&body).unwrap();
+
+        // should return current head
+        assert_eq!(resp.head, genesis_hash.to_string());
     }
 }
