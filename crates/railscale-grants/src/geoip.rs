@@ -1,7 +1,6 @@
 //! geoip resolution for ip:country posture checks
 
 use std::net::IpAddr;
-use std::path::Path;
 
 /// resolves IP addresses to country codes
 pub trait GeoIpResolver: Send + Sync {

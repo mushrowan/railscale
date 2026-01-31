@@ -255,11 +255,15 @@ impl GrantsEngine {
     ) -> PostureContext {
         let mut ctx = PostureContext::new();
 
-        // populate ip:country from geoip lookup
-        if let (Some(ip), Some(resolver)) = (client_ip, geoip) {
-            if let Some(country) = resolver.lookup_country(ip) {
-                ctx.set("ip:country", country);
-            }
+        // populate ip:country - prefer live geoip lookup, fall back to cached
+        let country = if let (Some(ip), Some(resolver)) = (client_ip, geoip) {
+            resolver.lookup_country(ip)
+        } else {
+            // use cached country from node's last connection
+            node.last_seen_country.clone()
+        };
+        if let Some(country) = country {
+            ctx.set("ip:country", country);
         }
 
         // populate node:* attributes from hostinfo
@@ -1364,5 +1368,46 @@ mod tests {
             Some(other_ip),
             &geoip
         ));
+    }
+
+    #[test]
+    fn test_ip_country_uses_cached_last_seen_country() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:us_only".to_string(),
+            vec!["ip:country == 'US'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:us_only".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let user_resolver = EmptyResolver;
+
+        // create node with cached country
+        let mut us_node = test_node(1, vec![]);
+        us_node.last_seen_country = Some("US".to_string());
+
+        let mut uk_node = test_node(2, vec![]);
+        uk_node.last_seen_country = Some("UK".to_string());
+
+        let mut no_country_node = test_node(3, vec![]);
+        no_country_node.last_seen_country = None;
+
+        let dst_node = test_node(4, vec![]);
+
+        // US node should be able to see dst (using cached country)
+        assert!(engine.can_see(&us_node, &dst_node, &user_resolver));
+
+        // UK node should NOT be able to see dst
+        assert!(!engine.can_see(&uk_node, &dst_node, &user_resolver));
+
+        // node with no cached country should NOT be able to see dst (fail closed)
+        assert!(!engine.can_see(&no_country_node, &dst_node, &user_resolver));
     }
 }
