@@ -19,6 +19,8 @@ pub mod ssh;
 pub use capability::{AppCapability, NetworkCapability, Protocol};
 pub use engine::{GrantsEngine, UserResolver};
 pub use error::{Error, ParseError, Result, ValidationError};
+#[cfg(feature = "maxminddb")]
+pub use geoip::MaxmindDbResolver;
 pub use geoip::{GeoIpResolver, NoopGeoIpResolver};
 pub use grant::Grant;
 pub use policy::Policy;

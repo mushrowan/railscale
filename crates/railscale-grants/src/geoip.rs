@@ -1,6 +1,7 @@
 //! geoip resolution for ip:country posture checks
 
 use std::net::IpAddr;
+use std::path::Path;
 
 /// resolves IP addresses to country codes
 pub trait GeoIpResolver: Send + Sync {
@@ -15,6 +16,42 @@ pub struct NoopGeoIpResolver;
 impl GeoIpResolver for NoopGeoIpResolver {
     fn lookup_country(&self, _ip: IpAddr) -> Option<String> {
         None
+    }
+}
+
+/// resolver backed by a MaxMind GeoLite2-Country database
+#[cfg(feature = "maxminddb")]
+pub struct MaxmindDbResolver {
+    reader: maxminddb::Reader<Vec<u8>>,
+}
+
+#[cfg(feature = "maxminddb")]
+impl MaxmindDbResolver {
+    /// load a maxminddb database from the given path
+    ///
+    /// returns None if the file doesn't exist or can't be read
+    pub fn from_path(path: impl AsRef<Path>) -> Option<Self> {
+        let reader = maxminddb::Reader::open_readfile(path).ok()?;
+        Some(Self { reader })
+    }
+}
+
+#[cfg(feature = "maxminddb")]
+impl GeoIpResolver for MaxmindDbResolver {
+    fn lookup_country(&self, ip: IpAddr) -> Option<String> {
+        #[derive(serde::Deserialize)]
+        struct Country<'a> {
+            iso_code: &'a str,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct GeoData<'a> {
+            #[serde(borrow)]
+            country: Option<Country<'a>>,
+        }
+
+        let data: GeoData = self.reader.lookup(ip).ok()?;
+        data.country.map(|c| c.iso_code.to_string())
     }
 }
 
@@ -74,5 +111,16 @@ mod tests {
     fn noop_resolver_returns_none() {
         let resolver = NoopGeoIpResolver;
         assert_eq!(resolver.lookup_country("8.8.8.8".parse().unwrap()), None);
+    }
+
+    #[cfg(feature = "maxminddb")]
+    mod maxminddb_tests {
+        use super::super::MaxmindDbResolver;
+
+        #[test]
+        fn missing_database_returns_none() {
+            let resolver = MaxmindDbResolver::from_path("/nonexistent/path/GeoLite2-Country.mmdb");
+            assert!(resolver.is_none());
+        }
     }
 }

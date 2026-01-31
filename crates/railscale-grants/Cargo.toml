@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+maxminddb = ["dep:maxminddb"]
+
 [dependencies]
 railscale-types = { workspace = true }
 railscale-proto = { workspace = true }
@@ -13,6 +17,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 ipnet = { workspace = true }
 humantime-serde = { workspace = true }
+maxminddb = { workspace = true, optional = true }
 
 [dev-dependencies]
 chrono = { workspace = true }
