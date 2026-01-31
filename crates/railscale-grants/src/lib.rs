@@ -20,5 +20,6 @@ pub use engine::{GrantsEngine, UserResolver};
 pub use error::{Error, ParseError, Result, ValidationError};
 pub use grant::Grant;
 pub use policy::Policy;
+pub use posture::{PostureAttr, PostureContext, PostureExpr, PostureOp, PostureParseError};
 pub use selector::{Autogroup, Selector};
 pub use ssh::{SshActionType, SshPolicyRule, build_ssh_users_map};
