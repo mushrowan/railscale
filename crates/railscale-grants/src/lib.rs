@@ -11,6 +11,7 @@ pub mod engine;
 pub mod error;
 pub mod grant;
 pub mod policy;
+pub mod posture;
 pub mod selector;
 pub mod ssh;
 
