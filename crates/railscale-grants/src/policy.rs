@@ -38,6 +38,19 @@ pub struct Policy {
     #[serde(default)]
     pub groups: HashMap<String, Vec<String>>,
 
+    /// named posture definitions
+    ///
+    /// maps posture names (e.g., `"posture:latestMac"`) to lists of condition strings.
+    /// each condition is a posture expression like `"node:os == 'macos'"`.
+    #[serde(default)]
+    pub postures: HashMap<String, Vec<String>>,
+
+    /// default source posture applied to grants without explicit srcPosture
+    ///
+    /// list of posture names that are checked with OR semantics.
+    #[serde(default, rename = "defaultSrcPosture")]
+    pub default_src_posture: Vec<String>,
+
     /// all grants in this policy.
     #[serde(default)]
     pub grants: Vec<Grant>,
@@ -66,7 +79,26 @@ impl Policy {
             grant
                 .validate()
                 .map_err(|e| Error::InvalidGrant { index: i, cause: e })?;
+
+            // validate posture references exist
+            for posture_name in &grant.src_posture {
+                if !self.postures.contains_key(posture_name) {
+                    return Err(Error::InvalidPostureReference {
+                        name: posture_name.clone(),
+                    });
+                }
+            }
         }
+
+        // validate default posture references
+        for posture_name in &self.default_src_posture {
+            if !self.postures.contains_key(posture_name) {
+                return Err(Error::InvalidPostureReference {
+                    name: posture_name.clone(),
+                });
+            }
+        }
+
         for (i, ssh_rule) in self.ssh.iter().enumerate() {
             ssh_rule
                 .validate()
@@ -122,6 +154,8 @@ mod proptests {
         ) {
             let policy = Policy {
                 groups,
+                postures: HashMap::new(),
+                default_src_posture: vec![],
                 grants: vec![],
                 ssh: vec![],
             };
@@ -389,6 +423,92 @@ mod tests {
                     "users": ["ubuntu"]
                 }
             ]
+        }"#;
+
+        let result = Policy::from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_policy_with_postures() {
+        let json = r#"{
+            "postures": {
+                "posture:latestMac": [
+                    "node:os == 'macos'",
+                    "node:tsVersion >= '1.40'"
+                ]
+            },
+            "grants": [
+                {"src": ["*"], "dst": ["*"], "ip": ["*"]}
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(policy.postures.len(), 1);
+        assert!(policy.postures.contains_key("posture:latestMac"));
+        assert_eq!(policy.postures["posture:latestMac"].len(), 2);
+    }
+
+    #[test]
+    fn test_parse_grant_with_src_posture() {
+        let json = r#"{
+            "postures": {
+                "posture:latestMac": ["node:os == 'macos'"]
+            },
+            "grants": [
+                {
+                    "src": ["*"],
+                    "dst": ["tag:prod"],
+                    "ip": ["*"],
+                    "srcPosture": ["posture:latestMac"]
+                }
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(policy.grants[0].src_posture, vec!["posture:latestMac"]);
+    }
+
+    #[test]
+    fn test_parse_default_src_posture() {
+        let json = r#"{
+            "postures": {
+                "posture:baseline": ["node:os IN ['macos', 'linux']"]
+            },
+            "defaultSrcPosture": ["posture:baseline"],
+            "grants": [
+                {"src": ["*"], "dst": ["*"], "ip": ["*"]}
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(policy.default_src_posture, vec!["posture:baseline"]);
+    }
+
+    #[test]
+    fn test_validate_posture_reference_exists() {
+        let json = r#"{
+            "postures": {},
+            "grants": [
+                {
+                    "src": ["*"],
+                    "dst": ["*"],
+                    "ip": ["*"],
+                    "srcPosture": ["posture:nonexistent"]
+                }
+            ]
+        }"#;
+
+        let result = Policy::from_json(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_default_posture_reference_exists() {
+        let json = r#"{
+            "postures": {},
+            "defaultSrcPosture": ["posture:nonexistent"],
+            "grants": []
         }"#;
 
         let result = Policy::from_json(json);

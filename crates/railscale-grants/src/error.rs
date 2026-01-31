@@ -30,6 +30,13 @@ pub enum Error {
     /// failed to parse selector.
     #[error("failed to parse selector: {0}")]
     ParseSelector(#[from] ParseError),
+
+    /// posture reference not found in postures map
+    #[error("posture not defined: {name}")]
+    InvalidPostureReference {
+        /// the undefined posture name
+        name: String,
+    },
 }
 
 /// validation errors for grants.
