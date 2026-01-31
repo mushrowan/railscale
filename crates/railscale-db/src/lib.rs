@@ -154,6 +154,13 @@ pub trait Database: Send + Sync {
     /// update an existing node. also updates `updated_at` timestamp.
     fn update_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
 
+    /// set posture attributes for a node
+    fn set_node_posture_attributes(
+        &self,
+        id: NodeId,
+        attrs: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> impl Future<Output = Result<()>> + Send;
+
     /// soft-delete a node by setting `deleted_at` timestamp.
     fn delete_node(&self, id: NodeId) -> impl Future<Output = Result<()>> + Send;
 
@@ -462,6 +469,32 @@ impl Database for RailscaleDb {
         model.updated_at = Set(Utc::now());
         let result = model.update(&self.conn).await?;
         Ok(result.into())
+    }
+
+    async fn set_node_posture_attributes(
+        &self,
+        id: NodeId,
+        attrs: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
+        let attrs_json = if attrs.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(attrs)?)
+        };
+        entity::node::Entity::update_many()
+            .col_expr(
+                entity::node::Column::PostureAttributes,
+                sea_orm::sea_query::Expr::value(attrs_json),
+            )
+            .col_expr(
+                entity::node::Column::UpdatedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::node::Column::Id.eq(id.0 as i64))
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .exec(&self.conn)
+            .await?;
+        Ok(())
     }
 
     async fn delete_node(&self, id: NodeId) -> Result<()> {

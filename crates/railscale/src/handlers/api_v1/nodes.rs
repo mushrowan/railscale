@@ -8,11 +8,14 @@
 //! - `POST /api/v1/node/{id}/rename/{new_name}` - rename a node
 //! - `POST /api/v1/node/{id}/tags` - set node tags
 //! - `POST /api/v1/node/{id}/routes` - set approved routes
+//! - `PATCH /api/v1/node/{id}/attributes` - set posture attributes
+
+use std::collections::HashMap;
 
 use axum::{
     Json, Router,
     extract::{Path, State},
-    routing::{get, post},
+    routing::{get, patch, post},
 };
 use chrono::Utc;
 use ipnet::IpNet;
@@ -142,6 +145,7 @@ pub fn router() -> Router<AppState> {
         .route("/{id}/rename/{new_name}", post(rename_node))
         .route("/{id}/tags", post(set_tags))
         .route("/{id}/routes", post(set_routes))
+        .route("/{id}/attributes", patch(set_posture_attributes))
 }
 
 /// list all nodes.
@@ -366,6 +370,76 @@ async fn set_routes(
     state.notifier.notify_state_changed();
 
     Ok(Json(SetRoutesResponse {
+        node: NodeResponse::from(node),
+    }))
+}
+
+/// request to set posture attributes.
+#[derive(Debug, Deserialize)]
+pub struct SetPostureAttributesRequest {
+    /// posture attributes to set
+    ///
+    /// values can be strings, numbers, or booleans.
+    /// to delete an attribute, set it to null.
+    pub attributes: HashMap<String, serde_json::Value>,
+}
+
+/// response for set posture attributes endpoint.
+#[derive(Debug, Serialize)]
+pub struct SetPostureAttributesResponse {
+    pub node: NodeResponse,
+}
+
+/// set posture attributes for a node.
+///
+/// `PATCH /api/v1/node/{id}/attributes`
+///
+/// this endpoint sets custom posture attributes (`custom:*` namespace)
+/// that can be used in policy posture conditions.
+async fn set_posture_attributes(
+    _auth: ApiKeyContext,
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+    Json(req): Json<SetPostureAttributesRequest>,
+) -> Result<Json<SetPostureAttributesResponse>, ApiError> {
+    let node_id = NodeId(id);
+
+    // get the current node
+    let mut node = state
+        .db
+        .get_node(node_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
+
+    // merge attributes: null values delete the key
+    for (key, value) in req.attributes {
+        if value.is_null() {
+            node.posture_attributes.remove(&key);
+        } else {
+            node.posture_attributes.insert(key, value);
+        }
+    }
+
+    // update in database
+    state
+        .db
+        .set_node_posture_attributes(node_id, &node.posture_attributes)
+        .await
+        .map_err(ApiError::internal)?;
+
+    // refetch to get updated node
+    let node = state
+        .db
+        .get_node(node_id)
+        .await
+        .map_err(ApiError::internal)?
+        .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
+
+    // notify connected clients
+    state.notifier.notify_state_changed();
+
+    Ok(Json(SetPostureAttributesResponse {
         node: NodeResponse::from(node),
     }))
 }
