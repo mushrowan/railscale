@@ -128,6 +128,8 @@ pub struct AppState {
     pub dns_cache: Cache<String, Vec<std::net::IpAddr>>,
     /// presence tracker for connected nodes (for online status).
     pub presence: PresenceTracker,
+    /// geoip resolver for ip:country posture checks (None if not configured).
+    pub geoip: Option<Arc<railscale_grants::MaxmindDbResolver>>,
 }
 
 /// routers for the application, potentially running on separate listeners.
@@ -329,6 +331,23 @@ pub async fn create_app_routers_with_policy_handle(
     // determine if api should run on separate listener
     let api_separate = config.api.enabled && config.api.listen_host.is_some();
 
+    // load geoip database if configured
+    let geoip = config.geoip_database_path.as_ref().and_then(|path| {
+        match railscale_grants::MaxmindDbResolver::from_path(path) {
+            Some(resolver) => {
+                tracing::info!(?path, "loaded geoip database for ip:country posture checks");
+                Some(Arc::new(resolver))
+            }
+            None => {
+                tracing::warn!(
+                    ?path,
+                    "geoip_database_path configured but database not found or invalid"
+                );
+                None
+            }
+        }
+    });
+
     let state = AppState {
         db,
         grants,
@@ -342,6 +361,7 @@ pub async fn create_app_routers_with_policy_handle(
         derp_map,
         dns_cache,
         presence: PresenceTracker::new(),
+        geoip,
     };
 
     // build protocol router

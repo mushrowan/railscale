@@ -1,6 +1,8 @@
 //! geoip resolution for ip:country posture checks
 
 use std::net::IpAddr;
+#[cfg(feature = "maxminddb")]
+use std::path::Path;
 
 /// resolves IP addresses to country codes
 pub trait GeoIpResolver: Send + Sync {
