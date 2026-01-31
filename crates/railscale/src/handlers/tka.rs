@@ -382,17 +382,150 @@ pub async fn tka_disable(
 ///
 /// submit a node-key signature.
 pub async fn tka_sign(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<TkaSubmitSignatureRequest>,
 ) -> impl IntoResponse {
-    info!(
-        node_key = ?req.node_key,
-        "tka sign request (not yet implemented)"
-    );
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(TkaSubmitSignatureResponse::default()),
-    )
+    debug!(node_key = ?req.node_key, "tka sign request");
+
+    // verify TKA is enabled
+    let tka_state = match state.db.get_tka_state().await {
+        Ok(Some(s)) if s.enabled => s,
+        Ok(Some(_)) => {
+            info!("tka sign: tka not enabled");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+        Ok(None) => {
+            info!("tka sign: no tka state");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+        Err(e) => {
+            info!(error = %e, "tka sign: db error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    // load genesis to get TKA public key
+    let genesis_bytes = match &tka_state.genesis_aum {
+        Some(b) => b,
+        None => {
+            info!("tka sign: no genesis aum stored");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    let genesis = match railscale_tka::Aum::from_cbor(genesis_bytes) {
+        Ok(a) => a,
+        Err(e) => {
+            info!(error = %e, "tka sign: failed to parse genesis");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    let tka_key = match &genesis.key {
+        Some(k) => k,
+        None => {
+            info!("tka sign: genesis has no key");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    let tka_public = match railscale_tka::NlPublicKey::try_from(tka_key.public.as_slice()) {
+        Ok(p) => p,
+        Err(e) => {
+            info!(error = %e, "tka sign: invalid tka public key");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    // parse the signature
+    let sig = match railscale_tka::NodeKeySignature::from_cbor(req.signature.as_bytes()) {
+        Ok(s) => s,
+        Err(e) => {
+            info!(error = %e, "tka sign: invalid signature");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    // verify the signature
+    if let Err(e) = sig.verify(&tka_public) {
+        info!(error = %e, "tka sign: signature verification failed");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(TkaSubmitSignatureResponse::default()),
+        );
+    }
+
+    // extract the node key from the signature
+    let signed_pubkey = match &sig.pubkey {
+        Some(p) => p,
+        None => {
+            info!("tka sign: signature has no pubkey");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    // find the node with this pubkey
+    let signed_node_key = railscale_types::NodeKey::from_bytes(signed_pubkey.clone());
+    let node = match state.db.get_node_by_node_key(&signed_node_key).await {
+        Ok(Some(n)) => n,
+        Ok(None) => {
+            info!(node_key = ?signed_node_key, "tka sign: node not found");
+            return (
+                StatusCode::NOT_FOUND,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+        Err(e) => {
+            info!(error = %e, "tka sign: db error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaSubmitSignatureResponse::default()),
+            );
+        }
+    };
+
+    // store the signature
+    if let Err(e) = state
+        .db
+        .set_node_key_signature(node.id, req.signature.as_bytes())
+        .await
+    {
+        info!(node_id = %node.id, error = %e, "tka sign: failed to store signature");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TkaSubmitSignatureResponse::default()),
+        );
+    }
+
+    info!(node_id = %node.id, "tka sign: signature stored");
+    (StatusCode::OK, Json(TkaSubmitSignatureResponse::default()))
 }
 
 #[cfg(test)]
@@ -802,5 +935,142 @@ mod tests {
         // when tka enabled with genesis, should return genesis_aum
         assert!(resp.genesis_aum.is_some());
         assert_eq!(resp.genesis_aum.unwrap().as_bytes(), genesis_bytes);
+    }
+
+    #[tokio::test]
+    async fn tka_sign_stores_signature_for_node() {
+        use railscale_db::{Database, TkaState};
+        use railscale_tka::{
+            Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey, NodeKeySignature,
+        };
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create TKA key
+        let nl_private = NlPrivateKey::generate();
+        let nl_public = nl_private.public_key();
+        let tka_key = Key {
+            kind: KeyKind::Ed25519,
+            public: nl_public.as_bytes().to_vec(),
+            votes: 1,
+            meta: None,
+        };
+        let tka_key_id = tka_key.id().unwrap();
+
+        // create and store genesis AUM
+        let genesis = Aum {
+            message_kind: AumKind::AddKey,
+            prev_aum_hash: None,
+            key: Some(tka_key),
+            key_id: None,
+            state: None,
+            votes: None,
+            meta: None,
+            signatures: vec![],
+        };
+        let genesis_hash = genesis.hash().unwrap();
+        let sig = nl_private.sign(genesis_hash.as_bytes());
+        let signed_genesis = Aum {
+            signatures: vec![AumSignature {
+                key_id: tka_key_id.as_bytes().to_vec(),
+                signature: sig.to_vec(),
+            }],
+            ..genesis
+        };
+        let genesis_bytes = signed_genesis.to_cbor().unwrap();
+
+        // enable TKA in database
+        let now = chrono::Utc::now();
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some(genesis_hash.to_string()),
+            state_checkpoint: None,
+            disablement_secrets: None,
+            genesis_aum: Some(genesis_bytes),
+            created_at: now,
+            updated_at: now,
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        // create a user and node (without signature)
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+        };
+        let node = db.create_node(&node).await.unwrap();
+
+        // verify no signature stored yet
+        assert!(db.get_node_key_signature(node.id).await.unwrap().is_none());
+
+        // create a valid node-key signature
+        let node_pubkey_bytes = node_key.as_bytes().to_vec();
+        let node_sig =
+            NodeKeySignature::sign_direct(&node_pubkey_bytes, &tka_key_id, &nl_private).unwrap();
+        let node_sig_bytes = node_sig.to_cbor().unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // submit the signature
+        let req = TkaSubmitSignatureRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            signature: node_sig_bytes.clone().into(),
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/sign")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // verify signature was stored
+        let stored_sig = db
+            .get_node_key_signature(node.id)
+            .await
+            .unwrap()
+            .expect("signature stored");
+        assert_eq!(stored_sig, node_sig_bytes);
     }
 }
