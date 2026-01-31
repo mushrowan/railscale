@@ -364,18 +364,87 @@ pub async fn tka_sync_send(
 ///
 /// disable tka with disablement secret.
 pub async fn tka_disable(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(req): Json<TkaDisableRequest>,
 ) -> impl IntoResponse {
-    info!(
-        node_key = ?req.node_key,
-        head = %req.head,
-        "tka disable request (not yet implemented)"
-    );
-    (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(TkaDisableResponse::default()),
-    )
+    debug!(node_key = ?req.node_key, head = %req.head, "tka disable request");
+
+    // verify TKA is enabled
+    let tka_state = match state.db.get_tka_state().await {
+        Ok(Some(s)) if s.enabled => s,
+        Ok(Some(_)) => {
+            info!("tka disable: tka not enabled");
+            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
+        }
+        Ok(None) => {
+            info!("tka disable: no tka state");
+            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
+        }
+        Err(e) => {
+            info!(error = %e, "tka disable: db error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TkaDisableResponse::default()),
+            );
+        }
+    };
+
+    // get stored disablement secret hashes
+    let stored_hashes = match &tka_state.disablement_secrets {
+        Some(h) if !h.is_empty() => h,
+        _ => {
+            info!("tka disable: no disablement secrets configured");
+            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
+        }
+    };
+
+    // verify the provided secret against stored hashes
+    // stored as concatenated 32-byte hashes
+    let secret_bytes: [u8; 32] = match req.disablement_secret.as_slice().try_into() {
+        Ok(b) => b,
+        Err(_) => {
+            info!("tka disable: invalid secret length");
+            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
+        }
+    };
+
+    let secret = railscale_tka::DisablementSecret::from(secret_bytes);
+
+    // check each stored hash (32 bytes each)
+    let mut valid = false;
+    for chunk in stored_hashes.chunks(32) {
+        if chunk.len() == 32 {
+            let hash: [u8; 32] = chunk.try_into().unwrap();
+            if secret.verify(&hash) {
+                valid = true;
+                break;
+            }
+        }
+    }
+
+    if !valid {
+        info!("tka disable: invalid disablement secret");
+        return (StatusCode::FORBIDDEN, Json(TkaDisableResponse::default()));
+    }
+
+    // disable TKA
+    let now = chrono::Utc::now();
+    let updated_state = railscale_db::TkaState {
+        enabled: false,
+        updated_at: now,
+        ..tka_state
+    };
+
+    if let Err(e) = state.db.upsert_tka_state(&updated_state).await {
+        info!(error = %e, "tka disable: failed to update state");
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TkaDisableResponse::default()),
+        );
+    }
+
+    info!("tka disabled");
+    (StatusCode::OK, Json(TkaDisableResponse::default()))
 }
 
 /// POST /machine/tka/sign
@@ -1072,5 +1141,141 @@ mod tests {
             .unwrap()
             .expect("signature stored");
         assert_eq!(stored_sig, node_sig_bytes);
+    }
+
+    #[tokio::test]
+    async fn tka_disable_with_valid_secret() {
+        use railscale_db::{Database, TkaState};
+        use railscale_tka::{
+            Aum, AumKind, AumSignature, DisablementSecret, Key, KeyKind, NlPrivateKey,
+        };
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a user and node (needed for request authentication)
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+        };
+        db.create_node(&node).await.unwrap();
+
+        // create TKA key and genesis
+        let nl_private = NlPrivateKey::generate();
+        let nl_public = nl_private.public_key();
+        let tka_key = Key {
+            kind: KeyKind::Ed25519,
+            public: nl_public.as_bytes().to_vec(),
+            votes: 1,
+            meta: None,
+        };
+        let tka_key_id = tka_key.id().unwrap();
+
+        let genesis = Aum {
+            message_kind: AumKind::AddKey,
+            prev_aum_hash: None,
+            key: Some(tka_key),
+            key_id: None,
+            state: None,
+            votes: None,
+            meta: None,
+            signatures: vec![],
+        };
+        let genesis_hash = genesis.hash().unwrap();
+        let sig = nl_private.sign(genesis_hash.as_bytes());
+        let signed_genesis = Aum {
+            signatures: vec![AumSignature {
+                key_id: tka_key_id.as_bytes().to_vec(),
+                signature: sig.to_vec(),
+            }],
+            ..genesis
+        };
+        let genesis_bytes = signed_genesis.to_cbor().unwrap();
+
+        // create a disablement secret and store its hash
+        let secret_bytes: [u8; 32] = [0xab; 32];
+        let secret = DisablementSecret::from(secret_bytes);
+        let secret_hash = secret.hash();
+
+        // store hashes as simple vec of 32-byte hashes concatenated
+        let disablement_secrets = secret_hash.to_vec();
+
+        // enable TKA with disablement secret
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some(genesis_hash.to_string()),
+            state_checkpoint: None,
+            disablement_secrets: Some(disablement_secrets),
+            genesis_aum: Some(genesis_bytes),
+            created_at: now,
+            updated_at: now,
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        // verify TKA is enabled
+        let state = db.get_tka_state().await.unwrap().unwrap();
+        assert!(state.enabled);
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // disable TKA with the secret
+        let req = TkaDisableRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            head: genesis_hash.to_string(),
+            disablement_secret: secret_bytes.to_vec(),
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/disable")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // verify TKA is now disabled
+        let state = db.get_tka_state().await.unwrap().unwrap();
+        assert!(!state.enabled);
     }
 }
