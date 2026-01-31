@@ -75,10 +75,8 @@
               clippy = clippyBase { cargoClippyExtraArgs = "--all-targets"; };
               clippyDenyWarnings = clippyBase { cargoClippyExtraArgs = "--all-targets -- --deny warnings"; };
 
-              fmt = craneLib.cargoFmt {
-                inherit (commonArgs) src;
-                inherit cargoArtifacts;
-              };
+              # note: cargoFmt clears cargoArtifacts/cargoVendorDir by design (no compilation needed)
+              fmt = craneLib.cargoFmt { inherit (commonArgs) src; };
               cargoTest = craneLib.cargoTest (commonArgs // { inherit cargoArtifacts; });
             }
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {

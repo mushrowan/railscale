@@ -19,6 +19,7 @@ railscale-db = { workspace = true }
 railscale-proto = { workspace = true }
 railscale-grants = { workspace = true }
 railscale-admin = { workspace = true }
+railscale-tka = { workspace = true }
 tokio = { workspace = true }
 color-eyre = { workspace = true }
 thiserror = { workspace = true }
