@@ -3,6 +3,7 @@
 //! nodes are the core entity in railscale - they represent devices
 //! connected to the tailnet.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 
 use chrono::{DateTime, Utc};
@@ -114,6 +115,13 @@ pub struct Node {
     /// whether the node is currently online (not persisted).
     #[serde(skip)]
     pub is_online: Option<bool>,
+
+    /// custom posture attributes for access control
+    ///
+    /// key-value pairs in the `custom:` namespace (e.g., `custom:tier`, `custom:managed`).
+    /// values can be strings, numbers, or booleans.
+    #[serde(default)]
+    pub posture_attributes: HashMap<String, serde_json::Value>,
 }
 
 impl Node {

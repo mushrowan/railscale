@@ -852,6 +852,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         let node = db.create_node(&node).await.unwrap();
 
@@ -1014,6 +1015,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         let node = db.create_node(&node).await.unwrap();
 
@@ -1286,6 +1288,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         let node = db.create_node(&node).await.unwrap();
 
@@ -1377,6 +1380,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         db.create_node(&node).await.unwrap();
 
@@ -1511,6 +1515,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         db.create_node(&node).await.unwrap();
 
@@ -1644,6 +1649,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         db.create_node(&node).await.unwrap();
 
@@ -1771,6 +1777,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         db.create_node(&node).await.unwrap();
 

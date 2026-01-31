@@ -89,6 +89,7 @@ async fn test_map_request_updates_disco_key() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
 
     db.create_node(&node).await.unwrap();
@@ -191,6 +192,7 @@ async fn test_map_request_updates_hostinfo() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
 
     db.create_node(&node).await.unwrap();
@@ -324,6 +326,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
     db.create_node(&peer_node).await.unwrap();
 
@@ -350,6 +353,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
     db.create_node(&node).await.unwrap();
 
@@ -454,6 +458,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
     db.create_node(&peer_node).await.unwrap();
 
@@ -480,6 +485,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
     db.create_node(&node).await.unwrap();
 
@@ -678,6 +684,7 @@ async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
 
     db.create_node(&node).await.unwrap();

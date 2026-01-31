@@ -11,6 +11,7 @@ use tracing::warn;
 use railscale_types::{
     DiscoKey, HostInfo, MachineKey, Node, NodeId, NodeKey, RegisterMethod, Tag, UserId,
 };
+use std::collections::HashMap;
 
 /// node database model.
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
@@ -73,6 +74,10 @@ pub struct Model {
     /// tka node-key signature (cbor-encoded)
     #[sea_orm(column_type = "VarBinary(StringLen::None)", nullable)]
     pub key_signature: Option<Vec<u8>>,
+
+    /// custom posture attributes (json object)
+    #[sea_orm(column_type = "Text", nullable)]
+    pub posture_attributes: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -150,6 +155,18 @@ impl From<Model> for Node {
             _ => RegisterMethod::AuthKey,
         };
 
+        let posture_attributes: HashMap<String, serde_json::Value> = model
+            .posture_attributes
+            .as_ref()
+            .and_then(|s| match serde_json::from_str(s) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    warn!(node_id = model.id, error = %e, "failed to parse posture_attributes JSON");
+                    None
+                }
+            })
+            .unwrap_or_default();
+
         Node {
             id: NodeId(model.id as u64),
             machine_key: MachineKey::from_bytes(model.machine_key),
@@ -171,6 +188,7 @@ impl From<Model> for Node {
             created_at: model.created_at,
             updated_at: model.updated_at,
             is_online: None,
+            posture_attributes,
         }
     }
 }
@@ -186,6 +204,11 @@ impl From<&Node> for ActiveModel {
         let tags_json = serde_json::to_string(&node.tags).unwrap_or_else(|_| "[]".to_string());
         let approved_routes_json =
             serde_json::to_string(&node.approved_routes).unwrap_or_else(|_| "[]".to_string());
+        let posture_attributes_json = if node.posture_attributes.is_empty() {
+            None
+        } else {
+            serde_json::to_string(&node.posture_attributes).ok()
+        };
 
         let register_method = match node.register_method {
             RegisterMethod::AuthKey => "authkey",
@@ -219,6 +242,7 @@ impl From<&Node> for ActiveModel {
             updated_at: Set(node.updated_at),
             deleted_at: NotSet,
             key_signature: NotSet, // managed separately via TKA operations
+            posture_attributes: Set(posture_attributes_json),
         }
     }
 }

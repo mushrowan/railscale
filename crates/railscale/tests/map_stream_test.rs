@@ -73,6 +73,7 @@ impl MapTestFixture {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
 
         let node = db.create_node(&node).await.unwrap();
@@ -296,6 +297,7 @@ async fn test_streaming_map_receives_updates_on_state_change() {
         created_at: now,
         updated_at: now,
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
     fixture.db.create_node(&second_node).await.unwrap();
 

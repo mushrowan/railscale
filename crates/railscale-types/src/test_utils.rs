@@ -142,6 +142,7 @@ impl TestNodeBuilder {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         }
     }
 }

@@ -52,6 +52,7 @@ async fn test_policy_hot_reload_changes_visibility() {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         })
         .await
         .unwrap();
@@ -78,6 +79,7 @@ async fn test_policy_hot_reload_changes_visibility() {
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         })
         .await
         .unwrap();

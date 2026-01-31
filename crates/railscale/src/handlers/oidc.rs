@@ -223,6 +223,7 @@ pub async fn oidc_callback(
             created_at: now,
             updated_at: now,
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
 
         let node = state.db.create_node(&node).await.map_internal()?;

@@ -65,6 +65,7 @@ async fn test_verify_allows_registered_node() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         is_online: None,
+        posture_attributes: std::collections::HashMap::new(),
     };
     db.create_node(&node).await.expect("failed to create node");
 

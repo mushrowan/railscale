@@ -1013,6 +1013,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
 
         let created = db.create_node(&node).await.unwrap();
@@ -1108,6 +1109,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
         };
         let created = db.create_node(&node).await.unwrap();
 

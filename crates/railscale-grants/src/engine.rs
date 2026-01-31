@@ -225,10 +225,11 @@ impl GrantsEngine {
         })
     }
 
-    /// build a posture context from a node's hostinfo
+    /// build a posture context from a node's hostinfo and custom attributes
     fn build_posture_context(&self, node: &Node) -> PostureContext {
         let mut ctx = PostureContext::new();
 
+        // populate node:* attributes from hostinfo
         if let Some(ref hostinfo) = node.hostinfo {
             if let Some(ref os) = hostinfo.os {
                 ctx.set("node:os", os);
@@ -249,6 +250,19 @@ impl GrantsEngine {
                 ctx.set("node:tsReleaseTrack", track);
             }
             // tsAutoUpdate - not available in hostinfo, skip for now
+        }
+
+        // populate custom:* attributes from posture_attributes
+        for (key, value) in &node.posture_attributes {
+            let attr_key = format!("custom:{}", key);
+            // convert json value to string for comparison
+            let str_value = match value {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                serde_json::Value::Number(n) => n.to_string(),
+                _ => continue, // skip null, arrays, objects
+            };
+            ctx.set(&attr_key, str_value);
         }
 
         ctx
@@ -1149,5 +1163,114 @@ mod tests {
 
         assert!(engine.can_see(&new_node, &dst_node, &resolver));
         assert!(!engine.can_see(&old_node, &dst_node, &resolver));
+    }
+
+    // custom posture attribute tests
+
+    fn test_node_with_custom_attrs(
+        id: u64,
+        attrs: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Node {
+        let mut node = TestNodeBuilder::new(id).build();
+        node.posture_attributes = attrs;
+        node
+    }
+
+    #[test]
+    fn test_custom_posture_attribute_string() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:managed".to_string(),
+            vec!["custom:tier == 'prod'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:managed".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let mut prod_attrs = std::collections::HashMap::new();
+        prod_attrs.insert("tier".to_string(), serde_json::json!("prod"));
+
+        let mut dev_attrs = std::collections::HashMap::new();
+        dev_attrs.insert("tier".to_string(), serde_json::json!("dev"));
+
+        let prod_node = test_node_with_custom_attrs(1, prod_attrs);
+        let dev_node = test_node_with_custom_attrs(2, dev_attrs);
+        let no_attr_node = test_node(3, vec![]);
+        let dst_node = test_node(4, vec![]);
+
+        assert!(engine.can_see(&prod_node, &dst_node, &resolver));
+        assert!(!engine.can_see(&dev_node, &dst_node, &resolver));
+        assert!(!engine.can_see(&no_attr_node, &dst_node, &resolver));
+    }
+
+    #[test]
+    fn test_custom_posture_attribute_is_set() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:has_mdm".to_string(),
+            vec!["custom:mdm_managed IS SET".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:has_mdm".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let mut managed_attrs = std::collections::HashMap::new();
+        managed_attrs.insert("mdm_managed".to_string(), serde_json::json!(true));
+
+        let managed_node = test_node_with_custom_attrs(1, managed_attrs);
+        let unmanaged_node = test_node(2, vec![]);
+        let dst_node = test_node(3, vec![]);
+
+        assert!(engine.can_see(&managed_node, &dst_node, &resolver));
+        assert!(!engine.can_see(&unmanaged_node, &dst_node, &resolver));
+    }
+
+    #[test]
+    fn test_custom_posture_attribute_boolean() {
+        let mut policy = Policy::empty();
+        policy.postures.insert(
+            "posture:compliant".to_string(),
+            vec!["custom:compliant == 'true'".to_string()],
+        );
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec!["posture:compliant".to_string()],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let mut compliant_attrs = std::collections::HashMap::new();
+        compliant_attrs.insert("compliant".to_string(), serde_json::json!(true));
+
+        let mut non_compliant_attrs = std::collections::HashMap::new();
+        non_compliant_attrs.insert("compliant".to_string(), serde_json::json!(false));
+
+        let compliant_node = test_node_with_custom_attrs(1, compliant_attrs);
+        let non_compliant_node = test_node_with_custom_attrs(2, non_compliant_attrs);
+        let dst_node = test_node(3, vec![]);
+
+        assert!(engine.can_see(&compliant_node, &dst_node, &resolver));
+        assert!(!engine.can_see(&non_compliant_node, &dst_node, &resolver));
     }
 }
