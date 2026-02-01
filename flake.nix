@@ -92,6 +92,12 @@
           packages = {
             default = railscale;
             inherit railscale;
+
+            # Smoke test for NixOS module options (not in checks, run manually)
+            # Usage: nix build .#module-smoke-test -L
+            module-smoke-test = import ./nix/tests/module-smoke.nix {
+              inherit pkgs railscale;
+            };
           };
 
           devShells.default = import ./nix/devshell.nix {

@@ -109,11 +109,22 @@ in
       };
     };
 
+    configFile = lib.mkOption {
+      type = lib.types.path;
+      readOnly = true;
+      default = configFile;
+      defaultText = lib.literalExpression ''(pkgs.formats.toml { }).generate "config.toml" cfg.settings'';
+      description = ''
+        path to the generated config file in the nix store.
+        useful for debugging or referencing from other modules.
+      '';
+    };
+
     settings = lib.mkOption {
       description = ''
-        Configuration settings for railscale.
-        These are converted to config.toml format.
-        See [config.example.toml](https://github.com/anomalyco/railscale/blob/main/config.example.toml)
+        configuration settings for railscale.
+        converted to config.toml format.
+        see config.example.toml in the repo
         for available options.
       '';
       default = { };
@@ -170,6 +181,16 @@ in
             description = ''
               IPv6 prefix for node address allocation.
               Must be within fd7a:115c:a1e0::/48 (Tailscale's ULA range).
+            '';
+          };
+
+          ip_allocation = lib.mkOption {
+            type = lib.types.enum [ "sequential" "random" ];
+            default = "sequential";
+            description = ''
+              ip allocation strategy for new nodes.
+              sequential: allocate ips in order (100.64.0.1, 100.64.0.2, ...).
+              random: allocate ips randomly within the prefix.
             '';
           };
 
@@ -241,6 +262,35 @@ in
               type = lib.types.listOf lib.types.str;
               default = [ ];
               description = "Search domains to inject to clients.";
+            };
+
+            extra_records = lib.mkOption {
+              type = lib.types.listOf (
+                lib.types.submodule {
+                  options = {
+                    name = lib.mkOption {
+                      type = lib.types.str;
+                      example = "grafana.railscale.net";
+                      description = "dns record name (FQDN)";
+                    };
+                    record_type = lib.mkOption {
+                      type = lib.types.enum [ "A" "AAAA" ];
+                      example = "A";
+                      description = "dns record type";
+                    };
+                    value = lib.mkOption {
+                      type = lib.types.str;
+                      example = "100.64.0.5";
+                      description = "dns record value (IP address)";
+                    };
+                  };
+                }
+              );
+              default = [ ];
+              example = [
+                { name = "grafana.railscale.net"; record_type = "A"; value = "100.64.0.5"; }
+              ];
+              description = "extra dns records served by MagicDNS";
             };
           };
 
@@ -320,7 +370,50 @@ in
                   expiry_secs = lib.mkOption {
                     type = lib.types.int;
                     default = 15552000; # 180 days
-                    description = "Node expiry in seconds after authentication.";
+                    description = "node expiry in seconds after authentication";
+                  };
+
+                  use_expiry_from_token = lib.mkOption {
+                    type = lib.types.bool;
+                    default = false;
+                    description = "use token expiry instead of expiry_secs";
+                  };
+
+                  group_prefix = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    example = "oidc-";
+                    description = ''
+                      prefix to apply to OIDC groups when mapping to policy groups.
+                      e.g. with prefix "oidc-", group "engineering" becomes "oidc-engineering"
+                    '';
+                  };
+
+                  extra_params = lib.mkOption {
+                    type = lib.types.attrsOf lib.types.str;
+                    default = { };
+                    example = { domain_hint = "example.com"; };
+                    description = "custom query parameters to send with the authorize endpoint request";
+                  };
+
+                  rate_limit_per_minute = lib.mkOption {
+                    type = lib.types.int;
+                    default = 30;
+                    description = "rate limit for OIDC endpoints (requests per minute per IP)";
+                  };
+
+                  pkce = {
+                    enabled = lib.mkOption {
+                      type = lib.types.bool;
+                      default = true;
+                      description = "enable PKCE (Proof Key for Code Exchange) for additional security";
+                    };
+
+                    method = lib.mkOption {
+                      type = lib.types.enum [ "S256" "Plain" ];
+                      default = "S256";
+                      description = "PKCE challenge method (S256 recommended)";
+                    };
                   };
                 };
               }
@@ -328,7 +421,7 @@ in
             default = null;
             description = ''
               OIDC authentication configuration.
-              When set, users authenticate via your identity provider.
+              when set, users authenticate via your identity provider.
             '';
           };
 
@@ -421,7 +514,52 @@ in
               stun_listen_addr = lib.mkOption {
                 type = lib.types.nullOr lib.types.str;
                 default = "0.0.0.0:3478";
-                description = "STUN server address for NAT traversal.";
+                description = "STUN server address for NAT traversal";
+              };
+
+              max_connections = lib.mkOption {
+                type = lib.types.int;
+                default = 1000;
+                description = "maximum concurrent DERP connections";
+              };
+
+              idle_timeout_secs = lib.mkOption {
+                type = lib.types.int;
+                default = 300;
+                description = "idle connection timeout in seconds (0 to disable)";
+              };
+
+              bytes_per_second = lib.mkOption {
+                type = lib.types.int;
+                default = 102400;
+                description = "message rate limit in bytes/sec (client-enforced via ServerInfo)";
+              };
+
+              bytes_burst = lib.mkOption {
+                type = lib.types.int;
+                default = 204800;
+                description = "message burst size in bytes";
+              };
+
+              connection_rate_per_minute = lib.mkOption {
+                type = lib.types.int;
+                default = 10;
+                description = "connection rate limit per IP (connections per minute)";
+              };
+
+              stun_rate_per_minute = lib.mkOption {
+                type = lib.types.int;
+                default = 60;
+                description = "STUN rate limit per IP (requests per minute)";
+              };
+
+              server_side_rate_limit = lib.mkOption {
+                type = lib.types.bool;
+                default = false;
+                description = ''
+                  enable server-side message rate limiting.
+                  protects against malicious clients that ignore ServerInfo limits.
+                '';
               };
             };
           };
@@ -498,6 +636,35 @@ in
                 Otherwise, opens the main server port ({option}`port`).
               '';
             };
+
+            rate_limit_enabled = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "enable per-IP rate limiting for API requests";
+            };
+
+            rate_limit_per_minute = lib.mkOption {
+              type = lib.types.int;
+              default = 100;
+              description = "maximum requests per minute per IP address";
+            };
+
+            behind_proxy = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                whether the server is behind a reverse proxy.
+                when true, client IPs are extracted from X-Forwarded-For headers
+                but only from requests originating from trusted_proxies.
+              '';
+            };
+
+            trusted_proxies = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [ "127.0.0.1" "10.0.0.0/8" "::1" ];
+              description = "list of trusted proxy IP addresses or CIDR ranges";
+            };
           };
 
           taildrop_enabled = lib.mkOption {
@@ -511,12 +678,47 @@ in
             default = false;
             description = "Randomize WireGuard port on clients.";
           };
+
+          geoip_database_path = lib.mkOption {
+            type = lib.types.nullOr lib.types.path;
+            default = null;
+            example = "/var/lib/railscale/GeoLite2-Country.mmdb";
+            description = ''
+              path to MaxMind GeoLite2-Country database for ip:country posture checks.
+              enables geolocation-based access control in grants when set.
+            '';
+          };
+
+          log_level = lib.mkOption {
+            type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
+            default = "info";
+            description = "log level for tracing output";
+          };
         };
       };
     };
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.settings.dns.magic_dns -> cfg.settings.base_domain != "";
+        message = "services.railscale.settings.base_domain must be set when magic_dns is enabled";
+      }
+      {
+        assertion = cfg.settings.api.behind_proxy -> cfg.settings.api.trusted_proxies != [ ];
+        message = "services.railscale.settings.api.trusted_proxies must not be empty when behind_proxy is true";
+      }
+      {
+        assertion = cfg.settings.oidc != null -> cfg.settings.oidc.issuer or "" != "";
+        message = "services.railscale.settings.oidc.issuer must be set when oidc is configured";
+      }
+      {
+        assertion = cfg.settings.oidc != null -> cfg.settings.oidc.client_id or "" != "";
+        message = "services.railscale.settings.oidc.client_id must be set when oidc is configured";
+      }
+    ];
+
     # Merge listen_addr from address:port
     services.railscale.settings.listen_addr = lib.mkDefault "${cfg.address}:${toString cfg.port}";
 
@@ -569,6 +771,7 @@ in
           ProtectHome = true;
           PrivateTmp = true;
           PrivateDevices = true;
+          PrivateMounts = true;
           ProtectKernelTunables = true;
           ProtectKernelModules = true;
           ProtectKernelLogs = true;
