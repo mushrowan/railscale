@@ -10,7 +10,7 @@ use color_eyre::eyre::{Context, Result, bail};
 use railscale_admin::{AdminServiceImpl, AdminServiceServer};
 use railscale_db::RailscaleDb;
 use railscale_grants::Policy;
-use railscale_types::{Config, EmbeddedDerpRuntime};
+use railscale_types::{Config, EmbeddedDerpRuntime, LogLevel};
 use secrecy::ExposeSecret;
 use tokio::net::{TcpListener, UnixListener};
 use tokio::signal::unix::{SignalKind, signal};
@@ -299,25 +299,34 @@ impl ServeCommand {
 
     /// run the serve command
     pub async fn run(self) -> Result<()> {
-        // initialize logging (use CLI override or default to info)
-        let log_level_str = self.log_level.clone().unwrap_or_else(|| "info".to_string());
-        let log_level = match log_level_str.to_lowercase().as_str() {
-            "trace" => Level::TRACE,
-            "debug" => Level::DEBUG,
-            "info" => Level::INFO,
-            "warn" => Level::WARN,
-            "error" => Level::ERROR,
-            _ => Level::INFO,
-        };
-
-        let subscriber = FmtSubscriber::builder().with_max_level(log_level).finish();
-        tracing::subscriber::set_global_default(subscriber)?;
-
-        info!("Starting railscale...");
-
         // save paths before into_config consumes self
         let policy_file_path = self.policy_file.clone();
         let admin_socket_path = self.admin_socket.clone();
+        let cli_log_level = self.log_level.clone();
+
+        // load configuration first (needed for log_level fallback)
+        let config = self.into_config()?;
+
+        // initialize logging: CLI override > config > default (info)
+        let log_level = if let Some(level_str) = cli_log_level {
+            level_str.parse::<LogLevel>().unwrap_or(LogLevel::Info)
+        } else {
+            config.log_level
+        };
+        let tracing_level = match log_level {
+            LogLevel::Trace => Level::TRACE,
+            LogLevel::Debug => Level::DEBUG,
+            LogLevel::Info => Level::INFO,
+            LogLevel::Warn => Level::WARN,
+            LogLevel::Error => Level::ERROR,
+        };
+
+        let subscriber = FmtSubscriber::builder()
+            .with_max_level(tracing_level)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)?;
+
+        info!("Starting railscale...");
 
         // load policy if provided
         let policy = if let Some(policy_path) = &policy_file_path {
@@ -332,9 +341,6 @@ impl ServeCommand {
         };
 
         info!("Loaded policy with {} grants", policy.grants.len());
-
-        // load configuration
-        let config = self.into_config()?;
         info!(
             "Database: {}",
             redact_db_password(&config.database.connection_string)

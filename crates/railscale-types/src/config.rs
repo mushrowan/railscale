@@ -58,6 +58,18 @@ pub struct Config {
     /// when set, enables ip:country posture checks for geolocation-based access control.
     pub geoip_database_path: Option<PathBuf>,
 
+    /// log level: trace, debug, info, warn, error.
+    pub log_level: LogLevel,
+
+    /// ip allocation strategy: sequential or random.
+    pub ip_allocation: AllocationStrategy,
+
+    /// inactivity timeout for ephemeral nodes (in seconds).
+    /// ephemeral nodes that haven't been seen for this duration will be deleted.
+    /// set to 0 to disable (ephemeral nodes won't be auto-deleted).
+    /// default: 120 seconds (2 minutes).
+    pub ephemeral_node_inactivity_timeout_secs: u64,
+
     /// allow registration without noise context (for testing only).
     ///
     /// when false (default), `/machine/register` requires a valid noise handshake
@@ -90,7 +102,88 @@ impl Default for Config {
             taildrop_enabled: true,
             randomize_client_port: false,
             geoip_database_path: None,
+            log_level: LogLevel::default(),
+            ip_allocation: AllocationStrategy::default(),
+            ephemeral_node_inactivity_timeout_secs: 120,
             allow_non_noise_registration: false,
+        }
+    }
+}
+
+/// ip allocation strategy for assigning addresses to new nodes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AllocationStrategy {
+    /// allocate ips sequentially (100.64.0.1, 100.64.0.2, ...).
+    /// predictable and compact, good for most deployments.
+    #[default]
+    Sequential,
+    /// allocate ips randomly within the prefix.
+    /// harder to predict node ips, may help with privacy.
+    Random,
+}
+
+impl std::fmt::Display for AllocationStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AllocationStrategy::Sequential => write!(f, "sequential"),
+            AllocationStrategy::Random => write!(f, "random"),
+        }
+    }
+}
+
+impl std::str::FromStr for AllocationStrategy {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "sequential" => Ok(AllocationStrategy::Sequential),
+            "random" => Ok(AllocationStrategy::Random),
+            _ => Err(format!("invalid allocation strategy: {}", s)),
+        }
+    }
+}
+
+/// log level for tracing output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum LogLevel {
+    /// most verbose, includes all trace spans
+    Trace,
+    /// debug messages
+    Debug,
+    /// informational messages (default)
+    #[default]
+    Info,
+    /// warnings only
+    Warn,
+    /// errors only
+    Error,
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogLevel::Trace => write!(f, "trace"),
+            LogLevel::Debug => write!(f, "debug"),
+            LogLevel::Info => write!(f, "info"),
+            LogLevel::Warn => write!(f, "warn"),
+            LogLevel::Error => write!(f, "error"),
+        }
+    }
+}
+
+impl std::str::FromStr for LogLevel {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "trace" => Ok(LogLevel::Trace),
+            "debug" => Ok(LogLevel::Debug),
+            "info" => Ok(LogLevel::Info),
+            "warn" => Ok(LogLevel::Warn),
+            "error" => Ok(LogLevel::Error),
+            _ => Err(format!("invalid log level: {}", s)),
         }
     }
 }
