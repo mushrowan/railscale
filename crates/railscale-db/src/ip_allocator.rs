@@ -7,6 +7,8 @@ use std::collections::HashSet;
 use std::net::IpAddr;
 
 use ipnet::IpNet;
+use railscale_types::AllocationStrategy;
+use rand::Rng;
 
 use crate::Error;
 
@@ -14,7 +16,7 @@ use crate::Error;
 ///
 /// supports both ipv4 and ipv6 allocation from configured prefixes.
 /// tracks the next candidate index to provide amortised O(1) allocation
-/// instead of O(n) per allocation
+/// instead of O(n) per allocation (for sequential mode).
 pub struct IpAllocator {
     prefix_v4: Option<IpNet>,
     prefix_v6: Option<IpNet>,
@@ -24,11 +26,17 @@ pub struct IpAllocator {
     next_v4_offset: usize,
     /// next ipv6 host count to try (avoids re-scanning from start)
     next_v6_count: u64,
+    /// allocation strategy (sequential or random)
+    strategy: AllocationStrategy,
 }
 
 impl IpAllocator {
-    /// create a new ip allocator with the given prefixes.
-    pub fn new(prefix_v4: Option<IpNet>, prefix_v6: Option<IpNet>) -> Self {
+    /// create a new ip allocator with the given prefixes and strategy.
+    pub fn new(
+        prefix_v4: Option<IpNet>,
+        prefix_v6: Option<IpNet>,
+        strategy: AllocationStrategy,
+    ) -> Self {
         Self {
             prefix_v4,
             prefix_v6,
@@ -36,6 +44,7 @@ impl IpAllocator {
             allocated_v6: HashSet::new(),
             next_v4_offset: 0,
             next_v6_count: 1,
+            strategy,
         }
     }
 
@@ -55,9 +64,8 @@ impl IpAllocator {
 
     /// allocate a new ipv4 address.
     ///
-    /// uses a next-candidate tracking strategy to avoid O(n) scans on each
-    /// allocation. amortised cost is O(1) for sequential allocations.
-    /// computes addresses arithmetically to avoid materialising all hosts.
+    /// for sequential: uses next-candidate tracking for amortised O(1).
+    /// for random: generates random offsets within the prefix.
     pub fn allocate_v4(&mut self) -> Result<Option<IpAddr>, Error> {
         let Some(prefix) = &self.prefix_v4 else {
             return Ok(None);
@@ -83,7 +91,18 @@ impl IpAllocator {
             return Err(Error::InvalidData("ipv4 address pool is empty".to_string()));
         }
 
-        // start from next_v4_offset and wrap around if needed
+        match self.strategy {
+            AllocationStrategy::Sequential => self.allocate_v4_sequential(base, total_hosts),
+            AllocationStrategy::Random => self.allocate_v4_random(base, total_hosts),
+        }
+    }
+
+    /// sequential allocation - start from next_v4_offset and wrap around
+    fn allocate_v4_sequential(
+        &mut self,
+        base: u32,
+        total_hosts: u64,
+    ) -> Result<Option<IpAddr>, Error> {
         let start_offset = self.next_v4_offset as u64 % total_hosts;
 
         for i in 0..total_hosts {
@@ -103,6 +122,30 @@ impl IpAllocator {
         Err(Error::InvalidData(
             "ipv4 address pool exhausted".to_string(),
         ))
+    }
+
+    /// random allocation - generate random offsets until we find an unallocated ip
+    fn allocate_v4_random(&mut self, base: u32, total_hosts: u64) -> Result<Option<IpAddr>, Error> {
+        let mut rng = rand::rng();
+
+        // try random offsets, but limit attempts to avoid infinite loop
+        // if pool is nearly exhausted
+        let max_attempts = total_hosts.min(10000);
+
+        for _ in 0..max_attempts {
+            let offset = rng.random_range(0..total_hosts);
+            let ip_u32 = base.wrapping_add((offset + 1) as u32);
+            let ip = IpAddr::V4(std::net::Ipv4Addr::from(ip_u32));
+
+            if !self.allocated_v4.contains(&ip) {
+                self.allocated_v4.insert(ip);
+                return Ok(Some(ip));
+            }
+        }
+
+        // fallback to sequential scan if random attempts exhausted
+        // (pool is likely very full)
+        self.allocate_v4_sequential(base, total_hosts)
     }
 
     /// helper for small prefixes (/31, /32) where hosts() is fine
@@ -132,8 +175,8 @@ impl IpAllocator {
 
     /// allocate a new ipv6 address.
     ///
-    /// uses a next-candidate tracking strategy to avoid o(n) scans on each
-    /// allocation. Amortised cost is O(1) for sequential allocations.
+    /// for sequential: uses next-candidate tracking for amortised O(1).
+    /// for random: generates random addresses within the prefix.
     pub fn allocate_v6(&mut self) -> Result<Option<IpAddr>, Error> {
         let Some(prefix) = &self.prefix_v6 else {
             return Ok(None);
@@ -148,7 +191,18 @@ impl IpAllocator {
         let segments = base.segments();
         let max_count: u64 = 1_000_000;
 
-        // start from next_v6_count and search for an available address
+        match self.strategy {
+            AllocationStrategy::Sequential => self.allocate_v6_sequential(segments, max_count),
+            AllocationStrategy::Random => self.allocate_v6_random(segments, max_count),
+        }
+    }
+
+    /// sequential ipv6 allocation
+    fn allocate_v6_sequential(
+        &mut self,
+        segments: [u16; 8],
+        max_count: u64,
+    ) -> Result<Option<IpAddr>, Error> {
         let start_count = self.next_v6_count;
 
         for i in 0..max_count {
@@ -168,7 +222,6 @@ impl IpAllocator {
             let ip = IpAddr::V6(std::net::Ipv6Addr::from(new_segments));
             if !self.allocated_v6.contains(&ip) {
                 self.allocated_v6.insert(ip);
-                // update next count to the one after this allocation
                 self.next_v6_count = count + 1;
                 if self.next_v6_count > max_count {
                     self.next_v6_count = 1;
@@ -180,6 +233,40 @@ impl IpAllocator {
         Err(Error::InvalidData(
             "IPv6 address pool exhausted".to_string(),
         ))
+    }
+
+    /// random ipv6 allocation
+    fn allocate_v6_random(
+        &mut self,
+        segments: [u16; 8],
+        max_count: u64,
+    ) -> Result<Option<IpAddr>, Error> {
+        let mut rng = rand::rng();
+        let max_attempts = max_count.min(10000);
+
+        for _ in 0..max_attempts {
+            let count = rng.random_range(1..=max_count);
+
+            let new_segments = [
+                segments[0],
+                segments[1],
+                segments[2],
+                segments[3],
+                0,
+                0,
+                (count >> 16) as u16,
+                count as u16,
+            ];
+
+            let ip = IpAddr::V6(std::net::Ipv6Addr::from(new_segments));
+            if !self.allocated_v6.contains(&ip) {
+                self.allocated_v6.insert(ip);
+                return Ok(Some(ip));
+            }
+        }
+
+        // fallback to sequential scan if random attempts exhausted
+        self.allocate_v6_sequential(segments, max_count)
     }
 
     /// allocate both ipv4 and ipv6 addresses for a new node.
@@ -207,9 +294,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_allocate_v4() {
+    fn test_allocate_v4_sequential() {
         let prefix: IpNet = "100.64.0.0/30".parse().unwrap();
-        let mut allocator = IpAllocator::new(Some(prefix), None);
+        let mut allocator = IpAllocator::new(Some(prefix), None, AllocationStrategy::Sequential);
 
         let ip1 = allocator.allocate_v4().unwrap();
         assert!(ip1.is_some());
@@ -223,7 +310,7 @@ mod tests {
     fn test_allocate_v4_large_prefix() {
         // /16 has 65534 hosts - this would OOM if we collected all hosts
         let prefix: IpNet = "100.64.0.0/16".parse().unwrap();
-        let mut allocator = IpAllocator::new(Some(prefix), None);
+        let mut allocator = IpAllocator::new(Some(prefix), None, AllocationStrategy::Sequential);
 
         // allocate first address
         let ip1 = allocator.allocate_v4().unwrap().unwrap();
@@ -244,7 +331,7 @@ mod tests {
     fn test_allocate_v4_default_prefix() {
         // default tailscale prefix is /10 (4M hosts) - must not OOM
         let prefix: IpNet = "100.64.0.0/10".parse().unwrap();
-        let mut allocator = IpAllocator::new(Some(prefix), None);
+        let mut allocator = IpAllocator::new(Some(prefix), None, AllocationStrategy::Sequential);
 
         let ip1 = allocator.allocate_v4().unwrap().unwrap();
         assert_eq!(ip1.to_string(), "100.64.0.1");
@@ -257,7 +344,7 @@ mod tests {
     fn test_release() {
         // /30 has only 2 usable hosts: .1 and .2
         let prefix: IpNet = "100.64.0.0/30".parse().unwrap();
-        let mut allocator = IpAllocator::new(Some(prefix), None);
+        let mut allocator = IpAllocator::new(Some(prefix), None, AllocationStrategy::Sequential);
 
         // allocate both addresses
         let ip1 = allocator.allocate_v4().unwrap().unwrap();
@@ -271,5 +358,56 @@ mod tests {
         allocator.release(ip1);
         let ip3 = allocator.allocate_v4().unwrap().unwrap();
         assert_eq!(ip1, ip3);
+    }
+
+    #[test]
+    fn test_allocate_v4_random() {
+        let prefix: IpNet = "100.64.0.0/24".parse().unwrap();
+        let mut allocator = IpAllocator::new(Some(prefix), None, AllocationStrategy::Random);
+
+        // allocate several addresses
+        let mut ips = Vec::new();
+        for _ in 0..10 {
+            let ip = allocator.allocate_v4().unwrap().unwrap();
+            // all should be within the prefix
+            assert!(ip.to_string().starts_with("100.64.0."));
+            // all should be unique
+            assert!(!ips.contains(&ip));
+            ips.push(ip);
+        }
+
+        // with random allocation, they shouldn't all be sequential
+        // (statistically extremely unlikely to get 1,2,3,4,5,6,7,8,9,10)
+        let mut is_sequential = true;
+        for i in 1..ips.len() {
+            let prev: std::net::Ipv4Addr = match ips[i - 1] {
+                IpAddr::V4(v4) => v4,
+                _ => panic!("expected v4"),
+            };
+            let curr: std::net::Ipv4Addr = match ips[i] {
+                IpAddr::V4(v4) => v4,
+                _ => panic!("expected v4"),
+            };
+            if u32::from(curr) != u32::from(prev) + 1 {
+                is_sequential = false;
+                break;
+            }
+        }
+        assert!(!is_sequential, "random allocation produced sequential IPs");
+    }
+
+    #[test]
+    fn test_allocate_v6_random() {
+        let prefix: IpNet = "fd7a:115c:a1e0::/48".parse().unwrap();
+        let mut allocator = IpAllocator::new(None, Some(prefix), AllocationStrategy::Random);
+
+        // allocate several addresses
+        let mut ips = Vec::new();
+        for _ in 0..10 {
+            let ip = allocator.allocate_v6().unwrap().unwrap();
+            // all should be unique
+            assert!(!ips.contains(&ip));
+            ips.push(ip);
+        }
     }
 }

@@ -80,6 +80,11 @@ prefix_v4 = "100.64.0.0/10"
 # Must be within fd7a:115c:a1e0::/48 (Tailscale's ULA range).
 prefix_v6 = "fd7a:115c:a1e0::/48"
 
+# IP allocation strategy: "sequential" or "random"
+# - sequential: allocate IPs in order (100.64.0.1, 100.64.0.2, ...)
+# - random: allocate IPs randomly within the prefix
+ip_allocation = "sequential"
+
 # Base domain for MagicDNS hostnames.
 # Nodes will be accessible as <hostname>.<base_domain>
 # This MUST be different from your server_url domain.
