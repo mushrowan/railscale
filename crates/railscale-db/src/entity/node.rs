@@ -60,6 +60,9 @@ pub struct Model {
 
     pub auth_key_id: Option<i64>,
 
+    /// whether this is an ephemeral node
+    pub ephemeral: bool,
+
     pub expiry: Option<DateTime<Utc>>,
     pub last_seen: Option<DateTime<Utc>>,
 
@@ -185,6 +188,7 @@ impl From<Model> for Node {
             register_method,
             tags,
             auth_key_id: model.auth_key_id.map(|id| id as u64),
+            ephemeral: model.ephemeral,
             expiry: model.expiry,
             last_seen: model.last_seen,
             last_seen_country: model.last_seen_country,
@@ -239,6 +243,7 @@ impl From<&Node> for ActiveModel {
             register_method: Set(register_method.to_string()),
             tags: Set(tags_json),
             auth_key_id: Set(node.auth_key_id.map(|id| id as i64)),
+            ephemeral: Set(node.ephemeral),
             expiry: Set(node.expiry),
             last_seen: Set(node.last_seen),
             approved_routes: Set(approved_routes_json),

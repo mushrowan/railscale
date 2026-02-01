@@ -93,6 +93,38 @@ client_secret = "your-client-secret"
 
 not yet
 
+## https / reverse proxy
+
+railscale speaks plain http. for production, stick a reverse proxy in front:
+
+**caddy** (easiest - automatic https):
+```
+vpn.example.com {
+    reverse_proxy localhost:8080
+}
+```
+
+**nginx**:
+```nginx
+server {
+    listen 443 ssl;
+    server_name vpn.example.com;
+    ssl_certificate /etc/letsencrypt/live/vpn.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/vpn.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+why no built-in acme? reverse proxies are battle-tested, more flexible, and keep
+railscale simple. caddy literally does automatic https with zero config.
+
 ## connecting clients
 
 ```bash

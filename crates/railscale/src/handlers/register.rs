@@ -490,6 +490,7 @@ async fn handle_preauth_registration(
         register_method: railscale_types::RegisterMethod::AuthKey,
         tags: preauth_key.tags.clone(),
         auth_key_id: Some(preauth_key.id),
+        ephemeral: preauth_key.ephemeral,
         last_seen: None,
         last_seen_country: None,
         expiry: None,

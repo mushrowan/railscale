@@ -91,6 +91,7 @@ async fn test_map_request_updates_disco_key() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
 
     db.create_node(&node).await.unwrap();
@@ -195,6 +196,7 @@ async fn test_map_request_updates_hostinfo() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
 
     db.create_node(&node).await.unwrap();
@@ -330,6 +332,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
     db.create_node(&peer_node).await.unwrap();
 
@@ -358,6 +361,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
     db.create_node(&node).await.unwrap();
 
@@ -464,6 +468,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
     db.create_node(&peer_node).await.unwrap();
 
@@ -492,6 +497,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
     db.create_node(&node).await.unwrap();
 
@@ -692,6 +698,7 @@ async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
 
     db.create_node(&node).await.unwrap();

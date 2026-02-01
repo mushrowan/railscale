@@ -185,7 +185,10 @@ in
           };
 
           ip_allocation = lib.mkOption {
-            type = lib.types.enum [ "sequential" "random" ];
+            type = lib.types.enum [
+              "sequential"
+              "random"
+            ];
             default = "sequential";
             description = ''
               ip allocation strategy for new nodes.
@@ -274,7 +277,10 @@ in
                       description = "dns record name (FQDN)";
                     };
                     record_type = lib.mkOption {
-                      type = lib.types.enum [ "A" "AAAA" ];
+                      type = lib.types.enum [
+                        "A"
+                        "AAAA"
+                      ];
                       example = "A";
                       description = "dns record type";
                     };
@@ -288,7 +294,11 @@ in
               );
               default = [ ];
               example = [
-                { name = "grafana.railscale.net"; record_type = "A"; value = "100.64.0.5"; }
+                {
+                  name = "grafana.railscale.net";
+                  record_type = "A";
+                  value = "100.64.0.5";
+                }
               ];
               description = "extra dns records served by MagicDNS";
             };
@@ -392,7 +402,9 @@ in
                   extra_params = lib.mkOption {
                     type = lib.types.attrsOf lib.types.str;
                     default = { };
-                    example = { domain_hint = "example.com"; };
+                    example = {
+                      domain_hint = "example.com";
+                    };
                     description = "custom query parameters to send with the authorize endpoint request";
                   };
 
@@ -410,7 +422,10 @@ in
                     };
 
                     method = lib.mkOption {
-                      type = lib.types.enum [ "S256" "Plain" ];
+                      type = lib.types.enum [
+                        "S256"
+                        "Plain"
+                      ];
                       default = "S256";
                       description = "PKCE challenge method (S256 recommended)";
                     };
@@ -662,7 +677,11 @@ in
             trusted_proxies = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [ ];
-              example = [ "127.0.0.1" "10.0.0.0/8" "::1" ];
+              example = [
+                "127.0.0.1"
+                "10.0.0.0/8"
+                "::1"
+              ];
               description = "list of trusted proxy IP addresses or CIDR ranges";
             };
           };
@@ -690,7 +709,13 @@ in
           };
 
           log_level = lib.mkOption {
-            type = lib.types.enum [ "trace" "debug" "info" "warn" "error" ];
+            type = lib.types.enum [
+              "trace"
+              "debug"
+              "info"
+              "warn"
+              "error"
+            ];
             default = "info";
             description = "log level for tracing output";
           };

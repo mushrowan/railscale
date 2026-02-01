@@ -293,8 +293,9 @@ pub async fn create_app_routers_with_policy_handle(
         railscale_proto::generate_keypair().expect("failed to generate noise keypair")
     });
 
-    // initialize ip allocator with configured prefixes
-    let mut ip_allocator = IpAllocator::new(config.prefix_v4, config.prefix_v6);
+    // initialize ip allocator with configured prefixes and strategy
+    let mut ip_allocator =
+        IpAllocator::new(config.prefix_v4, config.prefix_v6, config.ip_allocation);
 
     // load already-allocated ips from the database
     if let Ok(nodes) = db.list_nodes().await {

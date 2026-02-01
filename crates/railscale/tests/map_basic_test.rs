@@ -91,6 +91,7 @@ async fn test_map_request_returns_peers() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
 
     let node2 = Node {
@@ -116,6 +117,7 @@ async fn test_map_request_returns_peers() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
 
     db.create_node(&node1).await.unwrap();

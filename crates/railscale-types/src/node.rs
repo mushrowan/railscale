@@ -97,6 +97,9 @@ pub struct Node {
     /// preauthkey id used to register this node.
     pub auth_key_id: Option<u64>,
 
+    /// whether this is an ephemeral node (auto-deleted when inactive).
+    pub ephemeral: bool,
+
     /// when the node registration expires.
     pub expiry: Option<DateTime<Utc>>,
 

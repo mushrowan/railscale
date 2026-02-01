@@ -67,6 +67,7 @@ async fn test_verify_allows_registered_node() {
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
         last_seen_country: None,
+        ephemeral: false,
     };
     db.create_node(&node).await.expect("failed to create node");
 

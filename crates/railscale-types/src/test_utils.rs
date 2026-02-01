@@ -31,6 +31,7 @@ pub struct TestNodeBuilder {
     disco_key: Option<DiscoKey>,
     hostinfo: Option<HostInfo>,
     last_seen_country: Option<String>,
+    ephemeral: bool,
 }
 
 impl TestNodeBuilder {
@@ -48,6 +49,7 @@ impl TestNodeBuilder {
             disco_key: None,
             hostinfo: None,
             last_seen_country: None,
+            ephemeral: false,
         }
     }
 
@@ -115,6 +117,12 @@ impl TestNodeBuilder {
         self
     }
 
+    /// set ephemeral flag.
+    pub fn with_ephemeral(mut self, ephemeral: bool) -> Self {
+        self.ephemeral = ephemeral;
+        self
+    }
+
     /// build the [`node`].
     pub fn build(self) -> Node {
         let hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
@@ -144,6 +152,7 @@ impl TestNodeBuilder {
             register_method: RegisterMethod::AuthKey,
             tags: self.tags,
             auth_key_id: None,
+            ephemeral: self.ephemeral,
             expiry: None,
             last_seen: Some(now),
             last_seen_country: self.last_seen_country,

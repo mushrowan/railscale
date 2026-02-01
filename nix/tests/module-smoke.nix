@@ -111,8 +111,16 @@ pkgs.testers.runNixOSTest {
             dns = {
               magic_dns = true;
               extra_records = [
-                { name = "grafana.railscale.net"; record_type = "A"; value = "100.64.0.5"; }
-                { name = "prometheus.railscale.net"; record_type = "A"; value = "100.64.0.6"; }
+                {
+                  name = "grafana.railscale.net";
+                  record_type = "A";
+                  value = "100.64.0.5";
+                }
+                {
+                  name = "prometheus.railscale.net";
+                  record_type = "A";
+                  value = "100.64.0.6";
+                }
               ];
             };
           };

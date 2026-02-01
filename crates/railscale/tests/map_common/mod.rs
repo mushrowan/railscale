@@ -60,6 +60,7 @@ impl MapTestFixture {
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
             last_seen_country: None,
+            ephemeral: false,
         };
 
         let node = db.create_node(&node).await.unwrap();

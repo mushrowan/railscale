@@ -217,6 +217,7 @@ pub async fn oidc_callback(
             register_method: railscale_types::RegisterMethod::Oidc,
             tags: vec![],
             auth_key_id: None,
+            ephemeral: false,
             last_seen: None,
             last_seen_country: None,
             expiry: None,
