@@ -123,6 +123,11 @@ impl TestNodeBuilder {
         self
     }
 
+    /// mark as ephemeral (shorthand for `.with_ephemeral(true)`).
+    pub fn ephemeral(self) -> Self {
+        self.with_ephemeral(true)
+    }
+
     /// build the [`node`].
     pub fn build(self) -> Node {
         let hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));

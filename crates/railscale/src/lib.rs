@@ -17,6 +17,7 @@ pub mod derp;
 /// embedded derp relay server implementation.
 pub mod derp_server;
 mod dns;
+mod ephemeral;
 /// http request handlers for tailscale protocol endpoints.
 pub mod handlers;
 mod noise_stream;
@@ -33,6 +34,7 @@ pub mod stun;
 pub use derp::{
     DerpError, fetch_derp_map_from_url, generate_derp_map, load_derp_map_from_path, merge_derp_maps,
 };
+pub use ephemeral::EphemeralGarbageCollector;
 pub use noise_stream::NoiseStream;
 pub use notifier::StateNotifier;
 pub use presence::PresenceTracker;
@@ -130,6 +132,8 @@ pub struct AppState {
     pub presence: PresenceTracker,
     /// geoip resolver for ip:country posture checks (None if not configured).
     pub geoip: Option<Arc<railscale_grants::MaxmindDbResolver>>,
+    /// garbage collector for ephemeral nodes.
+    pub ephemeral_gc: EphemeralGarbageCollector,
 }
 
 /// routers for the application, potentially running on separate listeners.
@@ -349,6 +353,18 @@ pub async fn create_app_routers_with_policy_handle(
         }
     });
 
+    // create ephemeral garbage collector
+    let ephemeral_gc =
+        EphemeralGarbageCollector::new(db.clone(), config.ephemeral_node_inactivity_timeout_secs);
+
+    // spawn garbage collector background task (runs every 30 seconds)
+    if ephemeral_gc.is_enabled() {
+        let gc = ephemeral_gc.clone();
+        tokio::spawn(async move {
+            gc.spawn_collector(Duration::from_secs(30)).await;
+        });
+    }
+
     let state = AppState {
         db,
         grants,
@@ -363,6 +379,7 @@ pub async fn create_app_routers_with_policy_handle(
         dns_cache,
         presence: PresenceTracker::new(),
         geoip,
+        ephemeral_gc,
     };
 
     // build protocol router

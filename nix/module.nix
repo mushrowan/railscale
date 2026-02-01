@@ -197,6 +197,17 @@ in
             '';
           };
 
+          ephemeral_node_inactivity_timeout_secs = lib.mkOption {
+            type = lib.types.ints.unsigned;
+            default = 120;
+            description = ''
+              inactivity timeout for ephemeral nodes (in seconds).
+              ephemeral nodes that disconnect and remain inactive for this
+              duration will be automatically deleted.
+              set to 0 to disable automatic deletion.
+            '';
+          };
+
           database = {
             db_type = lib.mkOption {
               type = lib.types.enum [ "sqlite" ];

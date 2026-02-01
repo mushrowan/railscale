@@ -85,6 +85,14 @@ prefix_v6 = "fd7a:115c:a1e0::/48"
 # - random: allocate IPs randomly within the prefix
 ip_allocation = "sequential"
 
+# Inactivity timeout for ephemeral nodes (in seconds).
+# Ephemeral nodes are created with auth keys that have the "ephemeral" flag set.
+# When an ephemeral node disconnects and remains inactive for this duration,
+# it is automatically deleted from the database.
+# Set to 0 to disable automatic deletion (ephemeral nodes persist until manually removed).
+# Default: 120 seconds (2 minutes)
+ephemeral_node_inactivity_timeout_secs = 120
+
 # Base domain for MagicDNS hostnames.
 # Nodes will be accessible as <hostname>.<base_domain>
 # This MUST be different from your server_url domain.

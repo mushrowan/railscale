@@ -142,7 +142,7 @@ pub async fn map(
     if req.stream {
         // streaming mode: keep connection open and push updates
         Ok(
-            streaming_response(state, node.id, node.node_key, compression)
+            streaming_response(state, node.id, node.node_key, compression, node.ephemeral)
                 .await
                 .into_response(),
         )
@@ -181,21 +181,24 @@ enum StreamMessage {
 /// stream wrapper that tracks presence and cleans up on drop.
 ///
 /// when the stream is dropped (client disconnects), it marks the node as offline
-/// and notifies other clients of the state change.
+/// and notifies other clients of the state change. for ephemeral nodes, it
+/// schedules deletion after the configured inactivity timeout.
 struct PresenceTrackingStream<S> {
     inner: Pin<Box<S>>,
     state: AppState,
     node_id: NodeId,
     connected: bool,
+    ephemeral: bool,
 }
 
 impl<S> PresenceTrackingStream<S> {
-    fn new(inner: S, state: AppState, node_id: NodeId) -> Self {
+    fn new(inner: S, state: AppState, node_id: NodeId, ephemeral: bool) -> Self {
         Self {
             inner: Box::pin(inner),
             state,
             node_id,
             connected: false,
+            ephemeral,
         }
     }
 }
@@ -216,6 +219,7 @@ impl<S> Drop for PresenceTrackingStream<S> {
         if self.connected {
             let state = self.state.clone();
             let node_id = self.node_id;
+            let ephemeral = self.ephemeral;
 
             // spawn a task to mark the node as disconnected and notify peers
             // we can't use async in drop, so we spawn a background task
@@ -223,6 +227,11 @@ impl<S> Drop for PresenceTrackingStream<S> {
                 state.presence.disconnect(node_id).await;
                 // notify other streaming clients that node went offline
                 state.notifier.notify_state_changed();
+
+                // schedule ephemeral node for deletion after timeout
+                if ephemeral {
+                    state.ephemeral_gc.schedule_deletion(node_id).await;
+                }
             });
         }
     }
@@ -232,16 +241,23 @@ impl<S> Drop for PresenceTrackingStream<S> {
 ///
 /// this function marks the node as online when the stream starts,
 /// and marks it offline when the stream ends (client disconnects).
+/// for ephemeral nodes, reconnecting cancels any scheduled deletion.
 async fn streaming_response(
     state: AppState,
     node_id: NodeId,
     node_key: NodeKey,
     compression: Compression,
+    ephemeral: bool,
 ) -> Response {
     // mark node as connected before starting stream
     state.presence.connect(node_id, node_key.clone()).await;
     // notify other clients that this node came online
     state.notifier.notify_state_changed();
+
+    // cancel any scheduled deletion if ephemeral node reconnects
+    if ephemeral {
+        state.ephemeral_gc.cancel_deletion(node_id).await;
+    }
 
     // subscribe to state changes before building initial response
     let receiver = state.notifier.subscribe();
@@ -313,7 +329,8 @@ async fn streaming_response(
     );
 
     // wrap the stream to track presence - marks node offline on drop
-    let mut presence_stream = PresenceTrackingStream::new(inner_stream, state, node_id);
+    // for ephemeral nodes, also schedules deletion on disconnect
+    let mut presence_stream = PresenceTrackingStream::new(inner_stream, state, node_id, ephemeral);
     presence_stream.connected = true;
 
     // convert to a stream of result<bytes, infallible> for axum
