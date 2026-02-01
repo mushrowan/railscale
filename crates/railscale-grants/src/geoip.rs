@@ -51,8 +51,9 @@ impl GeoIpResolver for MaxmindDbResolver {
             country: Option<Country<'a>>,
         }
 
-        let data: GeoData = self.reader.lookup(ip).ok()?;
-        data.country.map(|c| c.iso_code.to_string())
+        let result = self.reader.lookup(ip).ok()?;
+        let data: Option<GeoData> = result.decode().ok()?;
+        data?.country.map(|c| c.iso_code.to_string())
     }
 }
 
