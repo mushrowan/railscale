@@ -52,10 +52,24 @@
           inherit (packageSet) railscale cargoArtifacts commonArgs;
         in
         {
-          _module.args.pkgs = import inputs.nixpkgs {
-            inherit system;
-            overlays = [ (import inputs.rust-overlay) ];
-          };
+        _module.args.pkgs = import inputs.nixpkgs {
+          inherit system;
+          overlays = [
+            (import inputs.rust-overlay)
+            # workaround: lix now handles ssl-cert-file properly, but nixpkgs still
+            # passes NIX_SSL_CERT_FILE as impure env var causing warnings
+            # https://git.lix.systems/lix-project/lix/commit/2d0109898a65884e8953813c0391ad8b3be0d929
+            (final: prev: {
+              lib = prev.lib // {
+                fetchers = prev.lib.fetchers // {
+                  proxyImpureEnvVars = builtins.filter
+                    (v: v != "NIX_SSL_CERT_FILE")
+                    prev.lib.fetchers.proxyImpureEnvVars;
+                };
+              };
+            })
+          ];
+        };
 
           checks =
             let
