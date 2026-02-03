@@ -2,7 +2,7 @@
   description = "tailscale control server written in rust";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     crane.url = "github:ipetkov/crane";
     rust-overlay = {
@@ -52,24 +52,24 @@
           inherit (packageSet) railscale cargoArtifacts commonArgs;
         in
         {
-        _module.args.pkgs = import inputs.nixpkgs {
-          inherit system;
-          overlays = [
-            (import inputs.rust-overlay)
-            # workaround: lix now handles ssl-cert-file properly, but nixpkgs still
-            # passes NIX_SSL_CERT_FILE as impure env var causing warnings
-            # https://git.lix.systems/lix-project/lix/commit/2d0109898a65884e8953813c0391ad8b3be0d929
-            (final: prev: {
-              lib = prev.lib // {
-                fetchers = prev.lib.fetchers // {
-                  proxyImpureEnvVars = builtins.filter
-                    (v: v != "NIX_SSL_CERT_FILE")
-                    prev.lib.fetchers.proxyImpureEnvVars;
+          _module.args.pkgs = import inputs.nixpkgs {
+            inherit system;
+            overlays = [
+              (import inputs.rust-overlay)
+              # workaround: lix now handles ssl-cert-file properly, but nixpkgs still
+              # passes NIX_SSL_CERT_FILE as impure env var causing warnings
+              # https://git.lix.systems/lix-project/lix/commit/2d0109898a65884e8953813c0391ad8b3be0d929
+              (final: prev: {
+                lib = prev.lib // {
+                  fetchers = prev.lib.fetchers // {
+                    proxyImpureEnvVars = builtins.filter (
+                      v: v != "NIX_SSL_CERT_FILE"
+                    ) prev.lib.fetchers.proxyImpureEnvVars;
+                  };
                 };
-              };
-            })
-          ];
-        };
+              })
+            ];
+          };
 
           checks =
             let
@@ -134,7 +134,7 @@
         };
 
       # Flake-wide outputs (not per-system)
-      flake = self: {
+      flake = { self, ... }: {
         nixosModules = rec {
           railscale =
             { pkgs, ... }:
