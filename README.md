@@ -26,11 +26,13 @@ they told me i couldn't do it
 - **full ts2021 protocol support** - works with official tailscale clients
 - **oidc authentication** - sign in with google, github, whatever
 - **grants policy system** - acls but swaggier
-- **embedded derp server** - built-in relay
+- **device posture** - restrict access based on device attributes and geolocation
+- **embedded derp server** - built-in relay with rate limiting
 - **taildrop** - file sharing between nodes (same-user)
 - **tailnet lock** - cryptographic verification of node keys
+- **ephemeral nodes** - auto-cleanup of temporary devices
 - **rest api** - manage users, nodes, keys
-- **nixos module** - first-class nix support
+- **nixos module** - first-class nix support with comprehensive options
 - **too much other stuff** - it's 2am and i cannot be bothered to remember
 
 ## quickstart
@@ -50,13 +52,12 @@ they told me i couldn't do it
           services.railscale = {
             enable = true;
             settings = {
-              server_url = "https://vpn.gaming.epic";
-              listen_addr = "0.0.0.0:443";
-              database_url = "sqlite:///var/lib/railscale/db.sqlite";
+              server_url = "https://vpn.example.com";
+              base_domain = "ts.example.com";
 
               # optional: oidc login
               oidc = {
-                issuer_url = "https://accounts.google.com";
+                issuer = "https://accounts.google.com";
                 client_id = "your-client-id";
                 client_secret_path = "/run/secrets/oidc-secret"; # use sops-nix
               };
@@ -73,9 +74,16 @@ they told me i couldn't do it
 
 ```toml
 # config.toml
-server_url = "https://vpn.gaming.epic"
-listen_addr = "0.0.0.0:443"
-database_url = "sqlite:///var/lib/railscale/db.sqlite"
+server_url = "https://vpn.example.com"
+listen_addr = "0.0.0.0:8080"
+base_domain = "ts.example.com"
+
+[database]
+db_type = "sqlite"
+connection_string = "/var/lib/railscale/db.sqlite"
+
+[database.sqlite]
+write_ahead_log = true  # recommended for production
 
 [derp.embedded_derp]
 enabled = true
@@ -84,7 +92,7 @@ region_name = "my-derp"
 
 # optional oidc
 [oidc]
-issuer_url = "https://accounts.google.com"
+issuer = "https://accounts.google.com"
 client_id = "your-client-id"
 client_secret = "your-client-secret"
 ```
@@ -180,6 +188,11 @@ railscale lock disable           # disable tailnet lock
   ]
 }
 ```
+
+> **note on persistence**: policy updates via the REST API or CLI are held in
+> memory only. they're lost on restart. for persistent policy, use a policy file
+> with `--policy` or the nixos `policyFile` option. runtime updates are for
+> testing/development.
 
 ## taildrop
 

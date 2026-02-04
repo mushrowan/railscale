@@ -20,13 +20,13 @@ Self-hosted Tailscale control server implementation in Rust with grants-based ac
 |  (railscale-admin)|             |    (main binary)  |
 +-------------------+              +--------+----------+
                                            |
-         +------------+------------+-------+-------+------------+
-         |            |            |               |            |
-         v            v            v               v            v
-  +------+----+ +-----+------+ +---+----+ +-------+------+ +----+-----+
-  | -types    | | -db        | | -proto | | -grants      | | -admin   |
-  | (domain)  | | (storage)  | | (wire) | | (policy)     | | (grpc)   |
-  +-----------+ +------------+ +--------+ +--------------+ +----------+
+         +------------+------------+-------+-------+------------+------------+
+         |            |            |               |            |            |
+         v            v            v               v            v            v
+  +------+----+ +-----+------+ +---+----+ +-------+------+ +----+-----+ +----+-----+
+  | -types    | | -db        | | -proto | | -grants      | | -admin   | | -tka     |
+  | (domain)  | | (storage)  | | (wire) | | (policy)     | | (grpc)   | | (lock)   |
+  +-----------+ +------------+ +--------+ +--------------+ +----------+ +----------+
 ```
 
 ## Crate Dependency Graph
@@ -39,11 +39,13 @@ graph TD
     proto[railscale-proto<br/><i>protocol types</i>]
     grants[railscale-grants<br/><i>access control</i>]
     admin[railscale-admin<br/><i>gRPC admin API</i>]
+    tka[railscale-tka<br/><i>tailnet lock</i>]
     
     railscale --> types
     railscale --> db
     railscale --> proto
     railscale --> grants
+    railscale --> tka
     
     db --> types
     grants --> types
@@ -51,6 +53,7 @@ graph TD
     admin --> types
     admin --> db
     admin --> grants
+    tka --> types
 ```
 
 ## Crate Responsibilities
@@ -66,11 +69,11 @@ The HTTP server and CLI interface. Built with axum.
   - `oidc.rs` - OpenID Connect authentication flow
   - `ts2021.rs` - Noise protocol WebSocket upgrade
   - `api_v1/` - REST admin API endpoints
-- `cli/` - Command-line interface (serve, users, nodes, policy)
+- `cli/` - Command-line interface (serve, users, nodes, policy, lock)
 - `resolver.rs` - User/group resolution for grants evaluation
 - `derp.rs` / `derp_server.rs` - DERP relay integration
-- `oidc.rs` - OIDC provider wrapper
-- `stun.rs` - Minimal STUN server for NAT traversal
+- `presence.rs` - Tracks connected nodes for online status
+- `ephemeral.rs` - Garbage collector for inactive ephemeral nodes
 
 **Application state (`AppState`):**
 ```rust
@@ -82,6 +85,8 @@ pub struct AppState {
     pub notifier: StateNotifier,            // Broadcasts to clients
     pub ip_allocator: Arc<Mutex<IpAllocator>>,
     pub derp_map: Arc<RwLock<DerpMap>>,
+    pub presence: PresenceTracker,
+    pub ephemeral_gc: EphemeralGarbageCollector,
     // ... caches, keys
 }
 ```
@@ -109,7 +114,7 @@ Database layer using sea-orm. Supports SQLite and PostgreSQL.
 **Key components:**
 - `Database` trait - Abstract interface for storage operations
 - `RailscaleDb` - sea-orm implementation
-- `IpAllocator` - Sequential IP allocation from configured prefixes
+- `IpAllocator` - Sequential or random IP allocation from configured prefixes
 - `entity/` - sea-orm entity definitions
 - `migration/` - Database migrations
 
@@ -117,6 +122,7 @@ Database layer using sea-orm. Supports SQLite and PostgreSQL.
 - Soft-delete semantics (records marked with `deleted_at`)
 - Split-token lookup for API keys
 - Hash-based lookup for preauth keys
+- TKA state and AUM storage
 
 ### `railscale-proto`
 
@@ -138,11 +144,13 @@ Tailscale wire protocol types and Noise cryptography.
 Grants-based access control engine (Tailscale's ACL replacement).
 
 **Key types:**
-- `Policy` - Complete policy document (grants + SSH rules + groups)
+- `Policy` - Complete policy document (grants + SSH rules + groups + postures)
 - `Grant` - Single access rule (src -> dst with capabilities)
 - `Selector` - Node matcher (`*`, `tag:x`, `user@`, `group:`, CIDR, autogroups)
 - `NetworkCapability` - Port/protocol permissions
 - `GrantsEngine` - Thread-safe policy evaluator
+- `PostureExpr` - Device posture conditions
+- `GeoIpResolver` - Geolocation lookup for ip:country posture checks
 
 **Selectors:**
 ```
@@ -161,6 +169,21 @@ group:engineering    - Nodes owned by group members
 - Union composition (multiple matching grants combine)
 - Directional (src -> dst, not bidirectional)
 
+### `railscale-tka`
+
+Tailnet Key Authority (tailnet lock) implementation.
+
+**Key types:**
+- `Authority` - TKA state machine
+- `Aum` - Authority Update Message (signed state changes)
+- `Key` - TKA signing key (ed25519)
+
+**Features:**
+- Genesis AUM creation with configurable disablement secrets
+- Full AUM chain storage and sync
+- Node signing with `nlpriv:` key format
+- TKA disable with disablement secret
+
 ### `railscale-admin`
 
 gRPC admin service for CLI and remote administration.
@@ -173,6 +196,7 @@ gRPC admin service for CLI and remote administration.
 - Node management (list, delete, expire, tags, routes)
 - PreAuth key management
 - API key management
+- TKA operations (init, sign, disable)
 
 ## Data Flow
 
@@ -225,19 +249,6 @@ sequenceDiagram
     end
 ```
 
-### Grants Evaluation
-
-```
-Input: src_node, dst_node, user_resolver
-
-For each grant in policy:
-    1. Check if src_node matches any grant.src selector
-    2. Check if dst_node matches any grant.dst selector
-    3. If both match, collect grant.ip capabilities
-
-Output: Union of all matching capabilities
-```
-
 ## Key Architectural Decisions
 
 ### 1. Grants vs ACLs
@@ -276,7 +287,7 @@ Legacy HTTP-based protocol not supported.
 
 ### 5. IP Allocation
 
-Sequential allocation from configured prefixes:
+Sequential or random allocation from configured prefixes:
 - IPv4: Default `100.64.0.0/10` (CGNAT range)
 - IPv6: Default `fd7a:115c:a1e0::/48` (ULA range)
 - Allocator tracks used IPs, loads from DB on startup
@@ -287,6 +298,13 @@ All entities use soft-delete with `deleted_at` timestamp:
 - Preserves audit trail
 - Allows recovery
 - Simplifies foreign key handling
+
+### 7. Ephemeral Nodes
+
+Nodes created with ephemeral preauth keys are automatically deleted after inactivity:
+- `EphemeralGarbageCollector` tracks disconnects via presence
+- Configurable timeout (default 120s)
+- Deletion cancelled if node reconnects
 
 ## External Dependencies
 
@@ -300,7 +318,7 @@ All entities use soft-delete with `deleted_at` timestamp:
 
 ### Database
 - `sea-orm` - Async ORM with migration support
-- SQLite for development/small deployments
+- SQLite for development/small deployments (with WAL mode)
 - PostgreSQL for production
 
 ### HTTP
@@ -308,12 +326,16 @@ All entities use soft-delete with `deleted_at` timestamp:
 - `tower-governor` - Rate limiting
 - `tonic` - gRPC (admin service)
 
+### Geolocation
+- `maxminddb` - GeoLite2-Country database for ip:country posture checks
+
 ## Testing Strategy
 
 ### Unit Tests
 Each crate has unit tests for core logic:
 - Grants evaluation
 - Selector parsing
+- Posture expression parsing
 - Database operations
 - Protocol encoding
 
@@ -329,5 +351,7 @@ Full end-to-end tests in NixOS VMs:
 - Real Tailscale client connecting to railscale
 - Multi-node scenarios
 - Policy enforcement verification
+- Taildrop file transfers
+- Tailnet lock operations
 
 Run via `nix flake check` (can take 5-10 minutes).
