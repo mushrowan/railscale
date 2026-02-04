@@ -284,8 +284,51 @@ impl RailscaleDb {
             .map_err(|e| Error::Connection(e.to_string()))?;
 
         let db = Self { conn };
+
+        // enable WAL mode for sqlite if configured
+        if config.database.db_type == "sqlite" && config.database.sqlite.write_ahead_log {
+            db.enable_wal_mode().await?;
+        }
+
         db.migrate().await?;
         Ok(db)
+    }
+
+    /// enable write-ahead logging mode for sqlite.
+    ///
+    /// WAL mode allows concurrent reads during writes and generally
+    /// improves performance. must be called before any writes.
+    async fn enable_wal_mode(&self) -> Result<()> {
+        use sea_orm::ConnectionTrait;
+        self.conn
+            .execute_unprepared("PRAGMA journal_mode=WAL")
+            .await
+            .map_err(|e| Error::Connection(format!("failed to enable WAL mode: {}", e)))?;
+        tracing::info!("sqlite WAL mode enabled");
+        Ok(())
+    }
+
+    /// get the current sqlite journal mode.
+    #[cfg(test)]
+    async fn get_journal_mode(&self) -> Result<String> {
+        use sea_orm::{ConnectionTrait, FromQueryResult};
+
+        #[derive(FromQueryResult)]
+        struct JournalMode {
+            journal_mode: String,
+        }
+
+        let result: Option<JournalMode> = self
+            .conn
+            .query_one(sea_orm::Statement::from_string(
+                sea_orm::DatabaseBackend::Sqlite,
+                "PRAGMA journal_mode".to_string(),
+            ))
+            .await
+            .map_err(|e| Error::Connection(e.to_string()))?
+            .map(|row| JournalMode::from_query_result(&row, "").unwrap());
+
+        Ok(result.map(|r| r.journal_mode).unwrap_or_default())
     }
 
     /// build a sea-orm compatible connection url from config.
@@ -1163,5 +1206,37 @@ mod tests {
         // get signature
         let fetched = db.get_node_key_signature(created.id).await.unwrap();
         assert_eq!(fetched, Some(signature));
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_wal_mode_enabled() {
+        // WAL mode requires a file-based database, not :memory:
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_wal.db");
+
+        let mut config = Config::default();
+        config.database.db_type = "sqlite".to_string();
+        config.database.connection_string = db_path.to_string_lossy().to_string();
+        config.database.sqlite.write_ahead_log = true;
+
+        let db = RailscaleDb::new(&config).await.unwrap();
+        let mode = db.get_journal_mode().await.unwrap();
+
+        // WAL mode should be enabled
+        assert_eq!(mode.to_lowercase(), "wal", "journal mode should be WAL");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_wal_mode_disabled_by_default() {
+        // default in-memory db should not have WAL
+        let db = setup_test_db().await;
+        let mode = db.get_journal_mode().await.unwrap();
+
+        // in-memory sqlite uses "memory" journal mode, not "wal"
+        assert_ne!(
+            mode.to_lowercase(),
+            "wal",
+            "default should not use WAL mode"
+        );
     }
 }

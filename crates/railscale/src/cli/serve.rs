@@ -737,6 +737,7 @@ fn parse_database_url(db_url: &str) -> Result<railscale_types::DatabaseConfig> {
         "postgres" | "postgresql" => Ok(railscale_types::DatabaseConfig {
             db_type: "postgres".to_string(),
             connection_string: db_url.to_string(),
+            ..Default::default()
         }),
         "sqlite" => {
             // extract path from sqlite:// url
@@ -744,6 +745,7 @@ fn parse_database_url(db_url: &str) -> Result<railscale_types::DatabaseConfig> {
             Ok(railscale_types::DatabaseConfig {
                 db_type: "sqlite".to_string(),
                 connection_string: path.to_string(),
+                ..Default::default()
             })
         }
         scheme => bail!(

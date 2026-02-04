@@ -48,6 +48,9 @@ pub struct Config {
     /// rest api configuration.
     pub api: ApiConfig,
 
+    /// verify endpoint configuration (derp client verification).
+    pub verify: VerifyConfig,
+
     /// enable taildrop file sharing.
     pub taildrop_enabled: bool,
 
@@ -99,6 +102,7 @@ impl Default for Config {
             oidc: None,
             tuning: TuningConfig::default(),
             api: ApiConfig::default(),
+            verify: VerifyConfig::default(),
             taildrop_enabled: true,
             randomize_client_port: false,
             geoip_database_path: None,
@@ -197,6 +201,29 @@ pub struct DatabaseConfig {
 
     /// database connection string or file path.
     pub connection_string: String,
+
+    /// sqlite-specific options.
+    pub sqlite: SqliteConfig,
+}
+
+/// sqlite-specific configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SqliteConfig {
+    /// enable write-ahead logging (WAL) mode.
+    ///
+    /// WAL mode improves concurrency by allowing simultaneous readers
+    /// and a single writer. recommended for production use.
+    /// see: https://www.sqlite.org/wal.html
+    pub write_ahead_log: bool,
+}
+
+impl Default for SqliteConfig {
+    fn default() -> Self {
+        Self {
+            write_ahead_log: false,
+        }
+    }
 }
 
 impl std::fmt::Debug for DatabaseConfig {
@@ -207,6 +234,7 @@ impl std::fmt::Debug for DatabaseConfig {
                 "connection_string",
                 &redact_connection_string(&self.connection_string),
             )
+            .field("sqlite", &self.sqlite)
             .finish()
     }
 }
@@ -241,6 +269,7 @@ impl Default for DatabaseConfig {
         Self {
             db_type: "sqlite".to_string(),
             connection_string: "/var/lib/railscale/db.sqlite".to_string(),
+            sqlite: SqliteConfig::default(),
         }
     }
 }
@@ -775,6 +804,35 @@ impl Default for ApiConfig {
     }
 }
 
+/// verify endpoint configuration (/verify for derp client verification).
+///
+/// this endpoint is intentionally unauthenticated for compatibility with
+/// tailscale's derp server. protect it with rate limiting and/or IP allowlists.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VerifyConfig {
+    /// rate limit for verify requests (requests per minute per IP).
+    /// set to 0 to disable rate limiting.
+    /// default: 60 requests/minute.
+    pub rate_limit_per_minute: u32,
+
+    /// ip allowlist for the verify endpoint.
+    /// when non-empty, only requests from these IPs/CIDRs are allowed.
+    /// examples: ["10.0.0.0/8", "192.168.1.100", "::1"]
+    /// default: empty (allow all).
+    #[serde(default)]
+    pub allowed_ips: Vec<String>,
+}
+
+impl Default for VerifyConfig {
+    fn default() -> Self {
+        Self {
+            rate_limit_per_minute: 60,
+            allowed_ips: Vec::new(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -786,6 +844,7 @@ mod tests {
             db_type: "postgres".to_string(),
             connection_string: "postgres://admin:supersecretpassword@localhost:5432/railscale"
                 .to_string(),
+            ..Default::default()
         };
 
         let debug_output = format!("{:?}", config);
@@ -806,6 +865,7 @@ mod tests {
         let config = DatabaseConfig {
             db_type: "sqlite".to_string(),
             connection_string: "/var/lib/railscale/db.sqlite".to_string(),
+            ..Default::default()
         };
 
         let debug_output = format!("{:?}", config);

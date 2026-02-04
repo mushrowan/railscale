@@ -405,7 +405,6 @@ pub async fn create_app_routers_with_policy_handle(
 fn build_protocol_router(state: &AppState) -> Router {
     // protocol routes with body size limits (64kb) to prevent memory exhaustion
     let protocol_routes = Router::new()
-        .route("/verify", post(handlers::verify))
         .route(
             "/ts2021",
             get(handlers::ts2021).post(handlers::ts2021_http_upgrade),
@@ -422,12 +421,16 @@ fn build_protocol_router(state: &AppState) -> Router {
         .route("/machine/tka/sign", post(handlers::tka_sign))
         .layer(DefaultBodyLimit::max(64 * 1024));
 
+    // build verify router with rate limiting and IP allowlist
+    let verify_router = build_verify_router(state);
+
     let mut router = Router::new()
         .route("/health", get(handlers::health))
         .route("/version", get(handlers::version))
         .route("/bootstrap-dns", get(handlers::bootstrap_dns))
         .route("/key", get(handlers::key))
-        .merge(protocol_routes);
+        .merge(protocol_routes)
+        .merge(verify_router);
 
     // add oidc routes (rate limited if configured)
     let oidc_router = Router::new()
@@ -459,6 +462,46 @@ fn build_protocol_router(state: &AppState) -> Router {
     }
 
     router.with_state(state.clone())
+}
+
+/// build the verify router with rate limiting and IP allowlist.
+fn build_verify_router(state: &AppState) -> Router<AppState> {
+    let verify_config = &state.config.verify;
+
+    // create the base verify router with body limit
+    let verify_route = Router::new()
+        .route("/verify", post(handlers::verify))
+        .layer(DefaultBodyLimit::max(64 * 1024));
+
+    // wrap with IP allowlist filter if configured
+    let verify_route = if !verify_config.allowed_ips.is_empty() {
+        let filter = rate_limit::IpAllowlistFilter::new(&verify_config.allowed_ips);
+        verify_route.layer(axum::middleware::from_fn_with_state(
+            filter,
+            rate_limit::ip_allowlist_middleware,
+        ))
+    } else {
+        verify_route
+    };
+
+    // apply rate limiting if configured
+    if verify_config.rate_limit_per_minute > 0 {
+        let params = rate_limit::RateLimitParams::from_requests_per_minute(
+            verify_config.rate_limit_per_minute,
+        );
+
+        let governor_conf = GovernorConfigBuilder::default()
+            .per_millisecond(params.replenish_interval_ms)
+            .burst_size(params.burst_size)
+            .key_extractor(rate_limit::SimpleIpKeyExtractor)
+            .use_headers()
+            .finish()
+            .expect("valid verify rate limit config");
+
+        verify_route.layer(GovernorLayer::new(Arc::new(governor_conf)))
+    } else {
+        verify_route
+    }
 }
 
 /// build the api router (rest admin endpoints).

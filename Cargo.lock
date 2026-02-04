@@ -3136,6 +3136,7 @@ dependencies = [
  "sea-orm",
  "sea-orm-migration",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

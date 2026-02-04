@@ -2,12 +2,16 @@
 //!
 //! this module provides a secure key extractor for rate limiting that
 //! properly handles X-Forwarded-For headers when behind a trusted proxy.
+//! also provides IP allowlist filtering for restricted endpoints.
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
-use axum::extract::ConnectInfo;
-use axum::http::Request;
+use axum::body::Body;
+use axum::extract::{ConnectInfo, State};
+use axum::http::{Request, StatusCode};
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use ipnet::IpNet;
 use tower_governor::key_extractor::KeyExtractor;
 
@@ -30,6 +34,28 @@ impl RateLimitParams {
             replenish_interval_ms,
             burst_size,
         }
+    }
+}
+
+/// simple IP key extractor that handles missing ConnectInfo gracefully.
+///
+/// uses the peer IP from ConnectInfo, or falls back to a default IP
+/// when ConnectInfo is unavailable (e.g., in tests).
+#[derive(Clone, Default)]
+pub struct SimpleIpKeyExtractor;
+
+impl KeyExtractor for SimpleIpKeyExtractor {
+    type Key = IpAddr;
+
+    fn extract<T>(&self, request: &Request<T>) -> Result<Self::Key, tower_governor::GovernorError> {
+        let connect_info = request
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|ci| ci.0.ip());
+
+        // use peer IP if available, otherwise fall back to localhost
+        // (missing ConnectInfo only happens in tests)
+        Ok(connect_info.unwrap_or(IpAddr::from([127, 0, 0, 1])))
     }
 }
 
@@ -162,5 +188,88 @@ mod tests {
         // valid entries should work
         assert!(extractor.is_trusted_proxy("127.0.0.1".parse().unwrap()));
         assert!(extractor.is_trusted_proxy("10.1.2.3".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_ip_allowlist_filter() {
+        let filter =
+            IpAllowlistFilter::new(&["10.0.0.0/8".to_string(), "192.168.1.100".to_string()]);
+
+        assert!(filter.is_allowed("10.1.2.3".parse().unwrap()));
+        assert!(filter.is_allowed("192.168.1.100".parse().unwrap()));
+        assert!(!filter.is_allowed("192.168.1.101".parse().unwrap()));
+        assert!(!filter.is_allowed("8.8.8.8".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_ip_allowlist_empty_allows_none() {
+        let filter = IpAllowlistFilter::new(&[]);
+        // empty filter allows nothing (should not be used - check before applying)
+        assert!(!filter.is_allowed("127.0.0.1".parse().unwrap()));
+    }
+}
+
+/// IP allowlist filter for restricting endpoint access.
+///
+/// when applied, only requests from IPs matching the allowlist are permitted.
+#[derive(Clone)]
+pub struct IpAllowlistFilter {
+    /// parsed allowed networks/IPs
+    allowed_networks: Arc<Vec<IpNet>>,
+}
+
+impl IpAllowlistFilter {
+    /// create a new filter with the given allowed addresses.
+    ///
+    /// accepts IPs and CIDR ranges (e.g., "127.0.0.1", "10.0.0.0/8").
+    pub fn new(allowed_ips: &[String]) -> Self {
+        let allowed_networks: Vec<IpNet> = allowed_ips
+            .iter()
+            .filter_map(|s| {
+                // try parsing as CIDR first, then as a single IP
+                s.parse::<IpNet>().ok().or_else(|| {
+                    s.parse::<IpAddr>().ok().map(|ip| match ip {
+                        IpAddr::V4(v4) => IpNet::V4(ipnet::Ipv4Net::new(v4, 32).unwrap()),
+                        IpAddr::V6(v6) => IpNet::V6(ipnet::Ipv6Net::new(v6, 128).unwrap()),
+                    })
+                })
+            })
+            .collect();
+
+        Self {
+            allowed_networks: Arc::new(allowed_networks),
+        }
+    }
+
+    /// check if an IP is in the allowlist.
+    pub fn is_allowed(&self, ip: IpAddr) -> bool {
+        self.allowed_networks.iter().any(|net| net.contains(&ip))
+    }
+}
+
+/// middleware to filter requests by IP allowlist.
+///
+/// returns 403 Forbidden if the client IP is not in the allowlist.
+pub async fn ip_allowlist_middleware(
+    State(filter): State<IpAllowlistFilter>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    // extract peer IP from ConnectInfo
+    let peer_ip = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip());
+
+    match peer_ip {
+        Some(ip) if filter.is_allowed(ip) => next.run(request).await,
+        Some(ip) => {
+            tracing::warn!(client_ip = %ip, "verify request from disallowed IP");
+            (StatusCode::FORBIDDEN, "IP not in allowlist").into_response()
+        }
+        None => {
+            tracing::warn!("verify request without client IP");
+            (StatusCode::FORBIDDEN, "unable to determine client IP").into_response()
+        }
     }
 }

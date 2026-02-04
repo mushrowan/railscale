@@ -225,6 +225,18 @@ in
                 For SQLite, this is the path to the database file.
               '';
             };
+
+            sqlite = {
+              write_ahead_log = lib.mkOption {
+                type = lib.types.bool;
+                default = true;
+                description = ''
+                  Enable SQLite write-ahead logging (WAL) mode.
+                  WAL improves concurrency by allowing simultaneous readers
+                  and a single writer. Recommended for production use.
+                '';
+              };
+            };
           };
 
           dns = {
@@ -694,6 +706,32 @@ in
                 "::1"
               ];
               description = "list of trusted proxy IP addresses or CIDR ranges";
+            };
+          };
+
+          verify = {
+            rate_limit_per_minute = lib.mkOption {
+              type = lib.types.int;
+              default = 60;
+              description = ''
+                Rate limit for /verify endpoint (requests per minute per IP).
+                Set to 0 to disable rate limiting.
+                The /verify endpoint is used by DERP servers to verify clients.
+              '';
+            };
+
+            allowed_ips = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [
+                "10.0.0.0/8"
+                "192.168.1.100"
+              ];
+              description = ''
+                IP allowlist for the /verify endpoint.
+                When non-empty, only requests from these IPs/CIDRs are allowed.
+                Leave empty to allow all IPs (rely on rate limiting only).
+              '';
             };
           };
 
