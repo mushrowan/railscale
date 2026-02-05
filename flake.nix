@@ -140,8 +140,7 @@
             { pkgs, ... }:
             {
               imports = [ ./nix/module.nix ];
-              services.railscale.package =
-                inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.railscale;
+              services.railscale.package = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.railscale;
             };
           default = railscale;
         };

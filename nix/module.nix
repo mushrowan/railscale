@@ -31,7 +31,8 @@ let
       cfg.port;
 
   # Parse port from "host:port" address string, with fallback
-  parsePort = addr: fallback:
+  parsePort =
+    addr: fallback:
     let
       parts = lib.splitString ":" addr;
       lastPart = lib.last parts;
