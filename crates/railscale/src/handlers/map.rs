@@ -628,17 +628,21 @@ fn node_to_map_response_node(
 
 /// build capability map for self node based on config.
 ///
-/// currently only includes file-sharing capability when taildrop_enabled.
+/// always includes ssh-env-vars (enables AcceptEnv on ssh rules).
+/// includes file-sharing when taildrop_enabled.
 fn build_self_cap_map(
     config: &railscale_types::Config,
 ) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
+    let mut cap_map = std::collections::HashMap::new();
+
+    // always enable ssh environment variable forwarding
+    cap_map.insert(railscale_proto::CAP_SSH_ENV_VARS.to_string(), vec![]);
+
     if config.taildrop_enabled {
-        let mut cap_map = std::collections::HashMap::new();
         cap_map.insert(railscale_proto::CAP_FILE_SHARING.to_string(), vec![]);
-        Some(cap_map)
-    } else {
-        None
     }
+
+    Some(cap_map)
 }
 
 /// fetch tka info from the database.
@@ -673,6 +677,27 @@ mod tests {
             "key_signature should be populated when provided"
         );
         assert_eq!(result.key_signature.as_bytes(), &sig_bytes);
+    }
+
+    #[test]
+    fn test_build_self_cap_map_always_includes_ssh_env_vars() {
+        // ssh-env-vars should be present even with taildrop disabled
+        let config = railscale_types::Config::default();
+        let cap_map = build_self_cap_map(&config);
+        let cap_map = cap_map.expect("cap_map should be Some when ssh-env-vars is always on");
+        assert!(
+            cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS),
+            "cap_map should contain ssh-env-vars capability"
+        );
+    }
+
+    #[test]
+    fn test_build_self_cap_map_with_taildrop_has_both_caps() {
+        let mut config = railscale_types::Config::default();
+        config.taildrop_enabled = true;
+        let cap_map = build_self_cap_map(&config).unwrap();
+        assert!(cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS));
+        assert!(cap_map.contains_key(railscale_proto::CAP_FILE_SHARING));
     }
 
     #[test]

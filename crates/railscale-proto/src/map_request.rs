@@ -39,6 +39,12 @@ use crate::tka::TkaInfo;
 /// proper CapGrant support to FilterRule
 pub const CAP_FILE_SHARING: &str = "https://tailscale.com/cap/file-sharing";
 
+/// node capability enabling ssh environment variable forwarding.
+///
+/// when present, the client's ssh server will filter client-proposed env vars
+/// through the AcceptEnv patterns on matching SSH rules
+pub const CAP_SSH_ENV_VARS: &str = "ssh-env-vars";
+
 /// a maprequest from a tailscale client.
 ///
 /// clients send maprequests periodically (every 15-60 seconds) to:
