@@ -28,7 +28,11 @@ impl RateLimitParams {
     ///
     /// burst is ~10 seconds worth of requests, capped at 5-50.
     pub fn from_requests_per_minute(rpm: u32) -> Self {
-        let replenish_interval_ms = if rpm > 0 { 60_000 / rpm as u64 } else { 1000 };
+        let replenish_interval_ms = if rpm > 0 {
+            (60_000u64 / rpm as u64).max(1)
+        } else {
+            1000
+        };
         let burst_size = (rpm / 6).clamp(5, 50);
         Self {
             replenish_interval_ms,
@@ -146,6 +150,31 @@ impl KeyExtractor for TrustedProxyKeyExtractor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_rate_limit_params_zero_rpm() {
+        let params = RateLimitParams::from_requests_per_minute(0);
+        assert_eq!(params.replenish_interval_ms, 1000);
+        assert_eq!(params.burst_size, 5);
+    }
+
+    #[test]
+    fn test_rate_limit_params_extreme_rpm() {
+        // very high RPM should not produce zero interval
+        let params = RateLimitParams::from_requests_per_minute(1_000_000);
+        assert!(
+            params.replenish_interval_ms >= 1,
+            "interval must be at least 1ms to avoid governor panic"
+        );
+        assert!(params.burst_size >= 5);
+    }
+
+    #[test]
+    fn test_rate_limit_params_normal_rpm() {
+        let params = RateLimitParams::from_requests_per_minute(60);
+        assert_eq!(params.replenish_interval_ms, 1000); // 60_000 / 60
+        assert_eq!(params.burst_size, 10); // 60 / 6
+    }
 
     #[test]
     fn test_trusted_proxy_parsing() {
