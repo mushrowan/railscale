@@ -60,7 +60,8 @@
 server_url = "http://127.0.0.1:8080"
 
 # Address to bind the HTTP server to.
-# Use "0.0.0.0:8080" to listen on all interfaces.
+# NOTE: code default is "0.0.0.0:8080" (all interfaces).
+# For security, we recommend binding to localhost and using a reverse proxy.
 listen_addr = "127.0.0.1:8080"
 
 # Path to the Noise protocol private key file.
@@ -110,6 +111,10 @@ db_type = "sqlite"
 # For SQLite: path to the database file
 # For Postgres: connection string (e.g., "postgres://user:pass@host/db")
 connection_string = "/var/lib/railscale/db.sqlite"
+
+[database.sqlite]
+# Enable WAL mode for better write concurrency (default: true).
+write_ahead_log = true
 
 # -----------------------------------------------------------------------------
 # DERP (Relay) Configuration
@@ -271,9 +276,10 @@ global = [
 # domain_hint = "example.com"
 #
 # # PKCE (Proof Key for Code Exchange) adds security to the OAuth flow.
+# # Enabled by default with S256 (recommended).
 # [oidc.pkce]
-# enabled = false
-# method = "S256"  # or "Plain"
+# enabled = true
+# method = "S256"
 
 # -----------------------------------------------------------------------------
 # REST API Configuration
@@ -313,6 +319,31 @@ rate_limit_enabled = true
 # Only applies when rate_limit_enabled is true.
 rate_limit_per_minute = 100
 
+# Reverse proxy settings.
+# When behind a reverse proxy (nginx, caddy), enable this to extract
+# real client IPs from X-Forwarded-For headers for rate limiting.
+# behind_proxy = true
+# trusted_proxies = ["127.0.0.1", "10.0.0.0/8"]
+
+# -----------------------------------------------------------------------------
+# Verify Endpoint Configuration
+# -----------------------------------------------------------------------------
+#
+# The /verify endpoint is used by DERP servers to check if a client is
+# registered. It is intentionally unauthenticated for compatibility.
+# Protect it with rate limiting and/or IP allowlists.
+
+[verify]
+# Rate limit for /verify requests (per minute per IP). 0 to disable.
+rate_limit_per_minute = 60
+
+# IP allowlist. When non-empty, only these IPs/CIDRs can reach /verify.
+# allowed_ips = ["10.0.0.0/8", "192.168.1.100"]
+
+# Trusted proxies for X-Forwarded-For extraction on /verify.
+# Only used when allowed_ips is non-empty.
+# trusted_proxies = ["127.0.0.1"]
+
 # -----------------------------------------------------------------------------
 # Feature Flags
 # -----------------------------------------------------------------------------
@@ -326,6 +357,14 @@ taildrop_enabled = true
 # Helps with some buggy firewalls that block the default port 41641.
 # https://tailscale.com/kb/1181/firewalls/
 randomize_client_port = false
+
+# Hide build metadata (commit, rustc, build time) from /version endpoint.
+# Enable to prevent fingerprinting in production.
+# hide_build_metadata = true
+
+# DANGEROUS: Allow registration without Noise protocol (testing only).
+# Never enable in production — bypasses cryptographic machine binding.
+# allow_non_noise_registration = false
 
 # -----------------------------------------------------------------------------
 # Performance Tuning
