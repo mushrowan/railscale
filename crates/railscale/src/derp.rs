@@ -35,7 +35,14 @@ pub enum DerpError {
     /// file i/o failed.
     #[error("File I/O failed: {0}")]
     Io(#[from] std::io::Error),
+
+    /// response too large.
+    #[error("DERP map response too large: {0} bytes (max {MAX_DERP_MAP_SIZE})")]
+    TooLarge(usize),
 }
+
+/// max size for a derp map response (1 MiB)
+const MAX_DERP_MAP_SIZE: usize = 1024 * 1024;
 
 /// fetch a derp map from a url (expects json format).
 pub async fn fetch_derp_map_from_url(url: &str) -> Result<DerpMap, DerpError> {
@@ -44,8 +51,20 @@ pub async fn fetch_derp_map_from_url(url: &str) -> Result<DerpMap, DerpError> {
         .build()?;
 
     let response = client.get(url).send().await?;
-    let body = response.text().await?;
-    let derp_map: DerpMap = serde_json::from_str(&body)?;
+
+    // check content-length if available before reading body
+    if let Some(len) = response.content_length() {
+        if len as usize > MAX_DERP_MAP_SIZE {
+            return Err(DerpError::TooLarge(len as usize));
+        }
+    }
+
+    let bytes = response.bytes().await?;
+    if bytes.len() > MAX_DERP_MAP_SIZE {
+        return Err(DerpError::TooLarge(bytes.len()));
+    }
+
+    let derp_map: DerpMap = serde_json::from_slice(&bytes)?;
     Ok(derp_map)
 }
 
@@ -265,6 +284,33 @@ Regions:
         assert_eq!(derp_map.regions.len(), 1);
         let region = derp_map.regions.get(&900).unwrap();
         assert_eq!(region.region_code, "custom");
+    }
+
+    /// test that oversized responses are rejected.
+    #[tokio::test]
+    async fn test_fetch_derp_map_rejects_oversized_response() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // respond with a body larger than MAX_DERP_MAP_SIZE
+        let big_body = "x".repeat(super::MAX_DERP_MAP_SIZE + 1);
+
+        Mock::given(method("GET"))
+            .and(path("/derpmap/big"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(big_body))
+            .mount(&mock_server)
+            .await;
+
+        let url = format!("{}/derpmap/big", mock_server.uri());
+        let result = fetch_derp_map_from_url(&url).await;
+        assert!(result.is_err(), "oversized response should be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("too large"),
+            "error should mention size: {err}"
+        );
     }
 
     /// test merging multiple derp maps (later maps override earlier).
