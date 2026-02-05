@@ -188,6 +188,19 @@ async fn delete_user(
         return Err(ApiError::not_found(format!("user {} not found", id)));
     }
 
+    // cascade: soft-delete nodes and preauth keys belonging to this user
+    state
+        .db
+        .delete_nodes_for_user(user_id)
+        .await
+        .map_err(ApiError::internal)?;
+
+    state
+        .db
+        .delete_preauth_keys_for_user(user_id)
+        .await
+        .map_err(ApiError::internal)?;
+
     state
         .db
         .delete_user(user_id)

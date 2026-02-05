@@ -164,6 +164,9 @@ pub trait Database: Send + Sync {
     /// soft-delete a node by setting `deleted_at` timestamp.
     fn delete_node(&self, id: NodeId) -> impl Future<Output = Result<()>> + Send;
 
+    /// soft-delete all nodes belonging to a user.
+    fn delete_nodes_for_user(&self, user_id: UserId) -> impl Future<Output = Result<u64>> + Send;
+
     // ─── PreAuthKey Operations ───────────────────────────────────────────────
 
     /// create a new pre-authentication key. returns the key with its assigned id.
@@ -192,6 +195,12 @@ pub trait Database: Send + Sync {
 
     /// soft-delete a pre-auth key.
     fn delete_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    /// soft-delete all pre-auth keys belonging to a user.
+    fn delete_preauth_keys_for_user(
+        &self,
+        user_id: UserId,
+    ) -> impl Future<Output = Result<u64>> + Send;
 
     /// expire a pre-auth key by setting its expiration to now.
     fn expire_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
@@ -552,6 +561,19 @@ impl Database for RailscaleDb {
         Ok(())
     }
 
+    async fn delete_nodes_for_user(&self, user_id: UserId) -> Result<u64> {
+        let result = entity::node::Entity::update_many()
+            .col_expr(
+                entity::node::Column::DeletedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::node::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .exec(&self.conn)
+            .await?;
+        Ok(result.rows_affected)
+    }
+
     // preauthkey operations
 
     async fn create_preauth_key(&self, key: &PreAuthKey) -> Result<PreAuthKey> {
@@ -603,6 +625,19 @@ impl Database for RailscaleDb {
             .exec(&self.conn)
             .await?;
         Ok(())
+    }
+
+    async fn delete_preauth_keys_for_user(&self, user_id: UserId) -> Result<u64> {
+        let result = entity::preauth_key::Entity::update_many()
+            .col_expr(
+                entity::preauth_key::Column::DeletedAt,
+                sea_orm::sea_query::Expr::value(Utc::now()),
+            )
+            .filter(entity::preauth_key::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::preauth_key::Column::DeletedAt.is_null())
+            .exec(&self.conn)
+            .await?;
+        Ok(result.rows_affected)
     }
 
     async fn get_all_preauth_keys(&self) -> Result<Vec<PreAuthKey>> {
@@ -1238,6 +1273,56 @@ mod tests {
             "wal",
             "default should not use WAL mode"
         );
+    }
+
+    #[tokio::test]
+    async fn test_delete_nodes_for_user() {
+        let db = setup_test_db().await;
+
+        let user = User::new(UserId(0), "alice".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        // create two nodes for this user
+        for i in 0..2u8 {
+            let node = railscale_types::test_utils::TestNodeBuilder::new(0)
+                .with_node_key(railscale_types::NodeKey::from_bytes(vec![i + 1; 32]))
+                .with_user_id(user.id)
+                .build();
+            db.create_node(&node).await.unwrap();
+        }
+
+        let nodes = db.list_nodes_for_user(user.id).await.unwrap();
+        assert_eq!(nodes.len(), 2);
+
+        let deleted = db.delete_nodes_for_user(user.id).await.unwrap();
+        assert_eq!(deleted, 2);
+
+        let nodes = db.list_nodes_for_user(user.id).await.unwrap();
+        assert_eq!(nodes.len(), 0, "nodes should be soft-deleted");
+    }
+
+    #[tokio::test]
+    async fn test_delete_preauth_keys_for_user() {
+        let db = setup_test_db().await;
+
+        let user = User::new(UserId(0), "bob".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        // create two preauth keys
+        for _ in 0..2 {
+            let token = railscale_types::PreAuthKeyToken::generate();
+            let key = railscale_types::PreAuthKey::from_token(0, &token, user.id);
+            db.create_preauth_key(&key).await.unwrap();
+        }
+
+        let keys = db.list_preauth_keys(user.id).await.unwrap();
+        assert_eq!(keys.len(), 2);
+
+        let deleted = db.delete_preauth_keys_for_user(user.id).await.unwrap();
+        assert_eq!(deleted, 2);
+
+        let keys = db.list_preauth_keys(user.id).await.unwrap();
+        assert_eq!(keys.len(), 0, "preauth keys should be soft-deleted");
     }
 
     #[tokio::test]
