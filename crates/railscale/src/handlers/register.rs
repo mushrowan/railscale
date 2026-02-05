@@ -47,6 +47,11 @@ pub struct RegisterRequest {
     /// that returned an auth_url.
     #[serde(default)]
     pub followup: String,
+
+    /// network lock public key (format: "nlpub:<hex>").
+    /// sent by clients that support tailnet lock for autonomous key rotation.
+    #[serde(rename = "NLKey", default)]
+    pub nl_key: String,
 }
 
 /// authentication info for registerrequest.
@@ -108,6 +113,22 @@ pub struct TailcfgLogin {
     pub display_name: String,
 }
 
+/// parse a network lock public key from the "nlpub:<hex>" format.
+///
+/// returns the raw ed25519 public key bytes (32 bytes) if valid,
+/// or None if the string is empty, has wrong prefix, or wrong length.
+fn parse_nl_public_key(s: &str) -> Option<Vec<u8>> {
+    if s.is_empty() {
+        return None;
+    }
+    let hex_str = s.strip_prefix("nlpub:")?;
+    let bytes = hex::decode(hex_str).ok()?;
+    if bytes.len() != 32 {
+        return None;
+    }
+    Some(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -140,6 +161,61 @@ mod tests {
 
         let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
         assert!(req.followup.is_empty());
+    }
+
+    #[test]
+    fn test_register_request_parses_nl_key() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+            "NLKey": "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert_eq!(
+            req.nl_key,
+            "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        );
+    }
+
+    #[test]
+    fn test_register_request_nl_key_defaults_to_empty() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert!(req.nl_key.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_valid() {
+        let hex_str = "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let result = parse_nl_public_key(hex_str);
+        assert!(result.is_some());
+        let bytes = result.unwrap();
+        assert_eq!(bytes.len(), 32);
+        assert_eq!(bytes[0], 0x01);
+        assert_eq!(bytes[31], 0x20);
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_empty() {
+        assert!(parse_nl_public_key("").is_none());
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_wrong_prefix() {
+        let hex_str = "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        assert!(parse_nl_public_key(hex_str).is_none());
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_wrong_length() {
+        // only 16 bytes instead of 32
+        let hex_str = "nlpub:0102030405060708090a0b0c0d0e0f10";
+        assert!(parse_nl_public_key(hex_str).is_none());
     }
 
     fn default_grants() -> GrantsEngine {
@@ -431,6 +507,70 @@ mod tests {
             "machine key must not be all zeros"
         );
     }
+
+    #[tokio::test]
+    async fn test_register_stores_nl_key() {
+        use railscale_db::Database;
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a preauth key
+        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let token = railscale_types::PreAuthKeyToken::generate();
+        let preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
+        db.create_preauth_key(&preauth).await.unwrap();
+        let auth_key_str = token.to_string();
+
+        let mut config = railscale_types::Config::default();
+        config.allow_non_noise_registration = true;
+
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        let nl_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:aabbccdd00000000000000000000000000000000000000000000000000000000",
+            "NLKey": format!("nlpub:{nl_key_hex}"),
+            "Auth": { "AuthKey": auth_key_str }
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // verify NL key was stored on the node
+        let nk = railscale_types::NodeKey::from_bytes(
+            hex::decode("aabbccdd00000000000000000000000000000000000000000000000000000000")
+                .unwrap(),
+        );
+        let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
+        let expected_bytes = hex::decode(nl_key_hex).unwrap();
+        assert_eq!(
+            node.nl_public_key,
+            Some(expected_bytes),
+            "nl_public_key should be stored from NLKey in register request"
+        );
+    }
 }
 
 /// handle node registration.
@@ -552,6 +692,9 @@ async fn handle_preauth_registration(
             .map_err(|e| ApiError::internal(e.to_string()))?
     };
 
+    // parse NL public key from "nlpub:<hex>" format if provided
+    let nl_public_key = parse_nl_public_key(&req.nl_key);
+
     let now = chrono::Utc::now();
     let node = Node {
         id: NodeId(0),
@@ -581,7 +724,7 @@ async fn handle_preauth_registration(
         updated_at: now,
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
+        nl_public_key,
     };
 
     let _node = state.db.create_node(&node).await.map_internal()?;
