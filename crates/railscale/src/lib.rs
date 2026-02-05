@@ -512,23 +512,36 @@ fn build_verify_router(state: &AppState) -> Router<AppState> {
     }
 }
 
+/// spawn a periodic cleanup task for a governor rate limiter.
+macro_rules! spawn_limiter_cleanup {
+    ($conf:expr) => {{
+        let limiter = $conf.limiter().clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(60));
+            loop {
+                interval.tick().await;
+                limiter.retain_recent();
+            }
+        });
+    }};
+}
+
 /// build the api router (rest admin endpoints).
 fn build_api_router(state: &AppState) -> Router {
     // apply body size limit (64kb) to prevent memory exhaustion
     let api_router = handlers::api_v1::router().layer(DefaultBodyLimit::max(64 * 1024));
 
     // apply rate limiting if enabled
-    let router = if state.config.api.rate_limit_enabled {
+    let nested = if state.config.api.rate_limit_enabled {
         let params = rate_limit::RateLimitParams::from_requests_per_minute(
             state.config.api.rate_limit_per_minute,
         );
 
-        // use proxy-aware key extractor if behind a reverse proxy
         if state.config.api.behind_proxy {
             let key_extractor =
                 rate_limit::TrustedProxyKeyExtractor::new(&state.config.api.trusted_proxies);
 
-            let governor_conf = GovernorConfigBuilder::default()
+            let conf = GovernorConfigBuilder::default()
                 .per_millisecond(params.replenish_interval_ms)
                 .burst_size(params.burst_size)
                 .key_extractor(key_extractor)
@@ -536,47 +549,24 @@ fn build_api_router(state: &AppState) -> Router {
                 .finish()
                 .expect("valid governor config");
 
-            // cleanup task for rate limiter storage
-            let limiter = governor_conf.limiter().clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(60));
-                loop {
-                    interval.tick().await;
-                    limiter.retain_recent();
-                }
-            });
-
-            Router::new().nest(
-                "/api/v1",
-                api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
-            )
+            spawn_limiter_cleanup!(conf);
+            api_router.layer(GovernorLayer::new(Arc::new(conf)))
         } else {
-            // direct connection mode - use peer ip directly
-            let governor_conf = GovernorConfigBuilder::default()
+            let conf = GovernorConfigBuilder::default()
                 .per_millisecond(params.replenish_interval_ms)
                 .burst_size(params.burst_size)
                 .use_headers()
                 .finish()
                 .expect("valid governor config");
 
-            // cleanup task for rate limiter storage
-            let limiter = governor_conf.limiter().clone();
-            tokio::spawn(async move {
-                let mut interval = tokio::time::interval(Duration::from_secs(60));
-                loop {
-                    interval.tick().await;
-                    limiter.retain_recent();
-                }
-            });
-
-            Router::new().nest(
-                "/api/v1",
-                api_router.layer(GovernorLayer::new(Arc::new(governor_conf))),
-            )
+            spawn_limiter_cleanup!(conf);
+            api_router.layer(GovernorLayer::new(Arc::new(conf)))
         }
     } else {
-        Router::new().nest("/api/v1", api_router)
+        api_router
     };
 
-    router.with_state(state.clone())
+    Router::new()
+        .nest("/api/v1", nested)
+        .with_state(state.clone())
 }
