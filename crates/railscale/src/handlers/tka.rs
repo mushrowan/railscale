@@ -21,6 +21,15 @@ use tracing::{debug, info};
 
 use crate::AppState;
 
+/// max size of a single AUM in bytes (32 KiB)
+const MAX_AUM_SIZE: usize = 32 * 1024;
+
+/// max number of AUMs in a single sync_send request
+const MAX_AUMS_PER_REQUEST: usize = 100;
+
+/// max number of signatures in a single init_finish request
+const MAX_SIGNATURES_PER_REQUEST: usize = 1000;
+
 /// verify the requesting node exists in the database, returning UNAUTHORIZED if not
 async fn verify_requesting_node(
     db: &impl Database,
@@ -57,6 +66,19 @@ pub async fn tka_init_begin(
     // verify requesting node exists
     if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka init begin").await {
         return (status, Json(TkaInitBeginResponse::default()));
+    }
+
+    // check genesis AUM size
+    if req.genesis_aum.as_bytes().len() > MAX_AUM_SIZE {
+        info!(
+            size = req.genesis_aum.as_bytes().len(),
+            max = MAX_AUM_SIZE,
+            "tka init begin: genesis aum too large"
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(TkaInitBeginResponse::default()),
+        );
     }
 
     // reject if TKA is already enabled — cannot overwrite existing state
@@ -491,6 +513,35 @@ pub async fn tka_sync_send(
     // verify requesting node exists
     if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka sync send").await {
         return (status, Json(TkaSyncSendResponse::default()));
+    }
+
+    // check aum count limit
+    if req.missing_aums.len() > MAX_AUMS_PER_REQUEST {
+        info!(
+            count = req.missing_aums.len(),
+            max = MAX_AUMS_PER_REQUEST,
+            "tka sync send: too many aums"
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(TkaSyncSendResponse::default()),
+        );
+    }
+
+    // check individual aum sizes
+    for (i, aum) in req.missing_aums.iter().enumerate() {
+        if aum.as_bytes().len() > MAX_AUM_SIZE {
+            info!(
+                index = i,
+                size = aum.as_bytes().len(),
+                max = MAX_AUM_SIZE,
+                "tka sync send: aum too large"
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TkaSyncSendResponse::default()),
+            );
+        }
     }
 
     // get current TKA state
@@ -2556,5 +2607,256 @@ mod tests {
 
         // should return current head
         assert_eq!(resp.head, genesis_hash.to_string());
+    }
+
+    // --- 1-7: aum size limits ---
+
+    #[tokio::test]
+    async fn tka_init_begin_rejects_oversized_genesis_aum() {
+        use railscale_db::Database;
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
+            last_seen_country: None,
+            ephemeral: false,
+        };
+        db.create_node(&node).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // genesis AUM larger than MAX_AUM_SIZE
+        let oversized = vec![0xffu8; super::MAX_AUM_SIZE + 1];
+        let req = TkaInitBeginRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            genesis_aum: oversized.into(),
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/init/begin")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn tka_sync_send_rejects_oversized_aum() {
+        use railscale_db::{Database, TkaState};
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
+            last_seen_country: None,
+            ephemeral: false,
+        };
+        db.create_node(&node).await.unwrap();
+
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some("abc".to_string()),
+            state_checkpoint: None,
+            disablement_secrets: None,
+            genesis_aum: Some(vec![0xca, 0xfe]),
+            created_at: now,
+            updated_at: now,
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        let oversized_aum: Vec<u8> = vec![0xffu8; super::MAX_AUM_SIZE + 1];
+        let req = TkaSyncSendRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            head: "abc".to_string(),
+            missing_aums: vec![oversized_aum.into()],
+            interactive: false,
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/sync/send")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn tka_sync_send_rejects_too_many_aums() {
+        use railscale_db::{Database, TkaState};
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
+            last_seen_country: None,
+            ephemeral: false,
+        };
+        db.create_node(&node).await.unwrap();
+
+        let tka_state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some("abc".to_string()),
+            state_checkpoint: None,
+            disablement_secrets: None,
+            genesis_aum: Some(vec![0xca, 0xfe]),
+            created_at: now,
+            updated_at: now,
+        };
+        db.upsert_tka_state(&tka_state).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // more AUMs than MAX_AUMS_PER_REQUEST
+        let too_many: Vec<_> = (0..super::MAX_AUMS_PER_REQUEST + 1)
+            .map(|_| vec![0u8; 10].into())
+            .collect();
+
+        let req = TkaSyncSendRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            head: "abc".to_string(),
+            missing_aums: too_many,
+            interactive: false,
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/sync/send")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 }
