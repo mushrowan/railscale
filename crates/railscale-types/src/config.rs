@@ -402,8 +402,8 @@ pub struct EmbeddedDerpConfig {
     /// sending it to clients via ServerInfo (client-side enforcement).
     /// this protects against malicious or misconfigured clients that ignore
     /// the ServerInfo rate limits.
-    /// default: false (client-side only, for headscale compatibility).
-    #[serde(default)]
+    /// default: true (server enforces, don't rely on client self-enforcement)
+    #[serde(default = "default_server_side_rate_limit")]
     pub server_side_rate_limit: bool,
 
     /// runtime details populated when the derp server starts.
@@ -430,10 +430,14 @@ impl Default for EmbeddedDerpConfig {
             bytes_burst: default_derp_bytes_burst(),
             connection_rate_per_minute: default_derp_connection_rate_per_minute(),
             stun_rate_per_minute: default_stun_rate_per_minute(),
-            server_side_rate_limit: false,
+            server_side_rate_limit: true,
             runtime: None,
         }
     }
+}
+
+fn default_server_side_rate_limit() -> bool {
+    true
 }
 
 fn default_derp_listen_addr() -> String {
@@ -995,11 +999,10 @@ mod tests {
         assert_eq!(derp.connection_rate_per_minute, 10);
         // stun rate limiting
         assert_eq!(derp.stun_rate_per_minute, 60);
-        // server-side message rate limiting should be disabled by default
-        // (for compatibility with clients that don't expect it)
+        // server-side rate limiting enabled by default for security
         assert!(
-            !derp.server_side_rate_limit,
-            "server_side_rate_limit should be false by default"
+            derp.server_side_rate_limit,
+            "server_side_rate_limit should be true by default"
         );
     }
 
@@ -1017,8 +1020,8 @@ mod tests {
         assert_eq!(derp.bytes_burst, 102400);
         assert_eq!(derp.connection_rate_per_minute, 5);
         assert_eq!(derp.stun_rate_per_minute, 30);
-        // default when not specified
-        assert!(!derp.server_side_rate_limit);
+        // default when not specified is now true
+        assert!(derp.server_side_rate_limit);
     }
 
     #[test]
