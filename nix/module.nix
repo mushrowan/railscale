@@ -29,6 +29,29 @@ let
       cfg.settings.api.listen_port or 9090
     else
       cfg.port;
+
+  # Parse port from "host:port" address string, with fallback
+  parsePort = addr: fallback:
+    let
+      parts = lib.splitString ":" addr;
+      lastPart = lib.last parts;
+      parsed = lib.toIntBase10 lastPart;
+    in
+    if builtins.length parts >= 2 then parsed else fallback;
+
+  # DERP port from listen_addr or advertise_port
+  derpPort =
+    if cfg.settings.derp.embedded_derp.advertise_port != null then
+      cfg.settings.derp.embedded_derp.advertise_port
+    else
+      parsePort cfg.settings.derp.embedded_derp.listen_addr 3340;
+
+  # STUN port from stun_listen_addr
+  stunPort =
+    if cfg.settings.derp.embedded_derp.stun_listen_addr != null then
+      parsePort cfg.settings.derp.embedded_derp.stun_listen_addr 3478
+    else
+      3478;
 in
 {
   options.services.railscale = {
@@ -210,10 +233,14 @@ in
 
           database = {
             db_type = lib.mkOption {
-              type = lib.types.enum [ "sqlite" ];
+              type = lib.types.enum [
+                "sqlite"
+                "postgres"
+              ];
               default = "sqlite";
               description = ''
-                Database type. Currently only SQLite is supported.
+                Database type. Supported: sqlite, postgres.
+                For postgres, set connection_string to a postgres:// URL.
               '';
             };
 
@@ -593,7 +620,7 @@ in
 
               server_side_rate_limit = lib.mkOption {
                 type = lib.types.bool;
-                default = false;
+                default = true;
                 description = ''
                   enable server-side message rate limiting.
                   protects against malicious clients that ignore ServerInfo limits.
@@ -731,6 +758,19 @@ in
                 IP allowlist for the /verify endpoint.
                 When non-empty, only requests from these IPs/CIDRs are allowed.
                 Leave empty to allow all IPs (rely on rate limiting only).
+              '';
+            };
+
+            trusted_proxies = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              example = [
+                "127.0.0.1"
+                "10.0.0.0/8"
+              ];
+              description = ''
+                trusted proxy addresses for X-Forwarded-For extraction on /verify.
+                only used when allowed_ips is non-empty.
               '';
             };
           };
@@ -885,15 +925,8 @@ in
     networking.firewall = lib.mkMerge [
       # DERP/STUN ports when embedded DERP is enabled
       (lib.mkIf cfg.settings.derp.embedded_derp.enabled {
-        allowedTCPPorts = [
-          (
-            if cfg.settings.derp.embedded_derp.advertise_port != null then
-              cfg.settings.derp.embedded_derp.advertise_port
-            else
-              3340
-          )
-        ];
-        allowedUDPPorts = lib.optional (cfg.settings.derp.embedded_derp.stun_listen_addr != null) 3478;
+        allowedTCPPorts = [ derpPort ];
+        allowedUDPPorts = lib.optional (cfg.settings.derp.embedded_derp.stun_listen_addr != null) stunPort;
       })
       # API port when settings.api.openFirewall and settings.api.enabled are both true
       (lib.mkIf (cfg.settings.api.openFirewall && cfg.settings.api.enabled) {
