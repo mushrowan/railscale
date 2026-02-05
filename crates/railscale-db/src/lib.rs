@@ -255,6 +255,15 @@ pub trait Database: Send + Sync {
         node_id: NodeId,
     ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
 
+    /// batch-fetch key signatures for multiple nodes.
+    ///
+    /// returns a map of node_id -> signature bytes for nodes that have signatures.
+    /// nodes without signatures are omitted from the result.
+    fn get_node_key_signatures_batch(
+        &self,
+        node_ids: &[NodeId],
+    ) -> impl Future<Output = Result<std::collections::HashMap<NodeId, Vec<u8>>>> + Send;
+
     /// set a node's key signature.
     fn set_node_key_signature(
         &self,
@@ -787,6 +796,35 @@ impl Database for RailscaleDb {
         Ok(result.and_then(|m| m.key_signature))
     }
 
+    async fn get_node_key_signatures_batch(
+        &self,
+        node_ids: &[NodeId],
+    ) -> Result<std::collections::HashMap<NodeId, Vec<u8>>> {
+        if node_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        let ids: Vec<i64> = node_ids.iter().map(|id| id.0 as i64).collect();
+
+        let results = entity::node::Entity::find()
+            .filter(entity::node::Column::Id.is_in(ids))
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .filter(entity::node::Column::KeySignature.is_not_null())
+            .all(&self.conn)
+            .await?;
+
+        let mut map = std::collections::HashMap::new();
+        for model in results {
+            if let Some(sig) = model.key_signature {
+                if !sig.is_empty() {
+                    map.insert(NodeId(model.id as u64), sig);
+                }
+            }
+        }
+
+        Ok(map)
+    }
+
     async fn set_node_key_signature(&self, node_id: NodeId, signature: &[u8]) -> Result<()> {
         entity::node::Entity::update_many()
             .col_expr(
@@ -1241,6 +1279,67 @@ mod tests {
         // get signature
         let fetched = db.get_node_key_signature(created.id).await.unwrap();
         assert_eq!(fetched, Some(signature));
+    }
+
+    #[tokio::test]
+    async fn test_node_key_signatures_batch() {
+        use railscale_types::{DiscoKey, MachineKey, NodeKey, RegisterMethod};
+
+        let db = setup_test_db().await;
+        let user = User::new(UserId(0), "batchowner".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        // create 3 nodes
+        let mut nodes = vec![];
+        for i in 0..3u8 {
+            let node = Node {
+                id: NodeId(0),
+                machine_key: MachineKey::from_bytes(vec![i + 1; 4]),
+                node_key: NodeKey::from_bytes(vec![i + 10; 4]),
+                disco_key: DiscoKey::from_bytes(vec![i + 20; 4]),
+                endpoints: vec![],
+                hostinfo: None,
+                ipv4: Some(format!("100.64.0.{}", i + 1).parse().unwrap()),
+                ipv6: None,
+                hostname: format!("node-{}", i),
+                given_name: format!("node-{}", i),
+                user_id: Some(user.id),
+                register_method: RegisterMethod::AuthKey,
+                tags: vec![],
+                auth_key_id: None,
+                expiry: None,
+                last_seen: None,
+                last_seen_country: None,
+                approved_routes: vec![],
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                is_online: None,
+                posture_attributes: std::collections::HashMap::new(),
+                ephemeral: false,
+            };
+            nodes.push(db.create_node(&node).await.unwrap());
+        }
+
+        // set signatures on nodes 0 and 2 (not 1)
+        db.set_node_key_signature(nodes[0].id, &[0xaa, 0xbb])
+            .await
+            .unwrap();
+        db.set_node_key_signature(nodes[2].id, &[0xcc, 0xdd])
+            .await
+            .unwrap();
+
+        // batch fetch all 3
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        let sigs = db.get_node_key_signatures_batch(&ids).await.unwrap();
+
+        assert_eq!(sigs.len(), 2);
+        assert_eq!(sigs.get(&nodes[0].id), Some(&vec![0xaa, 0xbb]));
+        assert!(sigs.get(&nodes[1].id).is_none());
+        assert_eq!(sigs.get(&nodes[2].id), Some(&vec![0xcc, 0xdd]));
+
+        // empty input returns empty map
+        let empty = db.get_node_key_signatures_batch(&[]).await.unwrap();
+        assert!(empty.is_empty());
     }
 
     #[tokio::test]

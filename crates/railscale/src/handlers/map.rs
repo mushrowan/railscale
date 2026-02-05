@@ -401,8 +401,20 @@ async fn build_map_response(
 
     // when omit_peers is set, skip expensive peer/filter/ssh computation
     if omit_peers {
+        // fetch self node's TKA signature if TKA is enabled
+        let self_sig = if tka_info.is_some() {
+            state
+                .db
+                .get_node_key_signature(node.id)
+                .await
+                .unwrap_or(None)
+        } else {
+            None
+        };
+
         // self is always online when making this request
-        let mut self_node = node_to_map_response_node(&node, home_derp, Some(true));
+        let mut self_node =
+            node_to_map_response_node(&node, home_derp, Some(true), self_sig.as_deref());
         self_node.cap_map = build_self_cap_map(&state.config);
 
         return Ok(MapResponse {
@@ -470,20 +482,35 @@ async fn build_map_response(
     // generate dns configuration
     let dns_config = crate::dns::generate_dns_config(&state.config);
 
+    // batch-fetch TKA key signatures when tailnet lock is enabled
+    let key_signatures = if tka_info.is_some() {
+        let mut all_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
+        all_ids.push(node.id);
+        state
+            .db
+            .get_node_key_signatures_batch(&all_ids)
+            .await
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+
     // build self node with capabilities (self is always online if we're making this request)
-    let mut self_node = node_to_map_response_node(&node, home_derp, Some(true));
+    let self_sig = key_signatures.get(&node.id).map(|v| v.as_slice());
+    let mut self_node = node_to_map_response_node(&node, home_derp, Some(true), self_sig);
     self_node.cap_map = build_self_cap_map(&state.config);
 
     // get online status for all visible peers
     let peer_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
     let online_statuses = state.presence.get_online_statuses(&peer_ids).await;
 
-    // build peer nodes with online status from presence tracker
+    // build peer nodes with online status and TKA signatures
     let peers: Vec<MapResponseNode> = visible_peers
         .iter()
         .map(|n| {
             let online = online_statuses.get(&n.id).copied();
-            node_to_map_response_node(n, home_derp, online)
+            let sig = key_signatures.get(&n.id).map(|v| v.as_slice());
+            node_to_map_response_node(n, home_derp, online, sig)
         })
         .collect();
 
@@ -539,7 +566,16 @@ fn ip_to_cidr(ip: std::net::IpAddr) -> String {
 /// `online` is the online status from presence tracking. if `Some(true)`, the node
 /// is currently connected via a streaming map session. if `Some(false)`, it's not.
 /// if `None`, the status is unknown (shouldn't happen in practice).
-fn node_to_map_response_node(node: &Node, home_derp: i32, online: Option<bool>) -> MapResponseNode {
+///
+/// `key_sig` is the TKA key signature for this node (if TKA is enabled and the node
+/// has been signed). when present, the tailscale client uses it to verify the node
+/// is approved by tailnet lock.
+fn node_to_map_response_node(
+    node: &Node,
+    home_derp: i32,
+    online: Option<bool>,
+    key_sig: Option<&[u8]>,
+) -> MapResponseNode {
     // addresses must be in cidr notation for tailscale client
     let mut addresses = Vec::new();
     if let Some(ip) = node.ipv4 {
@@ -575,7 +611,9 @@ fn node_to_map_response_node(node: &Node, home_derp: i32, online: Option<bool>) 
         tags: node.tags.iter().map(|t| t.to_string()).collect(),
         primary_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
         key_expiry: node.expiry.as_ref().map(|e| e.to_rfc3339()),
-        key_signature: Default::default(), // tka signature not yet implemented
+        key_signature: key_sig
+            .map(|s| railscale_tka::MarshaledSignature::from(s.to_vec()))
+            .unwrap_or_default(),
         expired: node.is_expired(),
         user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).0,
         // nodes in the database that respond to map requests are authorized
@@ -610,5 +648,41 @@ async fn get_tka_info(db: &impl Database) -> Option<TkaInfo> {
         tka_state.head.map(TkaInfo::new)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use railscale_types::test_utils::TestNodeBuilder;
+
+    #[test]
+    fn test_node_to_map_response_includes_key_signature() {
+        let node = TestNodeBuilder::new(1)
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+
+        let sig_bytes = vec![0xde, 0xad, 0xbe, 0xef];
+        let result = node_to_map_response_node(&node, 1, Some(true), Some(&sig_bytes));
+
+        assert!(
+            !result.key_signature.is_empty(),
+            "key_signature should be populated when provided"
+        );
+        assert_eq!(result.key_signature.as_bytes(), &sig_bytes);
+    }
+
+    #[test]
+    fn test_node_to_map_response_empty_signature_when_none() {
+        let node = TestNodeBuilder::new(2)
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+
+        let result = node_to_map_response_node(&node, 1, Some(true), None);
+
+        assert!(
+            result.key_signature.is_empty(),
+            "key_signature should be empty when not provided"
+        );
     }
 }
