@@ -44,6 +44,13 @@ pub struct SshPolicyRule {
 
     /// ssh users allowed (usernames or "autogroup:nonroot").
     pub users: Vec<String>,
+
+    /// environment variables to accept from clients (glob patterns).
+    ///
+    /// patterns support `*` (zero-or-more) and `?` (single char) wildcards.
+    /// e.g. `["GIT_*", "LANG"]`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accept_env: Option<Vec<String>>,
 }
 
 impl SshPolicyRule {
@@ -159,6 +166,7 @@ mod tests {
             src: vec![],
             dst: vec!["*".to_string()],
             users: vec!["ubuntu".to_string()],
+            accept_env: None,
         };
         assert!(matches!(rule.validate(), Err(ValidationError::EmptySrc)));
     }
@@ -171,6 +179,7 @@ mod tests {
             src: vec!["*".to_string()],
             dst: vec![],
             users: vec!["ubuntu".to_string()],
+            accept_env: None,
         };
         assert!(matches!(rule.validate(), Err(ValidationError::EmptyDst)));
     }
@@ -183,6 +192,7 @@ mod tests {
             src: vec!["*".to_string()],
             dst: vec!["*".to_string()],
             users: vec![],
+            accept_env: None,
         };
         assert!(matches!(
             rule.validate(),
@@ -198,6 +208,7 @@ mod tests {
             src: vec!["*".to_string()],
             dst: vec!["*".to_string()],
             users: vec!["ubuntu".to_string()],
+            accept_env: None,
         };
         assert!(matches!(
             rule.validate(),
@@ -213,6 +224,7 @@ mod tests {
             src: vec!["group:admins".to_string()],
             dst: vec!["tag:servers".to_string()],
             users: vec!["autogroup:nonroot".to_string(), "root".to_string()],
+            accept_env: None,
         };
 
         let json = serde_json::to_string(&rule).unwrap();

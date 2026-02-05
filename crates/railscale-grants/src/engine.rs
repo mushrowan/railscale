@@ -515,7 +515,7 @@ impl GrantsEngine {
                 principals,
                 ssh_users,
                 action,
-                accept_env: None,
+                accept_env: ssh_rule.accept_env.clone(),
             });
         }
 
@@ -918,6 +918,7 @@ mod tests {
             src: vec!["*".to_string()],
             dst: vec!["*".to_string()],
             users: vec!["autogroup:nonroot".to_string()],
+            accept_env: None,
         });
 
         let engine = GrantsEngine::new(policy);
@@ -940,6 +941,7 @@ mod tests {
             src: vec!["*".to_string()],
             dst: vec!["*".to_string()],
             users: vec!["ubuntu".to_string()],
+            accept_env: None,
         });
 
         let engine = GrantsEngine::new(policy);
@@ -974,6 +976,7 @@ mod tests {
             src: vec!["autogroup:member".to_string()],
             dst: vec!["autogroup:self".to_string()],
             users: vec!["autogroup:nonroot".to_string()],
+            accept_env: None,
         });
 
         let engine = GrantsEngine::new(policy);
@@ -1368,6 +1371,63 @@ mod tests {
             Some(other_ip),
             &geoip
         ));
+    }
+
+    #[test]
+    fn test_compile_ssh_policy_accept_env_propagated() {
+        let mut policy = Policy::empty();
+        policy.ssh.push(crate::ssh::SshPolicyRule {
+            action: crate::ssh::SshActionType::Accept,
+            check_period: None,
+            src: vec!["*".to_string()],
+            dst: vec!["*".to_string()],
+            users: vec!["ubuntu".to_string()],
+            accept_env: Some(vec!["GIT_*".to_string(), "LANG".to_string()]),
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![node1.clone(), node2.clone()];
+
+        let ssh_policy = engine.compile_ssh_policy(&node1, &all_nodes, &resolver);
+        let policy = ssh_policy.unwrap();
+        let rule = &policy.rules[0];
+
+        // accept_env should be propagated from policy rule
+        assert_eq!(
+            rule.accept_env,
+            Some(vec!["GIT_*".to_string(), "LANG".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_compile_ssh_policy_accept_env_none_when_unset() {
+        let mut policy = Policy::empty();
+        policy.ssh.push(crate::ssh::SshPolicyRule {
+            action: crate::ssh::SshActionType::Accept,
+            check_period: None,
+            src: vec!["*".to_string()],
+            dst: vec!["*".to_string()],
+            users: vec!["ubuntu".to_string()],
+            accept_env: None,
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![node1.clone(), node2.clone()];
+
+        let ssh_policy = engine.compile_ssh_policy(&node1, &all_nodes, &resolver);
+        let policy = ssh_policy.unwrap();
+        let rule = &policy.rules[0];
+
+        // accept_env should remain None when not configured
+        assert_eq!(rule.accept_env, None);
     }
 
     #[test]
