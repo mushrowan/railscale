@@ -227,7 +227,7 @@ pub struct SqliteConfig {
 impl Default for SqliteConfig {
     fn default() -> Self {
         Self {
-            write_ahead_log: false,
+            write_ahead_log: true,
         }
     }
 }
@@ -902,6 +902,11 @@ mod tests {
         assert!(config.prefix_v6.is_some());
         // api is disabled by default
         assert!(!config.api.enabled);
+        // wal should be enabled by default for better concurrency
+        assert!(
+            config.database.sqlite.write_ahead_log,
+            "sqlite WAL should be enabled by default"
+        );
     }
 
     #[test]
