@@ -64,9 +64,13 @@ pub struct NodeResponse {
     pub online: bool,
 }
 
-/// format a key as "prefix:<hex>"
+/// format a key as "prefix:<first 8 hex chars>..." (redacted)
+///
+/// only shows the first 4 bytes of key material for identification
+/// without exposing full cryptographic keys via the API
 fn format_key(prefix: &str, bytes: &[u8]) -> String {
-    format!("{}:{}", prefix, hex::encode(bytes))
+    let truncated = &bytes[..bytes.len().min(4)];
+    format!("{}:{}...", prefix, hex::encode(truncated))
 }
 
 impl From<Node> for NodeResponse {
@@ -513,5 +517,37 @@ mod tests {
         let json = r#"{"expiry": "2024-12-31T23:59:59Z"}"#;
         let req: ExpireNodeRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.expiry.as_deref(), Some("2024-12-31T23:59:59Z"));
+    }
+
+    #[test]
+    fn test_node_response_redacts_sensitive_keys() {
+        let node = TestNodeBuilder::new(1).build();
+        let response = NodeResponse::from(node);
+
+        // keys must be truncated, not full hex
+        // format should be "prefix:01020304..." (8 hex chars + "...")
+        assert!(
+            response.machine_key.ends_with("..."),
+            "machine_key must be redacted: {}",
+            response.machine_key
+        );
+        assert!(
+            response.node_key.ends_with("..."),
+            "node_key must be redacted: {}",
+            response.node_key
+        );
+        assert!(
+            response.disco_key.ends_with("..."),
+            "disco_key must be redacted: {}",
+            response.disco_key
+        );
+
+        // must NOT contain full 64-char hex (32 bytes)
+        let mkey_hex = response.machine_key.split(':').last().unwrap();
+        assert!(
+            mkey_hex.len() < 64,
+            "machine_key should be truncated, got {} chars",
+            mkey_hex.len()
+        );
     }
 }
