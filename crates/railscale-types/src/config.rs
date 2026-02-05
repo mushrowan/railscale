@@ -713,21 +713,38 @@ pub enum PkceMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TuningConfig {
-    /// nodestore batch size for write operations.
+    /// reserved for future use — not yet wired into runtime.
+    #[serde(default = "default_node_store_batch_size")]
     pub node_store_batch_size: usize,
 
-    /// nodestore batch timeout in milliseconds.
+    /// reserved for future use — not yet wired into runtime.
+    #[serde(default = "default_node_store_batch_timeout_ms")]
     pub node_store_batch_timeout_ms: u64,
 
-    /// registration cache expiration in seconds.
+    /// reserved for future use — not yet wired into runtime.
+    #[serde(default = "default_register_cache_expiration_secs")]
     pub register_cache_expiration_secs: u64,
 
-    /// registration cache cleanup interval in seconds.
+    /// reserved for future use — not yet wired into runtime.
+    #[serde(default = "default_register_cache_cleanup_secs")]
     pub register_cache_cleanup_secs: u64,
 
     /// interval between keep-alive messages for streaming map connections (in seconds).
     /// tailscale uses ~60 seconds. set to 0 to disable keep-alives.
     pub map_keepalive_interval_secs: u64,
+}
+
+fn default_node_store_batch_size() -> usize {
+    100
+}
+fn default_node_store_batch_timeout_ms() -> u64 {
+    500
+}
+fn default_register_cache_expiration_secs() -> u64 {
+    900
+}
+fn default_register_cache_cleanup_secs() -> u64 {
+    1200
 }
 
 impl Default for TuningConfig {
