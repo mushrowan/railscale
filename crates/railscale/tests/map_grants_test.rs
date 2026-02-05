@@ -178,7 +178,49 @@ async fn test_map_request_respects_user_grants() {
     assert_eq!(alice_map.peers.len(), 1);
     assert_eq!(alice_map.peers[0].id, bob_node.id.0);
 
+    // alice's user_profiles should contain alice + bob, but NOT charlie
+    let alice_profile_ids: std::collections::HashSet<u64> =
+        alice_map.user_profiles.iter().map(|p| p.id).collect();
+    assert!(
+        alice_profile_ids.contains(&alice.id.0),
+        "alice should see her own profile"
+    );
+    assert!(
+        alice_profile_ids.contains(&bob.id.0),
+        "alice should see bob's profile (visible peer)"
+    );
+    assert!(
+        !alice_profile_ids.contains(&charlie.id.0),
+        "alice should NOT see charlie's profile (not a visible peer)"
+    );
+    assert_eq!(
+        alice_map.user_profiles.len(),
+        2,
+        "only alice + bob profiles expected"
+    );
+
     // bob should not see anyone (directional grant)
     let bob_map = request_map(bob_node.node_key).await;
     assert_eq!(bob_map.peers.len(), 0);
+
+    // bob's user_profiles should only contain bob (no visible peers)
+    let bob_profile_ids: std::collections::HashSet<u64> =
+        bob_map.user_profiles.iter().map(|p| p.id).collect();
+    assert!(
+        bob_profile_ids.contains(&bob.id.0),
+        "bob should see his own profile"
+    );
+    assert!(
+        !bob_profile_ids.contains(&alice.id.0),
+        "bob should NOT see alice's profile"
+    );
+    assert!(
+        !bob_profile_ids.contains(&charlie.id.0),
+        "bob should NOT see charlie's profile"
+    );
+    assert_eq!(
+        bob_map.user_profiles.len(),
+        1,
+        "only bob's own profile expected"
+    );
 }

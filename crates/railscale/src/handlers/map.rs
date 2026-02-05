@@ -422,16 +422,6 @@ async fn build_map_response(
     let all_nodes = state.db.list_nodes().await.map_internal()?;
     let users = state.db.list_users().await.map_internal()?;
 
-    let user_profiles: Vec<UserProfile> = users
-        .iter()
-        .map(|u| UserProfile {
-            id: u.id.0,
-            login_name: u.username().to_string(),
-            display_name: u.display().to_string(),
-            profile_pic_url: u.profile_pic_url.clone(),
-        })
-        .collect();
-
     // acquire read lock on grants engine for policy evaluation
     let grants = state.grants.read().await;
 
@@ -443,13 +433,33 @@ async fn build_map_response(
         .and_then(|oidc| oidc.group_prefix.clone());
 
     let resolver = crate::resolver::MapUserResolver::with_groups(
-        users,
+        users.clone(),
         grants.policy().groups.clone(),
         oidc_group_prefix,
     );
 
     // use grants engine to filter visible peers
     let visible_peers = grants.get_visible_peers(&node, &all_nodes, &resolver);
+
+    // collect user IDs from visible peers + self node, then filter profiles
+    let mut visible_user_ids: std::collections::HashSet<u64> = visible_peers
+        .iter()
+        .filter_map(|n| n.user_id.map(|id| id.0))
+        .collect();
+    if let Some(self_uid) = node.user_id {
+        visible_user_ids.insert(self_uid.0);
+    }
+
+    let user_profiles: Vec<UserProfile> = users
+        .iter()
+        .filter(|u| visible_user_ids.contains(&u.id.0))
+        .map(|u| UserProfile {
+            id: u.id.0,
+            login_name: u.username().to_string(),
+            display_name: u.display().to_string(),
+            profile_pic_url: u.profile_pic_url.clone(),
+        })
+        .collect();
 
     // generate packet filter rules from grants
     let packet_filter = grants.generate_filter_rules(&node, &all_nodes, &resolver);
