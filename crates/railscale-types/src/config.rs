@@ -592,6 +592,8 @@ pub struct OidcConfig {
     pub scope: Vec<String>,
 
     /// whether email must be verified.
+    /// defaults to true for security — unverified emails can allow account takeover.
+    #[serde(default = "default_true")]
     pub email_verified_required: bool,
 
     /// pkce configuration.
@@ -1113,6 +1115,22 @@ mod tests {
             Some(&"example.com".to_string())
         );
         assert!(oidc.client_secret_path.is_none());
+    }
+
+    #[test]
+    fn test_oidc_email_verified_defaults_to_true() {
+        // when email_verified_required is omitted, it should default to true
+        let json = r#"{
+            "issuer": "https://sso.example.com",
+            "client_id": "railscale",
+            "client_secret": "secret",
+            "scope": ["openid"]
+        }"#;
+        let oidc: OidcConfig = serde_json::from_str(json).unwrap();
+        assert!(
+            oidc.email_verified_required,
+            "email_verified_required should default to true for security"
+        );
     }
 
     #[test]
