@@ -12,6 +12,9 @@ use rand::Rng;
 
 use crate::Error;
 
+/// maximum v6 address space to enumerate (cap for very large prefixes)
+const MAX_V6_ADDRESS_SPACE: u64 = 10_000_000;
+
 /// allocates ip addresses for new nodes.
 ///
 /// supports both ipv4 and ipv6 allocation from configured prefixes.
@@ -173,6 +176,18 @@ impl IpAllocator {
         ))
     }
 
+    /// compute the usable v6 address space for a prefix, capped at MAX_V6_ADDRESS_SPACE
+    pub fn compute_v6_address_space(prefix: &IpNet) -> u64 {
+        let host_bits = 128 - prefix.prefix_len() as u32;
+        if host_bits >= 64 {
+            // 2^64 or more — cap at maximum
+            MAX_V6_ADDRESS_SPACE
+        } else {
+            let space = 1u64 << host_bits;
+            space.min(MAX_V6_ADDRESS_SPACE)
+        }
+    }
+
     /// allocate a new ipv6 address.
     ///
     /// for sequential: uses next-candidate tracking for amortised O(1).
@@ -189,7 +204,7 @@ impl IpAllocator {
         };
 
         let segments = base.segments();
-        let max_count: u64 = 1_000_000;
+        let max_count = Self::compute_v6_address_space(prefix);
 
         match self.strategy {
             AllocationStrategy::Sequential => self.allocate_v6_sequential(segments, max_count),
@@ -409,5 +424,23 @@ mod tests {
             assert!(!ips.contains(&ip));
             ips.push(ip);
         }
+    }
+
+    #[test]
+    fn test_v6_address_space_computed_from_prefix() {
+        // a /48 prefix has 2^80 host bits, capped at MAX_V6_ADDRESS_SPACE
+        let prefix48: IpNet = "fd7a:115c:a1e0::/48".parse().unwrap();
+        let space48 = IpAllocator::compute_v6_address_space(&prefix48);
+        assert_eq!(space48, MAX_V6_ADDRESS_SPACE, "/48 should be capped");
+
+        // a /120 prefix has 2^8 = 256 host addresses
+        let prefix120: IpNet = "fd7a:115c:a1e0:ab::/120".parse().unwrap();
+        let space120 = IpAllocator::compute_v6_address_space(&prefix120);
+        assert_eq!(space120, 256, "/120 should have 256 addresses");
+
+        // a /112 prefix has 2^16 = 65536
+        let prefix112: IpNet = "fd7a:115c:a1e0:ab::/112".parse().unwrap();
+        let space112 = IpAllocator::compute_v6_address_space(&prefix112);
+        assert_eq!(space112, 65536, "/112 should have 65536 addresses");
     }
 }
