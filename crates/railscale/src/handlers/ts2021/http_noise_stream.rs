@@ -14,6 +14,13 @@ use tracing::{debug, error, trace};
 
 use super::{MAX_PLAINTEXT_SIZE, MSG_TYPE_RECORD};
 
+/// max size for the pending frame accumulation buffer (128kb).
+///
+/// noise frames have a u16 length field (max 65535 bytes payload), so a single
+/// frame can be at most ~65538 bytes. we allow some headroom for buffered reads
+/// that span frame boundaries.
+const MAX_PENDING_FRAME_SIZE: usize = 128 * 1024;
+
 /// http upgraded noise stream wrapper.
 ///
 /// this provides asyncread + asyncwrite over a noise-encrypted raw tcp stream,
@@ -25,6 +32,12 @@ pub(super) struct HttpNoiseStream {
     read_buffer: BytesMut,
     /// buffer for accumulating incomplete noise frames from the wire
     pending_frame: BytesMut,
+    /// buffer for encrypted frame data not yet fully written to the wire.
+    /// noise frames are atomic — partial writes would corrupt the stream.
+    write_buffer: BytesMut,
+    /// plaintext bytes represented by the current write_buffer contents.
+    /// returned to the caller once the write buffer is fully flushed.
+    write_pending_plaintext_len: usize,
     /// counter for decrypt operations (for debugging)
     decrypt_count: u64,
     /// counter for encrypt operations (for debugging)
@@ -41,6 +54,8 @@ impl HttpNoiseStream {
             transport,
             read_buffer: BytesMut::new(),
             pending_frame: BytesMut::new(),
+            write_buffer: BytesMut::new(),
+            write_pending_plaintext_len: 0,
             decrypt_count: 0,
             encrypt_count: 0,
         }
@@ -234,6 +249,19 @@ impl AsyncRead for HttpNoiseStream {
 
                     // append to pending_frame and loop to check if we have a complete frame
                     this.pending_frame.extend_from_slice(bytes_read);
+
+                    // enforce max buffer size to prevent memory exhaustion
+                    if this.pending_frame.len() > MAX_PENDING_FRAME_SIZE {
+                        error!(
+                            pending_len = this.pending_frame.len(),
+                            max = MAX_PENDING_FRAME_SIZE,
+                            "poll_read: pending frame buffer exceeded max size"
+                        );
+                        return Poll::Ready(Err(io::Error::new(
+                            ErrorKind::InvalidData,
+                            "noise frame accumulation buffer exceeded maximum size",
+                        )));
+                    }
                 }
                 Poll::Ready(Err(e)) => {
                     error!(error = %e, "poll_read: underlying read error");
@@ -247,19 +275,41 @@ impl AsyncRead for HttpNoiseStream {
 
 impl AsyncWrite for HttpNoiseStream {
     fn poll_write(
-        mut self: Pin<&mut Self>,
+        self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
+        let this = self.get_mut();
+
+        // if we have a pending write buffer from a previous partial write,
+        // we must flush it before accepting new data
+        if !this.write_buffer.is_empty() {
+            let wb = &this.write_buffer[..];
+            match Pin::new(&mut this.io).poll_write(cx, wb) {
+                Poll::Ready(Ok(written)) => {
+                    this.write_buffer.advance(written);
+                    if this.write_buffer.is_empty() {
+                        let plaintext_len = this.write_pending_plaintext_len;
+                        this.write_pending_plaintext_len = 0;
+                        return Poll::Ready(Ok(plaintext_len));
+                    }
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
         // chunk large writes to respect tailscale's frame size limits
         let to_write = std::cmp::min(buf.len(), MAX_PLAINTEXT_SIZE);
         let chunk = &buf[..to_write];
 
         // encrypt the chunk
-        let ciphertext = match self.transport.encrypt(chunk) {
+        let ciphertext = match this.transport.encrypt(chunk) {
             Ok(ct) => ct,
             Err(e) => {
-                error!(error = %e, encrypt_count = self.encrypt_count, "poll_write: encrypt failed");
+                error!(error = %e, encrypt_count = this.encrypt_count, "poll_write: encrypt failed");
                 return Poll::Ready(Err(io::Error::new(
                     ErrorKind::InvalidData,
                     format!("noise encrypt failed: {}", e),
@@ -267,44 +317,70 @@ impl AsyncWrite for HttpNoiseStream {
             }
         };
 
-        self.encrypt_count += 1;
+        this.encrypt_count += 1;
 
         // build the framed message: [type:1][len:2][ciphertext]
         let len = ciphertext.len() as u16;
-        let mut msg = Vec::with_capacity(3 + ciphertext.len());
-        msg.push(MSG_TYPE_RECORD); // 0x04 for data records
+        let mut msg = BytesMut::with_capacity(3 + ciphertext.len());
+        msg.extend_from_slice(&[MSG_TYPE_RECORD]);
         msg.extend_from_slice(&len.to_be_bytes());
         msg.extend_from_slice(&ciphertext);
 
         debug!(
-            encrypt_count = self.encrypt_count,
+            encrypt_count = this.encrypt_count,
             frame_len = msg.len(),
-            header = format!("{:02x} {:02x} {:02x}", msg[0], msg[1], msg[2]),
             plaintext_len = to_write,
             ciphertext_len = ciphertext.len(),
             "poll_write: sending frame"
         );
 
         // write to the underlying stream
-        match Pin::new(&mut self.io).poll_write(cx, &msg) {
+        let msg_len = msg.len();
+        match Pin::new(&mut this.io).poll_write(cx, &msg) {
             Poll::Ready(Ok(written)) => {
-                trace!(
-                    written = written,
-                    expected = msg.len(),
-                    "poll_write: wrote to underlying stream"
-                );
-                Poll::Ready(Ok(to_write))
+                if written == msg_len {
+                    Poll::Ready(Ok(to_write))
+                } else {
+                    // partial write — buffer the remainder
+                    trace!(
+                        written = written,
+                        remaining = msg_len - written,
+                        "poll_write: partial write, buffering remainder"
+                    );
+                    msg.advance(written);
+                    this.write_buffer = msg;
+                    this.write_pending_plaintext_len = to_write;
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
             }
             Poll::Ready(Err(e)) => {
                 error!(error = %e, "poll_write: underlying write error");
                 Poll::Ready(Err(e))
             }
-            Poll::Pending => Poll::Pending,
+            Poll::Pending => {
+                this.write_buffer = msg;
+                this.write_pending_plaintext_len = to_write;
+                Poll::Pending
+            }
         }
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.io).poll_flush(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        // drain any pending write buffer before flushing
+        while !this.write_buffer.is_empty() {
+            let wb = this.write_buffer.clone();
+            match Pin::new(&mut this.io).poll_write(cx, &wb) {
+                Poll::Ready(Ok(written)) => {
+                    this.write_buffer.advance(written);
+                }
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+        this.write_pending_plaintext_len = 0;
+        Pin::new(&mut this.io).poll_flush(cx)
     }
 
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {

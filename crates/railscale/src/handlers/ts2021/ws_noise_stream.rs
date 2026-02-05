@@ -57,35 +57,39 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        // try to read from websocket
-        match Pin::new(&mut self.reader).poll_next(cx) {
-            Poll::Ready(Some(Ok(Message::Binary(data)))) => {
-                // decrypt the message
-                match self.transport.decrypt(&data) {
-                    Ok(plaintext) => {
-                        // copy what we can to the output buffer
-                        let copy_len = std::cmp::min(buf.remaining(), plaintext.len());
-                        buf.put_slice(&plaintext[..copy_len]);
-                        // buffer the rest
-                        if copy_len < plaintext.len() {
-                            self.read_buffer.extend_from_slice(&plaintext[copy_len..]);
+        // try to read from websocket, skipping non-binary messages
+        loop {
+            match Pin::new(&mut self.reader).poll_next(cx) {
+                Poll::Ready(Some(Ok(Message::Binary(data)))) => {
+                    // decrypt the message
+                    match self.transport.decrypt(&data) {
+                        Ok(plaintext) => {
+                            let copy_len = std::cmp::min(buf.remaining(), plaintext.len());
+                            buf.put_slice(&plaintext[..copy_len]);
+                            if copy_len < plaintext.len() {
+                                self.read_buffer.extend_from_slice(&plaintext[copy_len..]);
+                            }
+                            return Poll::Ready(Ok(()));
                         }
-                        Poll::Ready(Ok(()))
+                        Err(e) => {
+                            return Poll::Ready(Err(io::Error::new(
+                                ErrorKind::InvalidData,
+                                format!("noise decrypt failed: {}", e),
+                            )));
+                        }
                     }
-                    Err(e) => Poll::Ready(Err(io::Error::new(
-                        ErrorKind::InvalidData,
-                        format!("noise decrypt failed: {}", e),
-                    ))),
                 }
+                Poll::Ready(Some(Ok(Message::Close(_)))) => return Poll::Ready(Ok(())),
+                Poll::Ready(Some(Ok(_))) => {
+                    // non-binary message (Text, Ping, Pong) — skip and try next
+                    continue;
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    return Poll::Ready(Err(io::Error::other(e.to_string())));
+                }
+                Poll::Ready(None) => return Poll::Ready(Ok(())),
+                Poll::Pending => return Poll::Pending,
             }
-            Poll::Ready(Some(Ok(Message::Close(_)))) => Poll::Ready(Ok(())),
-            Poll::Ready(Some(Ok(_))) => {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(io::Error::other(e.to_string()))),
-            Poll::Ready(None) => Poll::Ready(Ok(())),
-            Poll::Pending => Poll::Pending,
         }
     }
 }
