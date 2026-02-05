@@ -10,6 +10,7 @@ mod machine_key_context;
 mod map;
 pub mod oidc;
 mod register;
+mod templates;
 mod tka;
 mod ts2021;
 mod verify;
