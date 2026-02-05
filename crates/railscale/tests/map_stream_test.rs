@@ -74,6 +74,7 @@ impl MapTestFixture {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -300,6 +301,7 @@ async fn test_streaming_map_receives_updates_on_state_change() {
         updated_at: now,
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
+        nl_public_key: None,
         last_seen_country: None,
         ephemeral: false,
     };

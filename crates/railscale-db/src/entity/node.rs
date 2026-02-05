@@ -84,6 +84,10 @@ pub struct Model {
 
     /// ISO 3166-1 alpha-2 country code from geoip lookup
     pub last_seen_country: Option<String>,
+
+    /// network lock public key (raw ed25519, 32 bytes)
+    #[sea_orm(column_type = "VarBinary(StringLen::None)", nullable)]
+    pub nl_public_key: Option<Vec<u8>>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -197,6 +201,7 @@ impl From<Model> for Node {
             updated_at: model.updated_at,
             is_online: None,
             posture_attributes,
+            nl_public_key: model.nl_public_key,
         }
     }
 }
@@ -253,6 +258,7 @@ impl From<&Node> for ActiveModel {
             key_signature: NotSet, // managed separately via TKA operations
             posture_attributes: Set(posture_attributes_json),
             last_seen_country: Set(node.last_seen_country.clone()),
+            nl_public_key: Set(node.nl_public_key.clone()),
         }
     }
 }

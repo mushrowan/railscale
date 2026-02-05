@@ -66,6 +66,7 @@ async fn test_verify_allows_registered_node() {
         updated_at: Utc::now(),
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
+        nl_public_key: None,
         last_seen_country: None,
         ephemeral: false,
     };

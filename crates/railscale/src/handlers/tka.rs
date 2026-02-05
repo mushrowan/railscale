@@ -136,7 +136,7 @@ pub async fn tka_init_begin(
         .map(|n| TkaSignInfo {
             node_id: n.id,
             node_public: n.node_key,
-            rotation_pubkey: vec![], // TODO: rotation keys not implemented
+            rotation_pubkey: n.nl_public_key.unwrap_or_default(),
         })
         .collect();
 
@@ -975,6 +975,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -1089,6 +1090,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -1175,6 +1177,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -1338,6 +1341,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -1483,6 +1487,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -1577,6 +1582,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -1714,6 +1720,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -1850,6 +1857,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -2251,6 +2259,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -2372,6 +2381,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -2516,6 +2526,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -2645,6 +2656,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -2718,6 +2730,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -2804,6 +2817,7 @@ mod tests {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             last_seen_country: None,
             ephemeral: false,
         };
@@ -2858,5 +2872,128 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn tka_init_begin_returns_rotation_pubkey_from_nl_key() {
+        use railscale_db::Database;
+        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
+        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        let user = User::new(UserId(1), "test-user".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        // generate an NL key for the node (this is what the client sends as NLKey)
+        let node_nl_private = NlPrivateKey::generate();
+        let node_nl_public = node_nl_private.public_key();
+        let nl_public_bytes = node_nl_public.as_bytes().to_vec();
+
+        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let now = chrono::Utc::now();
+        let node = Node {
+            id: NodeId(0),
+            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            node_key: node_key.clone(),
+            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            ipv4: Some("100.64.0.1".parse().unwrap()),
+            ipv6: None,
+            endpoints: vec![],
+            hostinfo: None,
+            hostname: "test-node".to_string(),
+            given_name: "test-node".to_string(),
+            user_id: Some(user.id),
+            register_method: RegisterMethod::AuthKey,
+            tags: vec![],
+            auth_key_id: None,
+            last_seen: Some(now),
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: Some(nl_public_bytes.clone()),
+            last_seen_country: None,
+            ephemeral: false,
+        };
+        let node = db.create_node(&node).await.unwrap();
+
+        // create genesis AUM
+        let tka_nl_private = NlPrivateKey::generate();
+        let tka_nl_public = tka_nl_private.public_key();
+        let key = Key {
+            kind: KeyKind::Ed25519,
+            public: tka_nl_public.as_bytes().to_vec(),
+            votes: 1,
+            meta: None,
+        };
+        let key_id = key.id().unwrap();
+        let genesis = Aum {
+            message_kind: AumKind::AddKey,
+            prev_aum_hash: None,
+            key: Some(key),
+            key_id: None,
+            state: None,
+            votes: None,
+            meta: None,
+            signatures: vec![],
+        };
+        let hash = genesis.hash().unwrap();
+        let sig = tka_nl_private.sign(hash.as_bytes());
+        let signed_genesis = Aum {
+            signatures: vec![AumSignature {
+                key_id: key_id.as_bytes().to_vec(),
+                signature: sig.to_vec(),
+            }],
+            ..genesis
+        };
+        let genesis_bytes = signed_genesis.to_cbor().unwrap();
+
+        let config = railscale_types::Config::default();
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        let req = TkaInitBeginRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            genesis_aum: genesis_bytes.into(),
+        };
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/tka/init/begin")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let resp: TkaInitBeginResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(resp.need_signatures.len(), 1);
+        assert_eq!(resp.need_signatures[0].node_id, node.id);
+        // the key assertion: rotation_pubkey should be the node's NL public key
+        assert_eq!(
+            resp.need_signatures[0].rotation_pubkey, nl_public_bytes,
+            "rotation_pubkey should be populated from node's nl_public_key"
+        );
     }
 }

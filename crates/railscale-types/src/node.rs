@@ -129,6 +129,14 @@ pub struct Node {
     /// values can be strings, numbers, or booleans.
     #[serde(default)]
     pub posture_attributes: HashMap<String, serde_json::Value>,
+
+    /// network lock public key (raw ed25519, 32 bytes).
+    ///
+    /// sent by the client as `NLKey` during registration (format: `nlpub:<hex>`).
+    /// used as `rotation_pubkey` in TkaSignInfo so nodes can autonomously
+    /// rotate their wireguard keys under tailnet lock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nl_public_key: Option<Vec<u8>>,
 }
 
 impl Node {

@@ -32,6 +32,7 @@ pub struct TestNodeBuilder {
     hostinfo: Option<HostInfo>,
     last_seen_country: Option<String>,
     ephemeral: bool,
+    nl_public_key: Option<Vec<u8>>,
 }
 
 impl TestNodeBuilder {
@@ -50,6 +51,7 @@ impl TestNodeBuilder {
             hostinfo: None,
             last_seen_country: None,
             ephemeral: false,
+            nl_public_key: None,
         }
     }
 
@@ -128,6 +130,12 @@ impl TestNodeBuilder {
         self.with_ephemeral(true)
     }
 
+    /// set network lock public key (raw ed25519 bytes).
+    pub fn with_nl_public_key(mut self, key: Vec<u8>) -> Self {
+        self.nl_public_key = Some(key);
+        self
+    }
+
     /// build the [`node`].
     pub fn build(self) -> Node {
         let hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
@@ -166,6 +174,7 @@ impl TestNodeBuilder {
             updated_at: now,
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: self.nl_public_key,
         }
     }
 }

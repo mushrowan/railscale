@@ -1164,6 +1164,7 @@ mod tests {
             updated_at: Utc::now(),
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             ephemeral: false,
         };
 
@@ -1262,6 +1263,7 @@ mod tests {
             updated_at: Utc::now(),
             is_online: None,
             posture_attributes: std::collections::HashMap::new(),
+            nl_public_key: None,
             ephemeral: false,
         };
         let created = db.create_node(&node).await.unwrap();
@@ -1315,6 +1317,7 @@ mod tests {
                 updated_at: Utc::now(),
                 is_online: None,
                 posture_attributes: std::collections::HashMap::new(),
+                nl_public_key: None,
                 ephemeral: false,
             };
             nodes.push(db.create_node(&node).await.unwrap());

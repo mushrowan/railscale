@@ -581,6 +581,7 @@ async fn handle_preauth_registration(
         updated_at: now,
         is_online: None,
         posture_attributes: std::collections::HashMap::new(),
+        nl_public_key: None,
     };
 
     let _node = state.db.create_node(&node).await.map_internal()?;
