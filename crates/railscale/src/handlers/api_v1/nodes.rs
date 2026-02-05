@@ -14,7 +14,7 @@ use std::collections::HashMap;
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     routing::{get, patch, post},
 };
 use chrono::Utc;
@@ -25,6 +25,27 @@ use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_db::Database;
 use railscale_types::{Node, NodeId, NodeName};
+
+/// pagination query parameters for list endpoints.
+#[derive(Debug, Deserialize)]
+pub struct PaginationParams {
+    /// maximum number of items to return. omit for all.
+    pub limit: Option<usize>,
+    /// number of items to skip. default 0.
+    pub offset: Option<usize>,
+}
+
+impl PaginationParams {
+    /// apply pagination to a vec of items.
+    pub fn apply<T>(&self, items: Vec<T>) -> Vec<T> {
+        let offset = self.offset.unwrap_or(0);
+        let items: Vec<T> = items.into_iter().skip(offset).collect();
+        match self.limit {
+            Some(limit) => items.into_iter().take(limit).collect(),
+            None => items,
+        }
+    }
+}
 
 /// response wrapper for list nodes endpoint.
 #[derive(Debug, Serialize)]
@@ -155,13 +176,20 @@ pub fn router() -> Router<AppState> {
 /// list all nodes.
 ///
 /// `GET /api/v1/node`
+///
+/// supports optional pagination: `?limit=100&offset=0`
 async fn list_nodes(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
+    Query(pagination): Query<PaginationParams>,
 ) -> Result<Json<ListNodesResponse>, ApiError> {
     let nodes = state.db.list_nodes().await.map_err(ApiError::internal)?;
 
-    let nodes: Vec<NodeResponse> = nodes.into_iter().map(NodeResponse::from).collect();
+    let nodes: Vec<NodeResponse> = pagination
+        .apply(nodes)
+        .into_iter()
+        .map(NodeResponse::from)
+        .collect();
 
     Ok(Json(ListNodesResponse { nodes }))
 }
@@ -216,10 +244,10 @@ async fn delete_node(
     {
         let mut allocator = state.ip_allocator.lock().await;
         if let Some(v4) = node.ipv4 {
-            allocator.release(std::net::IpAddr::V4(v4));
+            allocator.release(v4.into());
         }
         if let Some(v6) = node.ipv6 {
-            allocator.release(std::net::IpAddr::V6(v6));
+            allocator.release(v6.into());
         }
     }
 
@@ -557,5 +585,55 @@ mod tests {
             "machine_key should be truncated, got {} chars",
             mkey_hex.len()
         );
+    }
+
+    #[test]
+    fn test_pagination_no_params() {
+        let params = PaginationParams {
+            limit: None,
+            offset: None,
+        };
+        let items = vec![1, 2, 3, 4, 5];
+        assert_eq!(params.apply(items), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_pagination_limit() {
+        let params = PaginationParams {
+            limit: Some(3),
+            offset: None,
+        };
+        let items = vec![1, 2, 3, 4, 5];
+        assert_eq!(params.apply(items), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_pagination_offset() {
+        let params = PaginationParams {
+            limit: None,
+            offset: Some(2),
+        };
+        let items = vec![1, 2, 3, 4, 5];
+        assert_eq!(params.apply(items), vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn test_pagination_limit_and_offset() {
+        let params = PaginationParams {
+            limit: Some(2),
+            offset: Some(1),
+        };
+        let items = vec![1, 2, 3, 4, 5];
+        assert_eq!(params.apply(items), vec![2, 3]);
+    }
+
+    #[test]
+    fn test_pagination_offset_beyond_length() {
+        let params = PaginationParams {
+            limit: Some(10),
+            offset: Some(100),
+        };
+        let items: Vec<i32> = vec![1, 2, 3];
+        assert_eq!(params.apply(items), Vec::<i32>::new());
     }
 }

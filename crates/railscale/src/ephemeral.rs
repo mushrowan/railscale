@@ -124,14 +124,14 @@ impl EphemeralGarbageCollector {
             }
 
             // fetch node to get IPs before deletion
-            let node_ips = match self.db.get_node(node_id).await {
+            let node_ips: Vec<IpAddr> = match self.db.get_node(node_id).await {
                 Ok(Some(n)) => {
                     let mut ips = Vec::new();
                     if let Some(v4) = n.ipv4 {
-                        ips.push(IpAddr::V4(v4));
+                        ips.push(v4.into());
                     }
                     if let Some(v6) = n.ipv6 {
-                        ips.push(IpAddr::V6(v6));
+                        ips.push(v6.into());
                     }
                     ips
                 }

@@ -8,11 +8,13 @@
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{delete, get, post},
 };
 use serde::{Deserialize, Serialize};
+
+use super::nodes::PaginationParams;
 
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext};
@@ -100,13 +102,20 @@ pub fn router() -> Router<AppState> {
 /// list all users.
 ///
 /// `GET /api/v1/user`
+///
+/// supports optional pagination: `?limit=100&offset=0`
 async fn list_users(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
+    Query(pagination): Query<PaginationParams>,
 ) -> Result<Json<ListUsersResponse>, ApiError> {
     let users = state.db.list_users().await.map_err(ApiError::internal)?;
 
-    let users: Vec<UserResponse> = users.into_iter().map(UserResponse::from).collect();
+    let users: Vec<UserResponse> = pagination
+        .apply(users)
+        .into_iter()
+        .map(UserResponse::from)
+        .collect();
 
     Ok(Json(ListUsersResponse { users }))
 }
@@ -207,10 +216,10 @@ async fn delete_user(
         let mut allocator = state.ip_allocator.lock().await;
         for node in &user_nodes {
             if let Some(v4) = node.ipv4 {
-                allocator.release(std::net::IpAddr::V4(v4));
+                allocator.release(v4.into());
             }
             if let Some(v6) = node.ipv6 {
-                allocator.release(std::net::IpAddr::V6(v6));
+                allocator.release(v6.into());
             }
         }
     }
