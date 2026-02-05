@@ -70,10 +70,15 @@ fn migrate_env_var(
 /// apply headscale_* -> railscale_* environment variable migration.
 ///
 /// for each known env var suffix, if headscale_x is set but railscale_x is not,
-/// set RAILSCALE_X to the HEADSCALE_X value. This allows users migrating from
+/// set RAILSCALE_X to the HEADSCALE_X value. this allows users migrating from
 /// headscale to use their existing environment configuration.
 ///
-/// call this before clap parses arguments.
+/// # safety requirement
+///
+/// **must be called before any threads are spawned** (before tokio runtime
+/// starts). `env::set_var` is unsafe in edition 2024 because concurrent
+/// env var access is undefined behaviour. this is only safe because it
+/// runs in single-threaded `main()` before `#[tokio::main]` entry.
 pub fn apply_headscale_env_migration() {
     use std::env;
 
@@ -97,9 +102,11 @@ pub fn apply_headscale_env_migration() {
                         &hs
                     }
                 );
-                // SAFETY: we're setting env vars before any threads are spawned,
-                // during CLI initialization. This is the standard pattern for
-                // env var configuration at startup.
+                // SAFETY: env::set_var is unsafe in edition 2024 because modifying
+                // env vars while other threads read them is UB. this function is
+                // called from main() before tokio::main starts the runtime, so no
+                // other threads exist. callers must not invoke this after spawning
+                // threads or entering an async runtime.
                 unsafe {
                     env::set_var(&rs_key, &hs);
                 }
