@@ -826,6 +826,14 @@ pub struct VerifyConfig {
     /// default: empty (allow all).
     #[serde(default)]
     pub allowed_ips: Vec<String>,
+
+    /// trusted proxy addresses for X-Forwarded-For extraction.
+    /// when the verify endpoint is behind a reverse proxy, set this to the
+    /// proxy's IP/CIDR so the real client IP is extracted from the XFF header.
+    /// only used when `allowed_ips` is non-empty.
+    /// examples: ["127.0.0.1", "10.0.0.0/8"]
+    #[serde(default)]
+    pub trusted_proxies: Vec<String>,
 }
 
 impl Default for VerifyConfig {
@@ -833,6 +841,7 @@ impl Default for VerifyConfig {
         Self {
             rate_limit_per_minute: 60,
             allowed_ips: Vec::new(),
+            trusted_proxies: Vec::new(),
         }
     }
 }

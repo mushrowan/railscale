@@ -475,7 +475,8 @@ fn build_verify_router(state: &AppState) -> Router<AppState> {
 
     // wrap with IP allowlist filter if configured
     let verify_route = if !verify_config.allowed_ips.is_empty() {
-        let filter = rate_limit::IpAllowlistFilter::new(&verify_config.allowed_ips);
+        let filter = rate_limit::IpAllowlistFilter::new(&verify_config.allowed_ips)
+            .with_trusted_proxies(&verify_config.trusted_proxies);
         verify_route.layer(axum::middleware::from_fn_with_state(
             filter,
             rate_limit::ip_allowlist_middleware,

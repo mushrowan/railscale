@@ -207,15 +207,80 @@ mod tests {
         // empty filter allows nothing (should not be used - check before applying)
         assert!(!filter.is_allowed("127.0.0.1".parse().unwrap()));
     }
+
+    #[test]
+    fn test_ip_allowlist_extract_client_ip_from_xff_when_trusted() {
+        let filter = IpAllowlistFilter::new(&["10.0.0.0/8".to_string()])
+            .with_trusted_proxies(&["192.168.1.1".to_string()]);
+
+        // request from trusted proxy with XFF header containing an allowed IP
+        let mut req = Request::builder()
+            .header("x-forwarded-for", "10.5.5.5, 192.168.1.1")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([192, 168, 1, 1], 1234))));
+
+        let client_ip = filter.extract_client_ip(&req);
+        assert_eq!(
+            client_ip,
+            Some("10.5.5.5".parse().unwrap()),
+            "should extract client IP from XFF when peer is trusted proxy"
+        );
+    }
+
+    #[test]
+    fn test_ip_allowlist_ignores_xff_from_untrusted_peer() {
+        let filter = IpAllowlistFilter::new(&["10.0.0.0/8".to_string()])
+            .with_trusted_proxies(&["192.168.1.1".to_string()]);
+
+        // request from untrusted peer with spoofed XFF header
+        let mut req = Request::builder()
+            .header("x-forwarded-for", "10.5.5.5")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([8, 8, 8, 8], 1234))));
+
+        let client_ip = filter.extract_client_ip(&req);
+        assert_eq!(
+            client_ip,
+            Some("8.8.8.8".parse().unwrap()),
+            "should use peer IP when not from trusted proxy"
+        );
+    }
+
+    #[test]
+    fn test_ip_allowlist_no_trusted_proxies_uses_peer_ip() {
+        let filter = IpAllowlistFilter::new(&["10.0.0.0/8".to_string()]);
+
+        // no trusted proxies configured, XFF should be ignored
+        let mut req = Request::builder()
+            .header("x-forwarded-for", "10.5.5.5")
+            .body(Body::empty())
+            .unwrap();
+        req.extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([8, 8, 8, 8], 1234))));
+
+        let client_ip = filter.extract_client_ip(&req);
+        assert_eq!(
+            client_ip,
+            Some("8.8.8.8".parse().unwrap()),
+            "should use peer IP when no trusted proxies configured"
+        );
+    }
 }
 
 /// IP allowlist filter for restricting endpoint access.
 ///
 /// when applied, only requests from IPs matching the allowlist are permitted.
+/// supports trusted proxy configuration for X-Forwarded-For extraction.
 #[derive(Clone)]
 pub struct IpAllowlistFilter {
     /// parsed allowed networks/IPs
     allowed_networks: Arc<Vec<IpNet>>,
+    /// trusted proxy networks for XFF extraction
+    trusted_networks: Arc<Vec<IpNet>>,
 }
 
 impl IpAllowlistFilter {
@@ -223,45 +288,83 @@ impl IpAllowlistFilter {
     ///
     /// accepts IPs and CIDR ranges (e.g., "127.0.0.1", "10.0.0.0/8").
     pub fn new(allowed_ips: &[String]) -> Self {
-        let allowed_networks: Vec<IpNet> = allowed_ips
-            .iter()
-            .filter_map(|s| {
-                // try parsing as CIDR first, then as a single IP
-                s.parse::<IpNet>().ok().or_else(|| {
-                    s.parse::<IpAddr>().ok().map(|ip| match ip {
-                        IpAddr::V4(v4) => IpNet::V4(ipnet::Ipv4Net::new(v4, 32).unwrap()),
-                        IpAddr::V6(v6) => IpNet::V6(ipnet::Ipv6Net::new(v6, 128).unwrap()),
-                    })
-                })
-            })
-            .collect();
-
         Self {
-            allowed_networks: Arc::new(allowed_networks),
+            allowed_networks: Arc::new(parse_ip_list(allowed_ips)),
+            trusted_networks: Arc::new(Vec::new()),
         }
+    }
+
+    /// add trusted proxy addresses for X-Forwarded-For extraction.
+    ///
+    /// when a request arrives from a trusted proxy, the client IP is
+    /// extracted from the X-Forwarded-For header instead of using the peer IP.
+    pub fn with_trusted_proxies(mut self, trusted_proxies: &[String]) -> Self {
+        self.trusted_networks = Arc::new(parse_ip_list(trusted_proxies));
+        self
     }
 
     /// check if an IP is in the allowlist.
     pub fn is_allowed(&self, ip: IpAddr) -> bool {
         self.allowed_networks.iter().any(|net| net.contains(&ip))
     }
+
+    /// extract the client IP from a request, respecting trusted proxies.
+    ///
+    /// if the peer IP is from a trusted proxy, extracts the client IP from
+    /// the X-Forwarded-For header. otherwise, returns the peer IP directly.
+    pub fn extract_client_ip<T>(&self, request: &Request<T>) -> Option<IpAddr> {
+        let peer_ip = request
+            .extensions()
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|ci| ci.0.ip())?;
+
+        // if peer is a trusted proxy, try to extract real client IP from XFF
+        if self
+            .trusted_networks
+            .iter()
+            .any(|net| net.contains(&peer_ip))
+        {
+            if let Some(xff) = request.headers().get("x-forwarded-for") {
+                if let Ok(xff_str) = xff.to_str() {
+                    if let Some(first_ip) = xff_str.split(',').next() {
+                        if let Ok(client_ip) = first_ip.trim().parse::<IpAddr>() {
+                            return Some(client_ip);
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(peer_ip)
+    }
+}
+
+/// parse a list of IP/CIDR strings into IpNet entries.
+fn parse_ip_list(ips: &[String]) -> Vec<IpNet> {
+    ips.iter()
+        .filter_map(|s| {
+            s.parse::<IpNet>().ok().or_else(|| {
+                s.parse::<IpAddr>().ok().map(|ip| match ip {
+                    IpAddr::V4(v4) => IpNet::V4(ipnet::Ipv4Net::new(v4, 32).unwrap()),
+                    IpAddr::V6(v6) => IpNet::V6(ipnet::Ipv6Net::new(v6, 128).unwrap()),
+                })
+            })
+        })
+        .collect()
 }
 
 /// middleware to filter requests by IP allowlist.
 ///
 /// returns 403 Forbidden if the client IP is not in the allowlist.
+/// respects trusted proxy configuration for X-Forwarded-For extraction.
 pub async fn ip_allowlist_middleware(
     State(filter): State<IpAllowlistFilter>,
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    // extract peer IP from ConnectInfo
-    let peer_ip = request
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|ci| ci.0.ip());
+    let client_ip = filter.extract_client_ip(&request);
 
-    match peer_ip {
+    match client_ip {
         Some(ip) if filter.is_allowed(ip) => next.run(request).await,
         Some(ip) => {
             tracing::warn!(client_ip = %ip, "verify request from disallowed IP");
