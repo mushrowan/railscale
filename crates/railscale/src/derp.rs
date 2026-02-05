@@ -1,7 +1,7 @@
 //! derp map generation for relay coordination.
 
 use railscale_proto::{DerpMap, DerpNode, DerpRegion};
-use railscale_types::Config;
+use railscale_types::{Config, DerpConfig};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::Path;
@@ -90,6 +90,90 @@ pub fn merge_derp_maps(maps: &[DerpMap]) -> DerpMap {
         regions,
         omit_default_regions: false,
     }
+}
+
+/// load external derp maps from configured URL and/or local file path.
+///
+/// if both `derp_map_url` and `derp_map_path` are set, both are loaded and
+/// merged (path overrides url for the same region id). returns None if neither
+/// is configured.
+pub async fn load_external_derp_maps(config: &DerpConfig) -> Result<Option<DerpMap>, DerpError> {
+    let mut maps = Vec::new();
+
+    // load from URL first (lower priority)
+    if let Some(ref url) = config.derp_map_url {
+        match fetch_derp_map_from_url(url).await {
+            Ok(map) => {
+                tracing::info!(url, regions = map.regions.len(), "loaded derp map from URL");
+                maps.push(map);
+            }
+            Err(e) => {
+                tracing::warn!(url, error = %e, "failed to fetch derp map from URL");
+            }
+        }
+    }
+
+    // load from file path (higher priority, overrides URL)
+    if let Some(ref path) = config.derp_map_path {
+        match load_derp_map_from_path(path) {
+            Ok(map) => {
+                tracing::info!(
+                    ?path,
+                    regions = map.regions.len(),
+                    "loaded derp map from file"
+                );
+                maps.push(map);
+            }
+            Err(e) => {
+                tracing::warn!(?path, error = %e, "failed to load derp map from file");
+            }
+        }
+    }
+
+    if maps.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(merge_derp_maps(&maps)))
+    }
+}
+
+/// spawn a background task that periodically refreshes the derp map from
+/// external sources (URL/path) and merges with the base map.
+///
+/// the base map typically contains the embedded DERP region. external regions
+/// are merged on top, with later sources overriding earlier ones.
+pub fn spawn_derp_map_updater(
+    shared_map: std::sync::Arc<tokio::sync::RwLock<DerpMap>>,
+    config: DerpConfig,
+    base_map: DerpMap,
+) {
+    let interval_secs = config.update_frequency_secs.max(1);
+
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+
+        loop {
+            interval.tick().await;
+
+            match load_external_derp_maps(&config).await {
+                Ok(Some(external)) => {
+                    let merged = merge_derp_maps(&[base_map.clone(), external]);
+                    let mut map = shared_map.write().await;
+                    *map = merged;
+                    tracing::debug!(
+                        regions = map.regions.len(),
+                        "refreshed derp map from external sources"
+                    );
+                }
+                Ok(None) => {
+                    // no external sources configured, nothing to do
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to refresh derp map");
+                }
+            }
+        }
+    });
 }
 
 /// generate the derp map for clients.
@@ -311,6 +395,239 @@ Regions:
             err.contains("too large"),
             "error should mention size: {err}"
         );
+    }
+
+    /// test loading external derp map from a local yaml file via config
+    #[tokio::test]
+    async fn test_load_external_derp_maps_from_path() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let yaml_content = r#"
+Regions:
+  800:
+    RegionID: 800
+    RegionCode: ext
+    RegionName: External Region
+    Nodes:
+      - Name: 800a
+        RegionID: 800
+        HostName: derp-ext.example.com
+        STUNPort: 3478
+"#;
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(yaml_content.as_bytes()).unwrap();
+
+        let config = DerpConfig {
+            derp_map_url: None,
+            derp_map_path: Some(temp_file.path().to_path_buf()),
+            update_frequency_secs: 3600,
+            ..Default::default()
+        };
+
+        let result = load_external_derp_maps(&config).await.unwrap();
+        assert!(result.is_some(), "should load derp map from path");
+        let map = result.unwrap();
+        assert!(map.regions.contains_key(&800));
+        assert_eq!(map.regions.get(&800).unwrap().region_code, "ext");
+    }
+
+    /// test loading external derp map from url via config
+    #[tokio::test]
+    async fn test_load_external_derp_maps_from_url() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let derp_json = r#"{
+            "Regions": {
+                "700": {
+                    "RegionID": 700,
+                    "RegionCode": "remote",
+                    "RegionName": "Remote Region",
+                    "Nodes": [{
+                        "Name": "700a",
+                        "RegionID": 700,
+                        "HostName": "derp-remote.example.com",
+                        "STUNPort": 3478
+                    }]
+                }
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/derpmap"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(derp_json))
+            .mount(&mock_server)
+            .await;
+
+        let config = DerpConfig {
+            derp_map_url: Some(format!("{}/derpmap", mock_server.uri())),
+            derp_map_path: None,
+            update_frequency_secs: 3600,
+            ..Default::default()
+        };
+
+        let result = load_external_derp_maps(&config).await.unwrap();
+        assert!(result.is_some());
+        let map = result.unwrap();
+        assert!(map.regions.contains_key(&700));
+        assert_eq!(map.regions.get(&700).unwrap().region_code, "remote");
+    }
+
+    /// test that no external sources returns None
+    #[tokio::test]
+    async fn test_load_external_derp_maps_none_configured() {
+        let config = DerpConfig {
+            derp_map_url: None,
+            derp_map_path: None,
+            update_frequency_secs: 3600,
+            ..Default::default()
+        };
+
+        let result = load_external_derp_maps(&config).await.unwrap();
+        assert!(result.is_none());
+    }
+
+    /// test that url and path maps are merged (path overrides url)
+    #[tokio::test]
+    async fn test_load_external_derp_maps_merges_url_and_path() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // url provides region 600
+        let url_json = r#"{
+            "Regions": {
+                "600": {
+                    "RegionID": 600,
+                    "RegionCode": "url-region",
+                    "RegionName": "URL Region",
+                    "Nodes": [{
+                        "Name": "600a",
+                        "RegionID": 600,
+                        "HostName": "url.example.com",
+                        "STUNPort": 3478
+                    }]
+                }
+            }
+        }"#;
+
+        Mock::given(method("GET"))
+            .and(path("/derpmap"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(url_json))
+            .mount(&mock_server)
+            .await;
+
+        // path provides region 601 and overrides 600
+        let yaml_content = r#"
+Regions:
+  600:
+    RegionID: 600
+    RegionCode: path-override
+    RegionName: Path Override
+    Nodes:
+      - Name: 600a
+        RegionID: 600
+        HostName: path.example.com
+        STUNPort: 3478
+  601:
+    RegionID: 601
+    RegionCode: path-only
+    RegionName: Path Only
+    Nodes:
+      - Name: 601a
+        RegionID: 601
+        HostName: path-only.example.com
+        STUNPort: 3478
+"#;
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(yaml_content.as_bytes()).unwrap();
+
+        let config = DerpConfig {
+            derp_map_url: Some(format!("{}/derpmap", mock_server.uri())),
+            derp_map_path: Some(temp_file.path().to_path_buf()),
+            update_frequency_secs: 3600,
+            ..Default::default()
+        };
+
+        let result = load_external_derp_maps(&config).await.unwrap();
+        assert!(result.is_some());
+        let map = result.unwrap();
+
+        // region 600 should be from path (overrides url)
+        assert_eq!(map.regions.get(&600).unwrap().region_code, "path-override");
+        // region 601 from path only
+        assert_eq!(map.regions.get(&601).unwrap().region_code, "path-only");
+    }
+
+    /// test the periodic updater writes merged map to shared state
+    #[tokio::test]
+    async fn test_spawn_derp_map_updater_refreshes() {
+        use std::io::Write;
+        use std::sync::Arc;
+        use tempfile::NamedTempFile;
+        use tokio::sync::RwLock;
+
+        // create a yaml file for the updater to read
+        let yaml_content = r#"
+Regions:
+  500:
+    RegionID: 500
+    RegionCode: updated
+    RegionName: Updated Region
+    Nodes:
+      - Name: 500a
+        RegionID: 500
+        HostName: updated.example.com
+        STUNPort: 3478
+"#;
+        let mut temp_file = NamedTempFile::new().unwrap();
+        temp_file.write_all(yaml_content.as_bytes()).unwrap();
+
+        // base map has region 1 (embedded)
+        let base_map = DerpMap {
+            regions: [(
+                1,
+                DerpRegion {
+                    region_id: 1,
+                    region_code: "embedded".to_string(),
+                    region_name: "Embedded".to_string(),
+                    nodes: vec![],
+                },
+            )]
+            .into_iter()
+            .collect(),
+            omit_default_regions: true,
+        };
+
+        let shared_map = Arc::new(RwLock::new(base_map.clone()));
+
+        let config = DerpConfig {
+            derp_map_url: None,
+            derp_map_path: Some(temp_file.path().to_path_buf()),
+            // 1 second for test speed
+            update_frequency_secs: 1,
+            ..Default::default()
+        };
+
+        spawn_derp_map_updater(shared_map.clone(), config, base_map);
+
+        // wait for one update cycle
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+
+        let map = shared_map.read().await;
+        // should have both embedded (region 1) and external (region 500)
+        assert!(map.regions.contains_key(&1), "should keep embedded region");
+        assert!(
+            map.regions.contains_key(&500),
+            "should have external region"
+        );
+        assert_eq!(map.regions.get(&500).unwrap().region_code, "updated");
     }
 
     /// test merging multiple derp maps (later maps override earlier).

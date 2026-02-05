@@ -29,8 +29,8 @@ pub use api_key::{ApiKey, ApiKeySecret};
 pub use config::{
     AllocationStrategy, ApiConfig, Config, DEFAULT_DERP_BYTES_BURST, DEFAULT_DERP_BYTES_PER_SECOND,
     DEFAULT_DERP_CONNECTION_RATE_PER_MINUTE, DEFAULT_DERP_IDLE_TIMEOUT_SECS,
-    DEFAULT_DERP_MAX_CONNECTIONS, DEFAULT_STUN_RATE_PER_MINUTE, DatabaseConfig, EmbeddedDerpConfig,
-    EmbeddedDerpRuntime, LogLevel, OidcConfig, PkceConfig, PkceMethod,
+    DEFAULT_DERP_MAX_CONNECTIONS, DEFAULT_STUN_RATE_PER_MINUTE, DatabaseConfig, DerpConfig,
+    EmbeddedDerpConfig, EmbeddedDerpRuntime, LogLevel, OidcConfig, PkceConfig, PkceMethod,
 };
 pub use email::{Email, EmailError};
 pub use error::Error;

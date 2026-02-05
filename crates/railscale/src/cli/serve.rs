@@ -540,8 +540,27 @@ impl ServeCommand {
 
         // build routers with policy handle for hot-reload
         let notifier = crate::StateNotifier::new();
-        // generate derp map once at startup - config doesn't change at runtime
-        let derp_map = crate::derp::generate_derp_map(&config);
+
+        // generate base derp map from embedded config
+        let mut derp_map = crate::derp::generate_derp_map(&config);
+
+        // load external derp maps from URL/path and merge with embedded
+        match crate::derp::load_external_derp_maps(&config.derp).await {
+            Ok(Some(external)) => {
+                info!(
+                    regions = external.regions.len(),
+                    "loaded external DERP map, merging with embedded"
+                );
+                derp_map = crate::derp::merge_derp_maps(&[derp_map, external]);
+            }
+            Ok(None) => {
+                debug!("no external DERP map sources configured");
+            }
+            Err(e) => {
+                warn!(error = %e, "failed to load external DERP map at startup, using embedded only");
+            }
+        }
+
         let (routers, policy_handle) = crate::create_app_routers_with_policy_handle(
             db,
             policy,
@@ -549,9 +568,22 @@ impl ServeCommand {
             oidc,
             notifier,
             Some(keypair),
-            Some(derp_map),
+            Some(derp_map.clone()),
         )
         .await;
+
+        // spawn periodic derp map updater if external sources are configured
+        if config.derp.derp_map_url.is_some() || config.derp.derp_map_path.is_some() {
+            info!(
+                interval_secs = config.derp.update_frequency_secs,
+                "spawning periodic DERP map updater"
+            );
+            crate::derp::spawn_derp_map_updater(
+                routers.derp_map.clone(),
+                config.derp.clone(),
+                derp_map,
+            );
+        }
 
         // determine if api runs on separate listener and build final routers
         let (protocol_app, api_app, api_listen_addr) = if routers.api_separate {

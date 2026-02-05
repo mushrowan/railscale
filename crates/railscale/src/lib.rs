@@ -32,7 +32,8 @@ pub mod resolver;
 pub mod stun;
 
 pub use derp::{
-    DerpError, fetch_derp_map_from_url, generate_derp_map, load_derp_map_from_path, merge_derp_maps,
+    DerpError, fetch_derp_map_from_url, generate_derp_map, load_derp_map_from_path,
+    load_external_derp_maps, merge_derp_maps, spawn_derp_map_updater,
 };
 pub use ephemeral::EphemeralGarbageCollector;
 pub use noise_stream::NoiseStream;
@@ -147,6 +148,8 @@ pub struct AppRouters {
     pub api: Option<Router>,
     /// whether the api should run on a separate listener.
     pub api_separate: bool,
+    /// shared derp map for dynamic updates (e.g., periodic refresh from URL/path).
+    pub derp_map: Arc<RwLock<DerpMap>>,
 }
 
 /// load a noise keypair from file, or generate and save a new one.
@@ -399,6 +402,7 @@ pub async fn create_app_routers_with_policy_handle(
         protocol: protocol_router,
         api: api_router,
         api_separate,
+        derp_map: state.derp_map.clone(),
     };
 
     (routers, handle)
