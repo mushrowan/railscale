@@ -34,7 +34,7 @@ mod ws_noise_stream;
 use axum::{
     Router,
     body::Body,
-    extract::{Query, State, WebSocketUpgrade, ws::Message},
+    extract::{DefaultBodyLimit, Query, State, WebSocketUpgrade, ws::Message},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
@@ -54,6 +54,31 @@ use ws_noise_stream::ServerNoiseStream;
 
 use super::MachineKeyContext;
 use crate::AppState;
+
+/// max body size for requests on the internal noise router (64kb).
+///
+/// matches the limit on external protocol routes, preventing
+/// unbounded payloads over noise-encrypted connections.
+const NOISE_BODY_LIMIT: usize = 64 * 1024;
+
+/// build the internal router served over noise-encrypted http/2.
+///
+/// this is the same set of endpoints as the external protocol router,
+/// but served inside the noise tunnel after handshake completion.
+pub(crate) fn build_noise_router(state: AppState) -> Router {
+    Router::new()
+        .route("/machine/register", post(super::register))
+        .route("/machine/map", post(super::map))
+        .route("/machine/tka/init/begin", post(super::tka_init_begin))
+        .route("/machine/tka/init/finish", post(super::tka_init_finish))
+        .route("/machine/tka/bootstrap", post(super::tka_bootstrap))
+        .route("/machine/tka/sync/offer", post(super::tka_sync_offer))
+        .route("/machine/tka/sync/send", post(super::tka_sync_send))
+        .route("/machine/tka/disable", post(super::tka_disable))
+        .route("/machine/tka/sign", post(super::tka_sign))
+        .layer(DefaultBodyLimit::max(NOISE_BODY_LIMIT))
+        .with_state(state)
+}
 
 /// ts2021 message types.
 const MSG_TYPE_INITIATION: u8 = 0x01;
@@ -287,19 +312,7 @@ async fn handle_ts2021_connection(
     // create the encrypted stream
     let noise_stream = ServerNoiseStream::new(ws_read, ws_write, transport);
 
-    // create a router for the ts2021 endpoints with state
-    let router: Router = Router::new()
-        .route("/machine/register", post(super::register))
-        .route("/machine/map", post(super::map))
-        // tka (tailnet lock) endpoints
-        .route("/machine/tka/init/begin", post(super::tka_init_begin))
-        .route("/machine/tka/init/finish", post(super::tka_init_finish))
-        .route("/machine/tka/bootstrap", post(super::tka_bootstrap))
-        .route("/machine/tka/sync/offer", post(super::tka_sync_offer))
-        .route("/machine/tka/sync/send", post(super::tka_sync_send))
-        .route("/machine/tka/disable", post(super::tka_disable))
-        .route("/machine/tka/sign", post(super::tka_sign))
-        .with_state(state);
+    let router = build_noise_router(state);
 
     // run http/2 server over the encrypted stream
     let io = hyper_util::rt::TokioIo::new(noise_stream);
@@ -307,15 +320,10 @@ async fn handle_ts2021_connection(
         let mut router = router.clone();
         let machine_key_context = machine_key_context.clone();
         async move {
-            // convert hyper request to axum-compatible request
             let (mut parts, body) = req.into_parts();
-
-            // inject the machine key context from noise handshake
             parts.extensions.insert(machine_key_context);
-
             let body = Body::new(body);
             let req = Request::from_parts(parts, body);
-
             tower::Service::call(&mut router, req).await
         }
     });
@@ -447,19 +455,7 @@ async fn handle_ts2021_http_connection(
     // create the encrypted stream for HTTP/2
     let noise_stream = HttpNoiseStream::new(io, transport);
 
-    // create a router for the ts2021 endpoints with state
-    let router: Router = Router::new()
-        .route("/machine/register", post(super::register))
-        .route("/machine/map", post(super::map))
-        // tka (tailnet lock) endpoints
-        .route("/machine/tka/init/begin", post(super::tka_init_begin))
-        .route("/machine/tka/init/finish", post(super::tka_init_finish))
-        .route("/machine/tka/bootstrap", post(super::tka_bootstrap))
-        .route("/machine/tka/sync/offer", post(super::tka_sync_offer))
-        .route("/machine/tka/sync/send", post(super::tka_sync_send))
-        .route("/machine/tka/disable", post(super::tka_disable))
-        .route("/machine/tka/sign", post(super::tka_sign))
-        .with_state(state);
+    let router = build_noise_router(state);
 
     // run http/2 server over the encrypted stream
     let io = hyper_util::rt::TokioIo::new(noise_stream);
@@ -489,4 +485,91 @@ async fn handle_ts2021_http_connection(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use hyper::{Request, StatusCode};
+    use railscale_db::RailscaleDb;
+    use railscale_grants::{GrantsEngine, Policy};
+    use railscale_types::Config;
+    use tower::ServiceExt;
+
+    async fn test_state() -> AppState {
+        let db = RailscaleDb::new_in_memory().await.expect("in-memory db");
+        let grants = GrantsEngine::new(Policy::empty());
+        let config = Config::default();
+        let notifier = crate::StateNotifier::new();
+        let keypair = railscale_proto::generate_keypair().expect("keypair");
+        let ip_allocator = railscale_db::IpAllocator::new(
+            config.prefix_v4,
+            config.prefix_v6,
+            config.ip_allocation,
+        );
+
+        AppState {
+            db,
+            grants: std::sync::Arc::new(tokio::sync::RwLock::new(grants)),
+            config,
+            oidc: None,
+            notifier,
+            ip_allocator: std::sync::Arc::new(tokio::sync::Mutex::new(ip_allocator)),
+            noise_public_key: keypair.public,
+            noise_private_key: zeroize::Zeroizing::new(keypair.private),
+            pending_registrations: moka::sync::Cache::builder().build(),
+            derp_map: std::sync::Arc::new(tokio::sync::RwLock::new(Default::default())),
+            dns_cache: moka::sync::Cache::builder().build(),
+            presence: crate::PresenceTracker::new(),
+            geoip: None,
+            ephemeral_gc: crate::EphemeralGarbageCollector::new(
+                RailscaleDb::new_in_memory().await.unwrap(),
+                0,
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn noise_router_rejects_oversized_body() {
+        let state = test_state().await;
+        let router = build_noise_router(state);
+
+        let oversized = vec![0u8; NOISE_BODY_LIMIT + 1];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/machine/register")
+            .header("content-type", "application/json")
+            .body(Body::from(oversized))
+            .unwrap();
+
+        let resp = router.oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "oversized body should be rejected with 413"
+        );
+    }
+
+    #[tokio::test]
+    async fn noise_router_accepts_body_within_limit() {
+        let state = test_state().await;
+        let router = build_noise_router(state);
+
+        // exactly at limit should not be 413 (handler will error on invalid json, that's fine)
+        let body = vec![0u8; NOISE_BODY_LIMIT];
+        let req = Request::builder()
+            .method("POST")
+            .uri("/machine/register")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+
+        let resp = router.oneshot(req).await.unwrap();
+        assert_ne!(
+            resp.status(),
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "body within limit should not be 413"
+        );
+    }
 }
