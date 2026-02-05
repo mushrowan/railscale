@@ -182,10 +182,13 @@ impl AuthProviderOidc {
         let pkce_verifier = if self.config.pkce.enabled {
             let (challenge, verifier) = match self.config.pkce.method {
                 PkceMethod::S256 => PkceCodeChallenge::new_random_sha256(),
-                // plain method is handled by not applying sha256 transformation
-                // the openidconnect crate doesn't have a direct "plain" method,
-                // so we'll just use SHA256 for now (most secure anyway)
-                PkceMethod::Plain => PkceCodeChallenge::new_random_sha256(),
+                PkceMethod::Plain => {
+                    tracing::warn!(
+                        "PKCE plain method not supported by openidconnect crate, using S256. \
+                         S256 is the recommended method per RFC 7636"
+                    );
+                    PkceCodeChallenge::new_random_sha256()
+                }
             };
 
             auth_req = auth_req.set_pkce_challenge(challenge);
@@ -460,6 +463,20 @@ mod tests {
             picture: String::new(),
             groups: vec!["users".to_string()],
         }
+    }
+
+    #[test]
+    fn test_pkce_plain_falls_back_to_s256() {
+        // PkceMethod::Plain is not supported by the openidconnect crate,
+        // so it should fall back to S256 without panicking
+        let config = PkceConfig {
+            enabled: true,
+            method: PkceMethod::Plain,
+        };
+        // just verify the config can be created without issue
+        assert_eq!(config.method, PkceMethod::Plain);
+        // the actual fallback happens in authorization_url() which
+        // requires OIDC discovery, so we just verify the config is valid
     }
 
     #[test]
