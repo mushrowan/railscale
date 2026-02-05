@@ -73,6 +73,11 @@ pub struct Config {
     /// default: 120 seconds (2 minutes).
     pub ephemeral_node_inactivity_timeout_secs: u64,
 
+    /// hide build metadata (commit, rustc, build time) from /version endpoint.
+    /// when true, only the crate version is returned, preventing fingerprinting.
+    #[serde(default)]
+    pub hide_build_metadata: bool,
+
     /// allow registration without noise context (for testing only).
     ///
     /// when false (default), `/machine/register` requires a valid noise handshake
@@ -109,6 +114,7 @@ impl Default for Config {
             log_level: LogLevel::default(),
             ip_allocation: AllocationStrategy::default(),
             ephemeral_node_inactivity_timeout_secs: 120,
+            hide_build_metadata: false,
             allow_non_noise_registration: false,
         }
     }

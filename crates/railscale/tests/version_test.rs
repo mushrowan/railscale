@@ -86,3 +86,55 @@ async fn test_version_endpoint_returns_info() {
     );
     // dirty is a bool, always valid
 }
+
+/// response from `/version` when build metadata is hidden
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MinimalVersionResponse {
+    version: String,
+    #[serde(default)]
+    commit: Option<String>,
+    #[serde(default)]
+    build_time: Option<String>,
+    #[serde(default)]
+    rustc: Option<String>,
+    #[serde(default)]
+    dirty: Option<bool>,
+}
+
+/// test that GET /version hides build metadata when configured
+#[tokio::test]
+async fn test_version_endpoint_hides_build_metadata() {
+    let db = RailscaleDb::new_in_memory()
+        .await
+        .expect("failed to create in-memory database");
+    let grants = GrantsEngine::new(Policy::empty());
+    let mut config = Config::default();
+    config.hide_build_metadata = true;
+    let notifier = StateNotifier::default();
+
+    let app = create_app(db, grants, config, None, notifier, None).await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/version")
+        .body(Body::empty())
+        .expect("failed to build request");
+
+    let response = app.oneshot(request).await.expect("request failed");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("failed to read body");
+    let resp: MinimalVersionResponse =
+        serde_json::from_slice(&body).expect("failed to parse response");
+
+    // version should still be present
+    assert!(!resp.version.is_empty(), "version should still be present");
+    // build metadata should be absent
+    assert!(resp.commit.is_none(), "commit should be hidden");
+    assert!(resp.build_time.is_none(), "build_time should be hidden");
+    assert!(resp.rustc.is_none(), "rustc should be hidden");
+    assert!(resp.dirty.is_none(), "dirty should be hidden");
+}
