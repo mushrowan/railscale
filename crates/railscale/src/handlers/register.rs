@@ -352,6 +352,85 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn test_non_noise_registration_gets_unique_machine_keys() {
+        use railscale_db::Database;
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a preauth key so registration can complete
+        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let token = railscale_types::PreAuthKeyToken::generate();
+        let mut preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
+        preauth.reusable = true;
+        db.create_preauth_key(&preauth).await.unwrap();
+        let auth_key_str = token.to_string();
+
+        let mut config = railscale_types::Config::default();
+        config.allow_non_noise_registration = true;
+
+        // register two nodes with same allow_non_noise path
+        let mut machine_keys = vec![];
+        for i in 0u8..2 {
+            let app = crate::create_app(
+                db.clone(),
+                default_grants(),
+                config.clone(),
+                None,
+                crate::StateNotifier::default(),
+                None,
+            )
+            .await;
+
+            let mut node_key_bytes = vec![0u8; 32];
+            node_key_bytes[0] = i + 1;
+            let node_key_hex: String = node_key_bytes.iter().map(|b| format!("{b:02x}")).collect();
+
+            let req_body = serde_json::json!({
+                "Version": 68,
+                "NodeKey": format!("nodekey:{node_key_hex}"),
+                "Auth": { "AuthKey": auth_key_str }
+            });
+
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/machine/register")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+
+            // look up the node's machine key
+            let nk = railscale_types::NodeKey::from_bytes(node_key_bytes);
+            let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
+            machine_keys.push(node.machine_key.as_bytes().to_vec());
+        }
+
+        // machine keys must be different (not all zeros)
+        assert_ne!(
+            machine_keys[0], machine_keys[1],
+            "non-noise registrations must get unique machine keys"
+        );
+        assert_ne!(
+            machine_keys[0],
+            vec![0u8; 32],
+            "machine key must not be all zeros"
+        );
+        assert_ne!(
+            machine_keys[1],
+            vec![0u8; 32],
+            "machine key must not be all zeros"
+        );
+    }
 }
 
 /// handle node registration.
@@ -387,8 +466,11 @@ pub async fn register(
                     "registration requires Noise protocol handshake (ts2021)",
                 ));
             }
-            // for testing without ts2021, generate a placeholder key
-            MachineKey::from_bytes(vec![0; 32])
+            // generate a random machine key for non-noise registrations
+            // to ensure each node gets a unique identity
+            let mut bytes = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
+            MachineKey::from_bytes(bytes.to_vec())
         }
     };
 
