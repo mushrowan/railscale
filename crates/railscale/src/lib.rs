@@ -353,15 +353,18 @@ pub async fn create_app_routers_with_policy_handle(
         }
     });
 
-    // create ephemeral garbage collector
+    let ip_allocator = Arc::new(Mutex::new(ip_allocator));
+
+    // create ephemeral garbage collector with ip allocator for address release
     let ephemeral_gc =
-        EphemeralGarbageCollector::new(db.clone(), config.ephemeral_node_inactivity_timeout_secs);
+        EphemeralGarbageCollector::new(db.clone(), config.ephemeral_node_inactivity_timeout_secs)
+            .with_ip_allocator(ip_allocator.clone());
 
     // spawn garbage collector background task (runs every 30 seconds)
     if ephemeral_gc.is_enabled() {
         let gc = ephemeral_gc.clone();
         tokio::spawn(async move {
-            gc.spawn_collector(Duration::from_secs(30)).await;
+            let _ = gc.spawn_collector(Duration::from_secs(30)).await;
         });
     }
 
@@ -371,7 +374,7 @@ pub async fn create_app_routers_with_policy_handle(
         config,
         oidc,
         notifier,
-        ip_allocator: Arc::new(Mutex::new(ip_allocator)),
+        ip_allocator,
         noise_public_key: keypair.public,
         noise_private_key: Zeroizing::new(keypair.private),
         pending_registrations,

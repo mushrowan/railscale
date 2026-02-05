@@ -198,22 +198,30 @@ async fn delete_node(
 ) -> Result<Json<EmptyResponse>, ApiError> {
     let node_id = NodeId(id);
 
-    // check node exists
-    if state
+    // fetch node before deleting so we can release its IPs
+    let node = state
         .db
         .get_node(node_id)
         .await
         .map_err(ApiError::internal)?
-        .is_none()
-    {
-        return Err(ApiError::not_found(format!("node {} not found", id)));
-    }
+        .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
     state
         .db
         .delete_node(node_id)
         .await
         .map_err(ApiError::internal)?;
+
+    // release allocated IPs back to the pool
+    {
+        let mut allocator = state.ip_allocator.lock().await;
+        if let Some(v4) = node.ipv4 {
+            allocator.release(std::net::IpAddr::V4(v4));
+        }
+        if let Some(v6) = node.ipv6 {
+            allocator.release(std::net::IpAddr::V6(v6));
+        }
+    }
 
     // notify connected clients about the change
     state.notifier.notify_state_changed();

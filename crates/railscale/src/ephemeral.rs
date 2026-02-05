@@ -4,13 +4,14 @@
 //! inactive for a configurable timeout period.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use railscale_db::{Database, RailscaleDb};
+use railscale_db::{Database, IpAllocator, RailscaleDb};
 use railscale_types::NodeId;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 /// garbage collector for ephemeral nodes.
@@ -23,6 +24,8 @@ pub struct EphemeralGarbageCollector {
     scheduled: Arc<RwLock<HashMap<NodeId, DateTime<Utc>>>>,
     /// database for deleting nodes.
     db: RailscaleDb,
+    /// ip allocator for releasing addresses on deletion.
+    ip_allocator: Option<Arc<Mutex<IpAllocator>>>,
     /// inactivity timeout before deletion.
     timeout: Duration,
 }
@@ -39,8 +42,15 @@ impl EphemeralGarbageCollector {
         Self {
             scheduled: Arc::new(RwLock::new(HashMap::new())),
             db,
+            ip_allocator: None,
             timeout: Duration::from_secs(timeout_secs),
         }
+    }
+
+    /// set the ip allocator for releasing addresses on node deletion.
+    pub fn with_ip_allocator(mut self, allocator: Arc<Mutex<IpAllocator>>) -> Self {
+        self.ip_allocator = Some(allocator);
+        self
     }
 
     /// check if garbage collection is enabled.
@@ -113,9 +123,31 @@ impl EphemeralGarbageCollector {
                 scheduled.remove(&node_id);
             }
 
+            // fetch node to get IPs before deletion
+            let node_ips = match self.db.get_node(node_id).await {
+                Ok(Some(n)) => {
+                    let mut ips = Vec::new();
+                    if let Some(v4) = n.ipv4 {
+                        ips.push(IpAddr::V4(v4));
+                    }
+                    if let Some(v6) = n.ipv6 {
+                        ips.push(IpAddr::V6(v6));
+                    }
+                    ips
+                }
+                _ => Vec::new(),
+            };
+
             // delete from database
             match self.db.delete_node(node_id).await {
                 Ok(()) => {
+                    // release IPs back to the pool
+                    if let Some(ref allocator) = self.ip_allocator {
+                        let mut alloc = allocator.lock().await;
+                        for ip in &node_ips {
+                            alloc.release(*ip);
+                        }
+                    }
                     info!(?node_id, "deleted inactive ephemeral node");
                     deleted += 1;
                 }

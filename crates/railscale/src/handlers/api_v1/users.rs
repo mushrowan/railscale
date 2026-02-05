@@ -188,12 +188,32 @@ async fn delete_user(
         return Err(ApiError::not_found(format!("user {} not found", id)));
     }
 
+    // fetch user's nodes to release IPs after deletion
+    let user_nodes = state
+        .db
+        .list_nodes_for_user(user_id)
+        .await
+        .map_err(ApiError::internal)?;
+
     // cascade: soft-delete nodes and preauth keys belonging to this user
     state
         .db
         .delete_nodes_for_user(user_id)
         .await
         .map_err(ApiError::internal)?;
+
+    // release allocated IPs back to the pool
+    {
+        let mut allocator = state.ip_allocator.lock().await;
+        for node in &user_nodes {
+            if let Some(v4) = node.ipv4 {
+                allocator.release(std::net::IpAddr::V4(v4));
+            }
+            if let Some(v6) = node.ipv6 {
+                allocator.release(std::net::IpAddr::V6(v6));
+            }
+        }
+    }
 
     state
         .db
