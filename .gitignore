@@ -1,14 +1,15 @@
-.direnv/bin
-
-
-# Added by cargo
-
+# cargo
 /target
+
+# direnv
 .direnv
 result
+
+# sqlite
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
-AUDIT2.md
+
+# ro's mds
 progress.md
-audit.md
+/audit*

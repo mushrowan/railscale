@@ -1,5 +1,9 @@
 # railscale
-if you're reading this, it means i just pushed this because i tend to put off publicising code and i just wanted to get it out there into the world. half of this readme could be completely wrong as it's almost 3am and i am tired and just typed it all up like a moron. i will come back and fix i promise
+
+if you're reading this, it means i just pushed this because i tend to put off
+publicising code and i just wanted to get it out there into the world. half of
+this readme could be completely wrong as it's almost 3am and i am tired and just
+typed it all up like a moron. i will come back and fix i promise
 
 > [!CAUTION] **this has not been properly audited.** for something that is meant
 > to be secure like a zero trust mesh vpn, that should scream out to you as a
@@ -26,7 +30,8 @@ they told me i couldn't do it
 - **full ts2021 protocol support** - works with official tailscale clients
 - **oidc authentication** - sign in with google, github, whatever
 - **grants policy system** - acls but swaggier
-- **device posture** - restrict access based on device attributes and geolocation
+- **device posture** - restrict access based on device attributes and
+  geolocation
 - **embedded derp server** - built-in relay with rate limiting
 - **taildrop** - file sharing between nodes (same-user)
 - **tailnet lock** - cryptographic verification of node keys
@@ -106,6 +111,7 @@ not yet
 railscale speaks plain http. for production, stick a reverse proxy in front:
 
 **caddy** (easiest - automatic https):
+
 ```
 vpn.example.com {
     reverse_proxy localhost:8080
@@ -113,6 +119,7 @@ vpn.example.com {
 ```
 
 **nginx**:
+
 ```nginx
 server {
     listen 443 ssl;
@@ -245,6 +252,8 @@ current limitations:
 - ssh policy works-ish but i'll be honest i only realised that i forgot to
   properly implement it today and then madly wrote it all in like 4 hours so
   yeah it might be broken
+  - doesn't yet support
+    [acceptEnv](https://tailscale.com/docs/features/tailscale-ssh#acceptenv)
 - app connectors - not yet
 - cross-user taildrop (needs grants support for peer capabilities)
 - probably like 50 million other things
