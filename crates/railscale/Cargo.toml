@@ -88,6 +88,9 @@ tower_governor = { version = "0.8", default-features = false, features = [
 # Rate limiting for DERP/STUN
 governor = "0.10"
 
+# Atomic file writes
+tempfile = "3"
+
 [dev-dependencies]
 tower = "0.5"
 hyper = "1.8"

@@ -406,8 +406,11 @@ impl ServeCommand {
             })?;
         info!("Noise public key loaded ({} bytes)", keypair.public.len());
 
-        // set up embedded derp server if enabled
+        // set runtime-only config fields from CLI
         let mut config = config;
+        config.policy_file_path = policy_file_path.clone();
+
+        // set up embedded derp server if enabled
         if config.derp.embedded_derp.enabled {
             info!("Setting up embedded DERP server...");
 

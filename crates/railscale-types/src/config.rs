@@ -90,6 +90,11 @@ pub struct Config {
     /// **NEVER enable in production** - only for testing without real clients.
     #[serde(default)]
     pub allow_non_noise_registration: bool,
+
+    /// runtime-only: path to persist policy file on updates.
+    /// set by CLI, not serialised to config.
+    #[serde(skip)]
+    pub policy_file_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -116,6 +121,7 @@ impl Default for Config {
             ephemeral_node_inactivity_timeout_secs: 120,
             hide_build_metadata: false,
             allow_non_noise_registration: false,
+            policy_file_path: None,
         }
     }
 }

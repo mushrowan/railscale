@@ -7,6 +7,8 @@
 use axum::{Json, Router, extract::State, routing::get};
 use serde::{Deserialize, Serialize};
 
+use std::path::Path;
+
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext};
 use railscale_grants::Policy;
@@ -32,6 +34,23 @@ pub struct SetPolicyRequest {
 pub struct SetPolicyResponse {
     pub policy: String,
     pub updated_at: String,
+}
+
+/// persist a policy to a file atomically (write to temp, then rename).
+///
+/// returns Ok(()) on success, or an io error. failures are logged but
+/// should not prevent the in-memory update from succeeding.
+pub fn persist_policy(path: &Path, policy: &Policy) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(policy)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    // write to a temp file in the same directory, then rename for atomicity
+    let parent = path.parent().unwrap_or(Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::Write::write_all(&mut temp, json.as_bytes())?;
+    temp.persist(path).map_err(|e| e.error)?;
+
+    Ok(())
 }
 
 /// create the policy router.
@@ -79,6 +98,17 @@ async fn set_policy(
     {
         let mut grants = state.grants.write().await;
         grants.update_policy(new_policy);
+    }
+
+    // persist to file if configured (best-effort; don't fail the request)
+    if let Some(ref path) = state.config.policy_file_path {
+        let grants = state.grants.read().await;
+        let current = grants.policy();
+        if let Err(e) = persist_policy(path, current) {
+            tracing::error!(path = ?path, error = %e, "failed to persist policy to file");
+        } else {
+            tracing::info!(path = ?path, "policy persisted to file");
+        }
     }
 
     // notify connected clients about the policy change
@@ -140,5 +170,62 @@ mod tests {
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("\"policy\""));
         assert!(json.contains("\"updated_at\""));
+    }
+
+    #[test]
+    fn test_persist_policy_writes_file() {
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        let policy = Policy::empty();
+        persist_policy(&path, &policy).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let loaded: Policy = serde_json::from_str(&content).unwrap();
+        assert_eq!(loaded.grants.len(), 0);
+    }
+
+    #[test]
+    fn test_persist_policy_roundtrips_grants() {
+        use tempfile::NamedTempFile;
+
+        let temp_file = NamedTempFile::new().unwrap();
+        let path = temp_file.path().to_path_buf();
+
+        let mut policy = Policy::empty();
+        policy.grants.push(railscale_grants::Grant {
+            src: vec![railscale_grants::Selector::Wildcard],
+            dst: vec![railscale_grants::Selector::Wildcard],
+            ip: vec![railscale_grants::NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        persist_policy(&path, &policy).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let loaded: Policy = serde_json::from_str(&content).unwrap();
+        assert_eq!(loaded.grants.len(), 1);
+    }
+
+    #[test]
+    fn test_persist_policy_atomic_write() {
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("policy.json");
+
+        // file doesn't exist yet
+        assert!(!path.exists());
+
+        let policy = Policy::empty();
+        persist_policy(&path, &policy).unwrap();
+
+        assert!(path.exists());
+        let content = std::fs::read_to_string(&path).unwrap();
+        let _: Policy = serde_json::from_str(&content).unwrap();
     }
 }

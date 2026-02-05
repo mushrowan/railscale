@@ -37,6 +37,19 @@ impl PolicyHandle {
     }
 }
 
+/// persist a policy to a file atomically (write to temp, then rename).
+fn persist_policy(path: &std::path::Path, policy: &Policy) -> std::io::Result<()> {
+    let json = serde_json::to_string_pretty(policy)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+    let parent = path.parent().unwrap_or(std::path::Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    std::io::Write::write_all(&mut temp, json.as_bytes())?;
+    temp.persist(path).map_err(|e| e.error)?;
+
+    Ok(())
+}
+
 /// admin service implementation.
 pub struct AdminServiceImpl {
     db: RailscaleDb,
@@ -120,6 +133,16 @@ impl AdminService for AdminServiceImpl {
 
         let grants_loaded = policy.grants.len() as u32;
         self.policy_handle.reload(policy).await;
+
+        // persist to file if configured (best-effort)
+        if let Some(ref path) = self.policy_file_path {
+            let current = self.policy_handle.get_policy().await;
+            if let Err(e) = persist_policy(path, &current) {
+                tracing::error!(path = ?path, error = %e, "failed to persist policy to file");
+            } else {
+                info!(path = ?path, "policy persisted to file");
+            }
+        }
 
         info!("Policy set via admin API ({} grants)", grants_loaded);
 
