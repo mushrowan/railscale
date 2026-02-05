@@ -421,7 +421,7 @@ async fn build_map_response(
             keep_alive: false,
             node: Some(self_node),
             peers: vec![],
-            dns_config: crate::dns::generate_dns_config(&state.config),
+            dns_config: state.map_cache.dns_config(),
             derp_map: Some(derp_map),
             packet_filter: vec![],
             user_profiles: vec![],
@@ -431,8 +431,11 @@ async fn build_map_response(
         });
     }
 
-    let all_nodes = state.db.list_nodes().await.map_internal()?;
-    let users = state.db.list_users().await.map_internal()?;
+    let (all_nodes, users) = state
+        .map_cache
+        .get_snapshot(&state.db)
+        .await
+        .map_internal()?;
 
     // acquire read lock on grants engine for policy evaluation
     let grants = state.grants.read().await;
@@ -479,8 +482,8 @@ async fn build_map_response(
     // compile ssh policy for this node
     let ssh_policy = grants.compile_ssh_policy(&node, &all_nodes, &resolver);
 
-    // generate dns configuration
-    let dns_config = crate::dns::generate_dns_config(&state.config);
+    // use pre-computed dns config from cache
+    let dns_config = state.map_cache.dns_config();
 
     // batch-fetch TKA key signatures when tailnet lock is enabled
     let key_signatures = if tka_info.is_some() {

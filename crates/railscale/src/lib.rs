@@ -20,6 +20,8 @@ mod dns;
 mod ephemeral;
 /// http request handlers for tailscale protocol endpoints.
 pub mod handlers;
+/// shared map response cache for node/user snapshots
+pub mod map_cache;
 mod noise_stream;
 mod notifier;
 /// openid connect authentication provider.
@@ -135,6 +137,8 @@ pub struct AppState {
     pub geoip: Option<Arc<railscale_grants::MaxmindDbResolver>>,
     /// garbage collector for ephemeral nodes.
     pub ephemeral_gc: EphemeralGarbageCollector,
+    /// shared map response cache for node/user snapshots
+    pub map_cache: Arc<map_cache::MapCache>,
 }
 
 /// routers for the application, potentially running on separate listeners.
@@ -371,6 +375,14 @@ pub async fn create_app_routers_with_policy_handle(
         });
     }
 
+    // pre-compute dns config once (pure config transform, never changes at runtime)
+    let cached_dns_config = dns::generate_dns_config(&config);
+    let map_cache = Arc::new(map_cache::MapCache::new(cached_dns_config));
+
+    // attach map cache to notifier so state changes automatically invalidate it
+    // (uses shared inner state, so all clones of the notifier see the cache)
+    notifier.set_map_cache(Arc::clone(&map_cache));
+
     let state = AppState {
         db,
         grants,
@@ -386,6 +398,7 @@ pub async fn create_app_routers_with_policy_handle(
         presence: PresenceTracker::new(),
         geoip,
         ephemeral_gc,
+        map_cache,
     };
 
     // build protocol router

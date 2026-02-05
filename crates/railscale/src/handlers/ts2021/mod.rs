@@ -527,6 +527,7 @@ mod tests {
                 RailscaleDb::new_in_memory().await.unwrap(),
                 0,
             ),
+            map_cache: std::sync::Arc::new(crate::map_cache::MapCache::new(None)),
         }
     }
 
