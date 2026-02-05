@@ -12,6 +12,7 @@ mod m20260131_000007_create_tka_aums;
 mod m20260131_000008_add_posture_attributes;
 mod m20260131_000009_add_last_seen_country;
 mod m20260201_000010_add_node_ephemeral;
+mod m20260205_000011_add_unique_name_and_node_key_index;
 
 pub struct Migrator;
 
@@ -29,6 +30,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260131_000008_add_posture_attributes::Migration),
             Box::new(m20260131_000009_add_last_seen_country::Migration),
             Box::new(m20260201_000010_add_node_ephemeral::Migration),
+            Box::new(m20260205_000011_add_unique_name_and_node_key_index::Migration),
         ]
     }
 }

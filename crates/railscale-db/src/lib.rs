@@ -1239,4 +1239,17 @@ mod tests {
             "default should not use WAL mode"
         );
     }
+
+    #[tokio::test]
+    async fn test_duplicate_username_rejected() {
+        let db = setup_test_db().await;
+
+        let user1 = User::new(UserId(0), "alice".to_string());
+        db.create_user(&user1).await.unwrap();
+
+        // second user with same name should fail
+        let user2 = User::new(UserId(0), "alice".to_string());
+        let result = db.create_user(&user2).await;
+        assert!(result.is_err(), "duplicate username should be rejected");
+    }
 }

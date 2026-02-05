@@ -127,7 +127,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum Nodes {
+pub(super) enum Nodes {
     Table,
     Id,
     MachineKey,
