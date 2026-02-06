@@ -45,6 +45,23 @@ pub const CAP_FILE_SHARING: &str = "https://tailscale.com/cap/file-sharing";
 /// through the AcceptEnv patterns on matching SSH rules
 pub const CAP_SSH_ENV_VARS: &str = "ssh-env-vars";
 
+// -- peer capabilities (for FilterRule.CapGrant) --
+
+/// peer can receive files via taildrop
+pub const PEER_CAP_FILE_SHARING_TARGET: &str = "https://tailscale.com/cap/file-sharing-target";
+
+/// peer can send files via taildrop
+pub const PEER_CAP_FILE_SEND: &str = "https://tailscale.com/cap/file-send";
+
+/// peer can be debugged
+pub const PEER_CAP_DEBUG_PEER: &str = "https://tailscale.com/cap/debug-peer";
+
+/// peer can use wake-on-lan
+pub const PEER_CAP_WAKE_ON_LAN: &str = "https://tailscale.com/cap/wake-on-lan";
+
+/// peer can accept ingress traffic
+pub const PEER_CAP_INGRESS: &str = "https://tailscale.com/cap/ingress";
+
 /// a maprequest from a tailscale client.
 ///
 /// clients send maprequests periodically (every 15-60 seconds) to:
@@ -370,16 +387,42 @@ pub struct DerpNode {
     pub insecure_for_tests: bool,
 }
 
-/// a packet filter rule (simplified).
+/// a packet filter rule.
+///
+/// `dst_ports` and `cap_grant` are mutually exclusive: a rule is either
+/// network-level (ports) or application-level (capabilities), never both.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct FilterRule {
-    /// source cidrs.
+    /// source cidrs (or "*" for all).
     #[serde(rename = "SrcIPs")]
     pub src_ips: Vec<String>,
 
-    /// destination ports.
+    /// destination port ranges. mutually exclusive with cap_grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dst_ports: Vec<NetPortRange>,
+
+    /// application capability grants. mutually exclusive with dst_ports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cap_grant: Vec<CapGrant>,
+}
+
+/// grants application-level capabilities from src to dst IPs.
+///
+/// used for taildrop (file sharing), app connectors, ingress, etc.
+/// the capabilities are opaque URLs resolved at runtime by the client
+/// via the WhoIs API.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub struct CapGrant {
+    /// destination IP prefixes this grant applies to.
+    pub dsts: Vec<String>,
+
+    /// capability map: capability URL -> list of opaque json values.
+    ///
+    /// preferred over the deprecated `caps` field.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub cap_map: std::collections::HashMap<String, Vec<serde_json::Value>>,
 }
 
 /// a port range (matches tailscale's tailcfg.portrange).
@@ -512,6 +555,7 @@ mod proptests {
                     .into_iter()
                     .map(|(ip, ports)| NetPortRange { ip, ports })
                     .collect(),
+                cap_grant: vec![],
             })
     }
 
@@ -708,5 +752,104 @@ mod proptests {
         assert!(parsed.cap_map.is_some());
         let parsed_cap_map = parsed.cap_map.unwrap();
         assert!(parsed_cap_map.contains_key(CAP_FILE_SHARING));
+    }
+
+    #[test]
+    fn cap_grant_serialises_as_pascal_case() {
+        use std::collections::HashMap;
+
+        let mut cap_map = HashMap::new();
+        cap_map.insert(PEER_CAP_FILE_SHARING_TARGET.to_string(), vec![]);
+
+        let grant = CapGrant {
+            dsts: vec!["100.64.0.0/10".to_string()],
+            cap_map,
+        };
+
+        let json = serde_json::to_string(&grant).unwrap();
+        assert!(json.contains("\"Dsts\""), "expected Dsts: {}", json);
+        assert!(json.contains("\"CapMap\""), "expected CapMap: {}", json);
+        assert!(
+            json.contains(PEER_CAP_FILE_SHARING_TARGET),
+            "expected peer cap: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn cap_grant_roundtrips() {
+        use std::collections::HashMap;
+
+        let mut cap_map = HashMap::new();
+        cap_map.insert(
+            PEER_CAP_FILE_SHARING_TARGET.to_string(),
+            vec![serde_json::json!({"maxSize": 1073741824})],
+        );
+
+        let grant = CapGrant {
+            dsts: vec![
+                "100.64.0.1/32".to_string(),
+                "fd7a:115c:a1e0::1/128".to_string(),
+            ],
+            cap_map,
+        };
+
+        let json = serde_json::to_string(&grant).unwrap();
+        let parsed: CapGrant = serde_json::from_str(&json).unwrap();
+        assert_eq!(grant, parsed);
+    }
+
+    #[test]
+    fn filter_rule_with_cap_grant_omits_dst_ports() {
+        use std::collections::HashMap;
+
+        let mut cap_map = HashMap::new();
+        cap_map.insert(PEER_CAP_FILE_SHARING_TARGET.to_string(), vec![]);
+
+        let rule = FilterRule {
+            src_ips: vec!["*".to_string()],
+            dst_ports: vec![],
+            cap_grant: vec![CapGrant {
+                dsts: vec!["100.64.0.0/10".to_string()],
+                cap_map,
+            }],
+        };
+
+        let json = serde_json::to_string(&rule).unwrap();
+        // dst_ports should be omitted (empty), cap_grant should be present
+        assert!(
+            !json.contains("DstPorts"),
+            "DstPorts should be omitted: {}",
+            json
+        );
+        assert!(
+            json.contains("CapGrant"),
+            "CapGrant should be present: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn filter_rule_with_dst_ports_omits_cap_grant() {
+        let rule = FilterRule {
+            src_ips: vec!["100.64.0.1".to_string()],
+            dst_ports: vec![NetPortRange {
+                ip: "100.64.0.2".to_string(),
+                ports: PortRange::single(443),
+            }],
+            cap_grant: vec![],
+        };
+
+        let json = serde_json::to_string(&rule).unwrap();
+        assert!(
+            json.contains("DstPorts"),
+            "DstPorts should be present: {}",
+            json
+        );
+        assert!(
+            !json.contains("CapGrant"),
+            "CapGrant should be omitted: {}",
+            json
+        );
     }
 }

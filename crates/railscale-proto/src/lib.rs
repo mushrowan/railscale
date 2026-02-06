@@ -16,8 +16,10 @@ mod tka;
 
 pub use error::Error;
 pub use map_request::{
-    CAP_FILE_SHARING, CAP_SSH_ENV_VARS, DerpMap, DerpNode, DerpRegion, DnsConfig, DnsResolver,
-    FilterRule, MapRequest, MapResponse, MapResponseNode, NetPortRange, PortRange, UserProfile,
+    CAP_FILE_SHARING, CAP_SSH_ENV_VARS, CapGrant, DerpMap, DerpNode, DerpRegion, DnsConfig,
+    DnsResolver, FilterRule, MapRequest, MapResponse, MapResponseNode, NetPortRange,
+    PEER_CAP_DEBUG_PEER, PEER_CAP_FILE_SEND, PEER_CAP_FILE_SHARING_TARGET, PEER_CAP_INGRESS,
+    PEER_CAP_WAKE_ON_LAN, PortRange, UserProfile,
 };
 pub use noise::{NoiseHandshake, NoiseTransport, generate_keypair};
 pub use snow::Keypair;

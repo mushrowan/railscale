@@ -4,7 +4,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 
 use railscale_proto::{
-    FilterRule, NetPortRange, PortRange, SshAction, SshPolicy, SshPrincipal, SshRule,
+    CapGrant, FilterRule, NetPortRange, PortRange, SshAction, SshPolicy, SshPrincipal, SshRule,
 };
 use railscale_types::{Node, UserId};
 
@@ -156,10 +156,86 @@ impl GrantsEngine {
                 continue;
             }
 
-            rules.push(FilterRule { src_ips, dst_ports });
+            rules.push(FilterRule {
+                src_ips,
+                dst_ports,
+                cap_grant: vec![],
+            });
         }
 
         rules
+    }
+
+    /// generate capability grant filter rules for the mapresponse.
+    ///
+    /// returns filter rules with `cap_grant` entries for peers that have
+    /// application-level capabilities towards this node (e.g. taildrop,
+    /// app connectors). these are separate from network-level port rules.
+    pub fn generate_cap_grant_rules<R: UserResolver>(
+        &self,
+        node: &Node,
+        peers: &[Node],
+        resolver: &R,
+    ) -> Vec<FilterRule> {
+        let mut rules = Vec::new();
+
+        for peer in peers {
+            let app_caps = self.get_app_capabilities(peer, node, resolver);
+            if app_caps.is_empty() {
+                continue;
+            }
+
+            let src_ips: Vec<String> = peer.ips().iter().map(|ip| ip.to_string()).collect();
+            if src_ips.is_empty() {
+                continue;
+            }
+
+            // build dst prefixes from node's IPs
+            let dsts: Vec<String> = node
+                .ips()
+                .iter()
+                .map(|ip| match ip {
+                    std::net::IpAddr::V4(_) => format!("{}/32", ip),
+                    std::net::IpAddr::V6(_) => format!("{}/128", ip),
+                })
+                .collect();
+
+            if dsts.is_empty() {
+                continue;
+            }
+
+            // build cap_map from app capabilities
+            let mut cap_map = std::collections::HashMap::new();
+            for app_cap in &app_caps {
+                cap_map.insert(app_cap.name.clone(), app_cap.params.clone());
+            }
+
+            rules.push(FilterRule {
+                src_ips,
+                dst_ports: vec![],
+                cap_grant: vec![CapGrant { dsts, cap_map }],
+            });
+        }
+
+        rules
+    }
+
+    /// get application capabilities that src has when accessing dst.
+    ///
+    /// returns the union of all `app` fields from matching grants.
+    pub fn get_app_capabilities<R: UserResolver>(
+        &self,
+        src: &Node,
+        dst: &Node,
+        resolver: &R,
+    ) -> Vec<crate::capability::AppCapability> {
+        let mut caps = Vec::new();
+        for grant in self
+            .matching_grants::<R, crate::geoip::NoopGeoIpResolver>(src, dst, resolver, None, None)
+        {
+            caps.extend(grant.app.iter().cloned());
+        }
+        caps
     }
 
     /// convert network capabilities to port ranges.
@@ -1428,6 +1504,78 @@ mod tests {
 
         // accept_env should remain None when not configured
         assert_eq!(rule.accept_env, None);
+    }
+
+    #[test]
+    fn test_generate_cap_grant_rules_from_app_caps() {
+        use crate::capability::AppCapability;
+
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![],
+            app: vec![AppCapability {
+                name: "https://tailscale.com/cap/file-sharing-target".to_string(),
+                params: vec![],
+            }],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![node1.clone(), node2.clone()];
+
+        let rules = engine.generate_cap_grant_rules(&node1, &all_nodes, &resolver);
+        assert!(!rules.is_empty(), "should generate cap grant rules");
+
+        // should be a filter rule with cap_grant, not dst_ports
+        let rule = &rules[0];
+        assert!(
+            rule.dst_ports.is_empty(),
+            "cap grant rules should have no dst_ports"
+        );
+        assert!(!rule.cap_grant.is_empty(), "should have cap_grant entries");
+
+        // the cap grant should reference node1's IPs and include the file-sharing-target cap
+        let grant = &rule.cap_grant[0];
+        assert!(!grant.dsts.is_empty());
+        assert!(
+            grant
+                .cap_map
+                .contains_key("https://tailscale.com/cap/file-sharing-target")
+        );
+    }
+
+    #[test]
+    fn test_generate_cap_grant_rules_empty_without_app_caps() {
+        let mut policy = Policy::empty();
+        // grant with only network caps, no app caps
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![node1.clone(), node2.clone()];
+
+        let rules = engine.generate_cap_grant_rules(&node1, &all_nodes, &resolver);
+        assert!(
+            rules.is_empty(),
+            "no cap grant rules for network-only grants"
+        );
     }
 
     #[test]
