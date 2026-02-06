@@ -252,8 +252,6 @@ current limitations:
 - ssh policy works-ish but i'll be honest i only realised that i forgot to
   properly implement it today and then madly wrote it all in like 4 hours so
   yeah it might be broken
-  - doesn't yet support
-    [acceptEnv](https://tailscale.com/docs/features/tailscale-ssh#acceptenv)
 - app connectors - not yet
 - cross-user taildrop (needs grants support for peer capabilities)
 - probably like 50 million other things

@@ -1,1 +1,1 @@
-- [ ] acceptEnv in ssh access control
+- [x] acceptEnv in ssh access control
