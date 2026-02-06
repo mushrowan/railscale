@@ -477,7 +477,15 @@ async fn build_map_response(
         .collect();
 
     // generate packet filter rules from grants
-    let packet_filter = grants.generate_filter_rules(&node, &all_nodes, &resolver);
+    let mut packet_filter = grants.generate_filter_rules(&node, &all_nodes, &resolver);
+
+    // append application capability grant rules (e.g. from policy app caps)
+    packet_filter.extend(grants.generate_cap_grant_rules(&node, &all_nodes, &resolver));
+
+    // append taildrop (file-sharing) capability grants for same-user peers
+    if state.config.taildrop_enabled {
+        packet_filter.extend(grants.generate_taildrop_rules(&node, &all_nodes, &resolver));
+    }
 
     // compile ssh policy for this node
     let ssh_policy = grants.compile_ssh_policy(&node, &all_nodes, &resolver);

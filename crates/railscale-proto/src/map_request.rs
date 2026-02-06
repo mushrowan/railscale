@@ -31,12 +31,9 @@ use crate::tka::TkaInfo;
 /// - IsSelfUntagged(): both sender/receiver untagged + same user
 /// - OR PeerHasCap(PeerCapabilityFileSharingTarget) for cross-user
 ///
-/// currently we only implement same-user sharing. cross-user would require:
-/// - CapGrant field on FilterRule with PeerCapMap
-/// - grants engine to emit file-sharing app capabilities as CapGrants
-///
-/// TODO: implement cross-user file sharing via app capabilities when we add
-/// proper CapGrant support to FilterRule
+/// same-user sharing works automatically. cross-user sharing requires an
+/// explicit grant with `cap/file-sharing-target` app capability in the policy,
+/// emitted as CapGrant on FilterRule
 pub const CAP_FILE_SHARING: &str = "https://tailscale.com/cap/file-sharing";
 
 /// node capability enabling ssh environment variable forwarding.

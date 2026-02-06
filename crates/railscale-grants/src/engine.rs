@@ -238,6 +238,67 @@ impl GrantsEngine {
         caps
     }
 
+    /// generate taildrop (file-sharing) capability grant rules.
+    ///
+    /// same-user untagged peers always get file-sharing-target.
+    /// cross-user peers get it only if there's an explicit app grant
+    /// with `cap/file-sharing-target` in the policy.
+    pub fn generate_taildrop_rules<R: UserResolver>(
+        &self,
+        node: &Node,
+        all_nodes: &[Node],
+        _resolver: &R,
+    ) -> Vec<FilterRule> {
+        // taildrop only applies to user-owned (untagged) nodes
+        if node.is_tagged() || node.user_id.is_none() {
+            return vec![];
+        }
+        let node_user = node.user_id.unwrap();
+
+        // build dst prefixes from node's IPs
+        let dsts: Vec<String> = node
+            .ips()
+            .iter()
+            .map(|ip| match ip {
+                std::net::IpAddr::V4(_) => format!("{}/32", ip),
+                std::net::IpAddr::V6(_) => format!("{}/128", ip),
+            })
+            .collect();
+
+        if dsts.is_empty() {
+            return vec![];
+        }
+
+        // collect same-user peer IPs
+        let mut src_ips = Vec::new();
+        for peer in all_nodes {
+            if peer.id == node.id || peer.is_tagged() {
+                continue;
+            }
+            if peer.user_id == Some(node_user) {
+                for ip in peer.ips() {
+                    src_ips.push(ip.to_string());
+                }
+            }
+        }
+
+        if src_ips.is_empty() {
+            return vec![];
+        }
+
+        let mut cap_map = std::collections::HashMap::new();
+        cap_map.insert(
+            railscale_proto::PEER_CAP_FILE_SHARING_TARGET.to_string(),
+            vec![],
+        );
+
+        vec![FilterRule {
+            src_ips,
+            dst_ports: vec![],
+            cap_grant: vec![CapGrant { dsts, cap_map }],
+        }]
+    }
+
     /// convert network capabilities to port ranges.
     fn capabilities_to_port_ranges(
         &self,
@@ -1575,6 +1636,71 @@ mod tests {
         assert!(
             rules.is_empty(),
             "no cap grant rules for network-only grants"
+        );
+    }
+
+    #[test]
+    fn test_generate_taildrop_rules_same_user() {
+        let engine = GrantsEngine::empty();
+        let resolver = EmptyResolver;
+
+        // two nodes owned by the same user
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let mut node2 = test_node_with_user(2, vec![], Some(UserId::from(1)));
+        node2.user_id = Some(UserId::from(1));
+
+        // different user
+        let node3 = test_node_with_user(3, vec![], Some(UserId::from(2)));
+
+        let all_nodes = vec![node1.clone(), node2.clone(), node3.clone()];
+
+        let rules = engine.generate_taildrop_rules(&node1, &all_nodes, &resolver);
+        assert!(
+            !rules.is_empty(),
+            "should have taildrop rules for same-user peer"
+        );
+
+        // should only include node2 (same user), not node3 (different user)
+        let rule = &rules[0];
+        assert_eq!(rule.src_ips.len(), 1, "only one same-user peer");
+        assert!(!rule.cap_grant.is_empty());
+        assert!(
+            rule.cap_grant[0]
+                .cap_map
+                .contains_key("https://tailscale.com/cap/file-sharing-target")
+        );
+    }
+
+    #[test]
+    fn test_generate_taildrop_rules_no_cross_user() {
+        let engine = GrantsEngine::empty();
+        let resolver = EmptyResolver;
+
+        // nodes owned by different users
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![node1.clone(), node2.clone()];
+
+        let rules = engine.generate_taildrop_rules(&node1, &all_nodes, &resolver);
+        assert!(
+            rules.is_empty(),
+            "no taildrop rules for cross-user without grants"
+        );
+    }
+
+    #[test]
+    fn test_generate_taildrop_rules_tagged_nodes_excluded() {
+        let engine = GrantsEngine::empty();
+        let resolver = EmptyResolver;
+
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let tagged = test_node(2, vec!["tag:server"]);
+        let all_nodes = vec![node1.clone(), tagged.clone()];
+
+        let rules = engine.generate_taildrop_rules(&node1, &all_nodes, &resolver);
+        assert!(
+            rules.is_empty(),
+            "tagged nodes should not get taildrop rules"
         );
     }
 
