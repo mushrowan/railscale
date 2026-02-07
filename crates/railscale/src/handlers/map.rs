@@ -650,6 +650,7 @@ fn node_to_map_response_node(
         user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).0,
         // nodes in the database that respond to map requests are authorized
         machine_authorized: true,
+        cap: railscale_proto::CapabilityVersion::CURRENT.0,
         // cap_map is populated separately for self node based on config
         cap_map: None,
     }
@@ -765,6 +766,17 @@ mod tests {
 
         let result = node_to_map_response_node(&node, 1, Some(true), None, "example.com");
         assert_eq!(result.name, "renamed.example.com.");
+    }
+
+    #[test]
+    fn test_node_cap_set_to_current_version() {
+        let node = TestNodeBuilder::new(1)
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+
+        let result = node_to_map_response_node(&node, 1, Some(true), None, "example.com");
+        assert_eq!(result.cap, railscale_proto::CapabilityVersion::CURRENT.0);
+        assert_ne!(result.cap, 0);
     }
 
     #[test]

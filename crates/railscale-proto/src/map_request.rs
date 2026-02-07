@@ -12,6 +12,10 @@ fn is_zero(n: &i32) -> bool {
     *n == 0
 }
 
+fn is_zero_u32(n: &u32) -> bool {
+    *n == 0
+}
+
 use railscale_tka::MarshaledSignature;
 use railscale_types::{DiscoKey, HostInfo, MachineKey, NodeKey};
 
@@ -269,6 +273,13 @@ pub struct MapResponseNode {
     /// defaults to false if not present.
     #[serde(default)]
     pub machine_authorized: bool,
+
+    /// capability version of this node.
+    ///
+    /// tells peers what protocol features this node supports.
+    /// zero means unknown (old server didn't send it).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub cap: u32,
 
     /// node capability map.
     ///
@@ -758,6 +769,7 @@ mod proptests {
             expired: false,
             user: 1,
             machine_authorized: true,
+            cap: 106,
             cap_map: Some(cap_map),
         };
 
@@ -767,6 +779,7 @@ mod proptests {
         assert!(parsed.cap_map.is_some());
         let parsed_cap_map = parsed.cap_map.unwrap();
         assert!(parsed_cap_map.contains_key(CAP_FILE_SHARING));
+        assert_eq!(parsed.cap, 106);
     }
 
     #[test]
