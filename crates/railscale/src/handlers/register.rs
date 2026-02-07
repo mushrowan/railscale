@@ -684,75 +684,117 @@ async fn handle_preauth_registration(
         .map(|n| n.into_inner())
         .unwrap_or_else(|| "node".to_string());
 
-    // allocate ip addresses for the new node
-    let (ipv4, ipv6) = {
-        let mut allocator = state.ip_allocator.lock().await;
-        allocator
-            .allocate()
-            .map_err(|e| ApiError::internal(e.to_string()))?
-    };
-
     // parse NL public key from "nlpub:<hex>" format if provided
     let nl_public_key = parse_nl_public_key(&req.nl_key);
 
+    // check for existing node with same machine key (re-registration / key rotation)
+    let existing_node = state
+        .db
+        .get_node_by_machine_key(&machine_key)
+        .await
+        .map_internal()?;
+
     let now = chrono::Utc::now();
-    let node = Node {
-        id: NodeId(0),
-        machine_key,
-        node_key: req.node_key,
-        disco_key: Default::default(),
-        ipv4,
-        ipv6,
-        endpoints: vec![],
-        hostinfo: req.hostinfo,
-        hostname: hostname.clone(),
-        given_name: hostname,
-        user_id: if preauth_key.creates_tagged_nodes() {
-            None
-        } else {
-            Some(preauth_key.user_id)
-        },
-        register_method: railscale_types::RegisterMethod::AuthKey,
-        tags: preauth_key.tags.clone(),
-        auth_key_id: Some(preauth_key.id),
-        ephemeral: preauth_key.ephemeral,
-        last_seen: None,
-        last_seen_country: None,
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key,
+
+    let node = if let Some(mut existing) = existing_node {
+        // re-registration: update existing node's key and metadata in place
+        // this preserves the node's IP allocation and identity
+        tracing::info!(
+            node_id = existing.id.0,
+            old_key = ?existing.node_key,
+            new_key = ?req.node_key,
+            "node re-registering (key rotation)"
+        );
+        existing.node_key = req.node_key;
+        existing.hostinfo = req.hostinfo;
+        existing.hostname = hostname.clone();
+        if existing.given_name.is_empty() {
+            existing.given_name = hostname;
+        }
+        existing.nl_public_key = nl_public_key;
+
+        // auto-approve any newly advertised routes
+        let grants = state.grants.read().await;
+        let auto_approved =
+            grants.auto_approve_routes(&existing, &railscale_grants::engine::EmptyResolver);
+        drop(grants);
+        if !auto_approved.is_empty() {
+            // merge with existing approved routes (never remove)
+            for route in auto_approved {
+                if !existing.approved_routes.contains(&route) {
+                    existing.approved_routes.push(route);
+                }
+            }
+        }
+
+        state.db.update_node(&existing).await.map_internal()?
+    } else {
+        // new registration — allocate IP addresses
+        let (ipv4, ipv6) = {
+            let mut allocator = state.ip_allocator.lock().await;
+            allocator
+                .allocate()
+                .map_err(|e| ApiError::internal(e.to_string()))?
+        };
+
+        let mut node = Node {
+            id: NodeId(0),
+            machine_key,
+            node_key: req.node_key,
+            disco_key: Default::default(),
+            ipv4,
+            ipv6,
+            endpoints: vec![],
+            hostinfo: req.hostinfo,
+            hostname: hostname.clone(),
+            given_name: hostname,
+            user_id: if preauth_key.creates_tagged_nodes() {
+                None
+            } else {
+                Some(preauth_key.user_id)
+            },
+            register_method: railscale_types::RegisterMethod::AuthKey,
+            tags: preauth_key.tags.clone(),
+            auth_key_id: Some(preauth_key.id),
+            ephemeral: preauth_key.ephemeral,
+            last_seen: None,
+            last_seen_country: None,
+            expiry: None,
+            approved_routes: vec![],
+            created_at: now,
+            updated_at: now,
+            is_online: None,
+            posture_attributes: std::collections::HashMap::new(),
+            nl_public_key,
+        };
+
+        // auto-approve routes based on policy
+        let grants = state.grants.read().await;
+        let auto_approved =
+            grants.auto_approve_routes(&node, &railscale_grants::engine::EmptyResolver);
+        drop(grants);
+        if !auto_approved.is_empty() {
+            tracing::info!(
+                node_id = ?node.hostname,
+                routes = ?auto_approved,
+                "auto-approved routes from policy"
+            );
+            node.approved_routes = auto_approved;
+        }
+
+        if !preauth_key.reusable {
+            state
+                .db
+                .mark_preauth_key_used(preauth_key.id)
+                .await
+                .map_internal()?;
+        }
+
+        state.db.create_node(&node).await.map_internal()?
     };
 
-    // auto-approve routes based on policy
-    let grants = state.grants.read().await;
-    let auto_approved = grants.auto_approve_routes(&node, &railscale_grants::engine::EmptyResolver);
-    drop(grants);
-    let mut node = node;
-    if !auto_approved.is_empty() {
-        tracing::info!(
-            node_id = ?node.hostname,
-            routes = ?auto_approved,
-            "auto-approved routes from policy"
-        );
-        node.approved_routes = auto_approved;
-    }
-
-    let _node = state.db.create_node(&node).await.map_internal()?;
-
-    // notify streaming clients that a new node has been added
+    // notify streaming clients
     state.notifier.notify_state_changed();
-
-    if !preauth_key.reusable {
-        state
-            .db
-            .mark_preauth_key_used(preauth_key.id)
-            .await
-            .map_internal()?;
-    }
 
     // build tailscale-format response
     let (user_info, login_info) = match user {

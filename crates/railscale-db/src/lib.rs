@@ -142,6 +142,12 @@ pub trait Database: Send + Sync {
         node_key: &railscale_types::NodeKey,
     ) -> impl Future<Output = Result<Option<Node>>> + Send;
 
+    /// get a node by its machine key (stable hardware identity).
+    fn get_node_by_machine_key(
+        &self,
+        machine_key: &railscale_types::MachineKey,
+    ) -> impl Future<Output = Result<Option<Node>>> + Send;
+
     /// list all non-deleted nodes.
     fn list_nodes(&self) -> impl Future<Output = Result<Vec<Node>>> + Send;
 
@@ -502,6 +508,18 @@ impl Database for RailscaleDb {
     ) -> Result<Option<Node>> {
         let result = entity::node::Entity::find()
             .filter(entity::node::Column::NodeKey.eq(node_key.as_bytes()))
+            .filter(entity::node::Column::DeletedAt.is_null())
+            .one(&self.conn)
+            .await?;
+        Ok(result.map(Into::into))
+    }
+
+    async fn get_node_by_machine_key(
+        &self,
+        machine_key: &railscale_types::MachineKey,
+    ) -> Result<Option<Node>> {
+        let result = entity::node::Entity::find()
+            .filter(entity::node::Column::MachineKey.eq(machine_key.as_bytes()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
