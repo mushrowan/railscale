@@ -114,6 +114,25 @@ fn generate_minimal_dns_config(config: &Config) -> Option<DnsConfig> {
     })
 }
 
+/// add cert_domains for a specific node to a cloned dns config.
+///
+/// when a dns_provider is configured, each node gets its FQDN as a cert domain
+/// so `tailscale cert` can provision TLS certificates via ACME dns-01.
+pub fn with_cert_domains(
+    dns_config: Option<DnsConfig>,
+    hostname: &str,
+    base_domain: &str,
+    has_dns_provider: bool,
+) -> Option<DnsConfig> {
+    let mut config = dns_config?;
+
+    if has_dns_provider && !base_domain.is_empty() && !hostname.is_empty() {
+        config.cert_domains = vec![format!("{}.{}", hostname, base_domain)];
+    }
+
+    Some(config)
+}
+
 /// generate ipv4 reverse dns routes (e.g., "64.100.in-addr.arpa.").
 ///
 /// for 100.64.0.0/10, this generates:
@@ -215,4 +234,52 @@ fn generate_ipv6_reverse_dns_routes(prefix: IpNet) -> Vec<String> {
     }
 
     routes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_dns_config() -> DnsConfig {
+        DnsConfig {
+            resolvers: vec![DnsResolver::new("8.8.8.8")],
+            domains: vec!["example.com".into()],
+            routes: HashMap::new(),
+            cert_domains: vec![],
+        }
+    }
+
+    #[test]
+    fn with_cert_domains_adds_fqdn_when_provider_configured() {
+        let config = with_cert_domains(Some(sample_dns_config()), "myhost", "example.com", true);
+        let config = config.unwrap();
+        assert_eq!(config.cert_domains, vec!["myhost.example.com"]);
+    }
+
+    #[test]
+    fn with_cert_domains_empty_when_no_provider() {
+        let config = with_cert_domains(Some(sample_dns_config()), "myhost", "example.com", false);
+        let config = config.unwrap();
+        assert!(config.cert_domains.is_empty());
+    }
+
+    #[test]
+    fn with_cert_domains_none_passthrough() {
+        let config = with_cert_domains(None, "myhost", "example.com", true);
+        assert!(config.is_none());
+    }
+
+    #[test]
+    fn with_cert_domains_empty_base_domain() {
+        let config = with_cert_domains(Some(sample_dns_config()), "myhost", "", true);
+        let config = config.unwrap();
+        assert!(config.cert_domains.is_empty());
+    }
+
+    #[test]
+    fn with_cert_domains_empty_hostname() {
+        let config = with_cert_domains(Some(sample_dns_config()), "", "example.com", true);
+        let config = config.unwrap();
+        assert!(config.cert_domains.is_empty());
+    }
 }

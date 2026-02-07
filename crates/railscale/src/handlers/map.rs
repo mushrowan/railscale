@@ -420,11 +420,24 @@ async fn build_map_response(
         );
         self_node.cap_map = build_self_cap_map(&state.config);
 
+        // add per-node cert_domains when dns_provider is configured
+        let hostname = if node.given_name.is_empty() {
+            &node.hostname
+        } else {
+            &node.given_name
+        };
+        let dns_config = crate::dns::with_cert_domains(
+            state.map_cache.dns_config(),
+            hostname,
+            &state.config.base_domain,
+            state.dns_provider.is_some(),
+        );
+
         return Ok(MapResponse {
             keep_alive: false,
             node: Some(self_node),
             peers: vec![],
-            dns_config: state.map_cache.dns_config(),
+            dns_config,
             derp_map: Some(derp_map),
             packet_filter: vec![],
             user_profiles: vec![],
@@ -494,8 +507,18 @@ async fn build_map_response(
     // compile ssh policy for this node
     let ssh_policy = grants.compile_ssh_policy(&node, &all_nodes, &resolver);
 
-    // use pre-computed dns config from cache
-    let dns_config = state.map_cache.dns_config();
+    // add per-node cert_domains when dns_provider is configured
+    let hostname = if node.given_name.is_empty() {
+        &node.hostname
+    } else {
+        &node.given_name
+    };
+    let dns_config = crate::dns::with_cert_domains(
+        state.map_cache.dns_config(),
+        hostname,
+        &state.config.base_domain,
+        state.dns_provider.is_some(),
+    );
 
     // batch-fetch TKA key signatures when tailnet lock is enabled
     let key_signatures = if tka_info.is_some() {

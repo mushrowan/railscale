@@ -141,6 +141,8 @@ pub struct AppState {
     pub ephemeral_gc: EphemeralGarbageCollector,
     /// shared map response cache for node/user snapshots
     pub map_cache: Arc<map_cache::MapCache>,
+    /// dns provider for ACME dns-01 challenges (None if not configured)
+    pub dns_provider: Option<Arc<dyn dns_provider::DnsProviderBoxed>>,
 }
 
 /// routers for the application, potentially running on separate listeners.
@@ -385,6 +387,19 @@ pub async fn create_app_routers_with_policy_handle(
     // (uses shared inner state, so all clones of the notifier see the cache)
     notifier.set_map_cache(Arc::clone(&map_cache));
 
+    // construct dns provider for ACME dns-01 challenges if configured
+    let dns_provider_boxed: Option<Arc<dyn dns_provider::DnsProviderBoxed>> =
+        config.dns_provider.as_ref().map(|provider_config| {
+            tracing::info!(
+                ?provider_config,
+                "dns provider configured for tailscale cert"
+            );
+            Arc::from(dns_provider::from_config(
+                provider_config,
+                &config.base_domain,
+            ))
+        });
+
     let state = AppState {
         db,
         grants,
@@ -401,6 +416,7 @@ pub async fn create_app_routers_with_policy_handle(
         geoip,
         ephemeral_gc,
         map_cache,
+        dns_provider: dns_provider_boxed,
     };
 
     // build protocol router

@@ -528,6 +528,7 @@ mod tests {
                 0,
             ),
             map_cache: std::sync::Arc::new(crate::map_cache::MapCache::new(None)),
+            dns_provider: None,
         }
     }
 
