@@ -39,6 +39,10 @@ pub struct Config {
     /// dns configuration.
     pub dns: DnsConfig,
 
+    /// external dns provider for ACME dns-01 certificate provisioning.
+    /// when set, enables `tailscale cert` for nodes on this control server.
+    pub dns_provider: Option<DnsProviderConfig>,
+
     /// oidc configuration (optional).
     pub oidc: Option<OidcConfig>,
 
@@ -109,6 +113,7 @@ impl Default for Config {
             database: DatabaseConfig::default(),
             derp: DerpConfig::default(),
             dns: DnsConfig::default(),
+            dns_provider: None,
             oidc: None,
             tuning: TuningConfig::default(),
             api: ApiConfig::default(),
@@ -580,6 +585,64 @@ pub struct DnsRecord {
     pub value: String,
 }
 
+/// external dns provider for ACME dns-01 challenges (`tailscale cert`).
+///
+/// when configured, railscale advertises CertDomains to clients and handles
+/// `/machine/set-dns` requests by creating TXT records via this provider.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum DnsProviderConfig {
+    /// cloudflare dns api.
+    Cloudflare {
+        /// api token with DNS:Edit permission for the zone.
+        #[serde(default, skip_serializing)]
+        api_token: SecretString,
+        /// cloudflare zone id.
+        zone_id: String,
+    },
+    /// godaddy dns api.
+    /// note: requires 10+ domains on the account or an active domain pro plan.
+    Godaddy {
+        /// godaddy api key.
+        #[serde(default, skip_serializing)]
+        api_key: SecretString,
+        /// godaddy api secret.
+        #[serde(default, skip_serializing)]
+        api_secret: SecretString,
+    },
+    /// generic webhook — POST's record details to a user-configured URL.
+    /// use this for DNS providers without built-in support.
+    Webhook {
+        /// URL to POST record changes to.
+        url: String,
+        /// optional HMAC-SHA256 shared secret for request signing.
+        #[serde(default, skip_serializing)]
+        secret: Option<SecretString>,
+    },
+}
+
+impl std::fmt::Debug for DnsProviderConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cloudflare { zone_id, .. } => f
+                .debug_struct("Cloudflare")
+                .field("api_token", &"[REDACTED]")
+                .field("zone_id", zone_id)
+                .finish(),
+            Self::Godaddy { .. } => f
+                .debug_struct("Godaddy")
+                .field("api_key", &"[REDACTED]")
+                .field("api_secret", &"[REDACTED]")
+                .finish(),
+            Self::Webhook { url, secret } => f
+                .debug_struct("Webhook")
+                .field("url", url)
+                .field("secret", &secret.as_ref().map(|_| "[REDACTED]"))
+                .finish(),
+        }
+    }
+}
+
 /// oidc configuration.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct OidcConfig {
@@ -881,6 +944,99 @@ impl Default for VerifyConfig {
 mod tests {
     use super::*;
     use secrecy::ExposeSecret;
+
+    #[test]
+    fn dns_provider_config_cloudflare_serde() {
+        let json = r#"{
+            "type": "cloudflare",
+            "api_token": "cf-token-123",
+            "zone_id": "zone-abc"
+        }"#;
+        let provider: DnsProviderConfig = serde_json::from_str(json).unwrap();
+        match provider {
+            DnsProviderConfig::Cloudflare { api_token, zone_id } => {
+                assert_eq!(api_token.expose_secret(), "cf-token-123");
+                assert_eq!(zone_id, "zone-abc");
+            }
+            _ => panic!("expected cloudflare"),
+        }
+    }
+
+    #[test]
+    fn dns_provider_config_godaddy_serde() {
+        let json = r#"{
+            "type": "godaddy",
+            "api_key": "gd-key",
+            "api_secret": "gd-secret"
+        }"#;
+        let provider: DnsProviderConfig = serde_json::from_str(json).unwrap();
+        match provider {
+            DnsProviderConfig::Godaddy {
+                api_key,
+                api_secret,
+            } => {
+                assert_eq!(api_key.expose_secret(), "gd-key");
+                assert_eq!(api_secret.expose_secret(), "gd-secret");
+            }
+            _ => panic!("expected godaddy"),
+        }
+    }
+
+    #[test]
+    fn dns_provider_config_webhook_serde() {
+        let json = r#"{
+            "type": "webhook",
+            "url": "https://my-dns.internal/set-record",
+            "secret": "hmac-secret"
+        }"#;
+        let provider: DnsProviderConfig = serde_json::from_str(json).unwrap();
+        match provider {
+            DnsProviderConfig::Webhook { url, secret } => {
+                assert_eq!(url, "https://my-dns.internal/set-record");
+                assert_eq!(secret.unwrap().expose_secret(), "hmac-secret");
+            }
+            _ => panic!("expected webhook"),
+        }
+    }
+
+    #[test]
+    fn dns_provider_config_webhook_no_secret() {
+        let json = r#"{
+            "type": "webhook",
+            "url": "https://my-dns.internal/set-record"
+        }"#;
+        let provider: DnsProviderConfig = serde_json::from_str(json).unwrap();
+        match provider {
+            DnsProviderConfig::Webhook { url, secret } => {
+                assert_eq!(url, "https://my-dns.internal/set-record");
+                assert!(secret.is_none());
+            }
+            _ => panic!("expected webhook"),
+        }
+    }
+
+    #[test]
+    fn dns_provider_config_none_when_missing() {
+        let config = Config::default();
+        assert!(config.dns_provider.is_none());
+    }
+
+    #[test]
+    fn dns_provider_config_debug_redacts_secrets() {
+        let provider = DnsProviderConfig::Cloudflare {
+            api_token: SecretString::from("super-secret-token"),
+            zone_id: "zone-abc".to_string(),
+        };
+        let debug = format!("{:?}", provider);
+        assert!(
+            !debug.contains("super-secret-token"),
+            "api_token should be redacted: {debug}"
+        );
+        assert!(
+            debug.contains("zone-abc"),
+            "zone_id should be visible: {debug}"
+        );
+    }
 
     #[test]
     fn test_database_config_debug_redacts_password() {
