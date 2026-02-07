@@ -207,6 +207,7 @@ mod tests {
             resolvers: vec![],
             domains: vec!["example.com".to_string()],
             routes: std::collections::HashMap::new(),
+            cert_domains: vec![],
         };
 
         let cache = MapCache::new(Some(dns.clone()));

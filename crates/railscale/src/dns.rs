@@ -80,6 +80,7 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
         resolvers,
         domains,
         routes,
+        cert_domains: vec![],
     })
 }
 
@@ -109,6 +110,7 @@ fn generate_minimal_dns_config(config: &Config) -> Option<DnsConfig> {
         resolvers: vec![], // empty = don't override client's resolvers
         domains: vec![config.base_domain.clone()],
         routes,
+        cert_domains: vec![],
     })
 }
 

@@ -323,7 +323,40 @@ pub struct DnsConfig {
     /// split dns routes: maps dns name suffixes to resolvers.
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub routes: std::collections::HashMap<String, Vec<DnsResolver>>,
+
+    /// FQDNs for which the control plane will provision TLS certs via dns-01 ACME.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cert_domains: Vec<String>,
 }
+
+/// request from a node to set a dns record (used for ACME dns-01 challenges).
+///
+/// sent by the tailscale client to `/machine/set-dns` over the noise transport.
+/// the control server creates the specified record in public DNS so that
+/// let's encrypt can verify domain ownership.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SetDNSRequest {
+    /// client capability version.
+    pub version: CapabilityVersion,
+
+    /// the requesting node's current node key.
+    pub node_key: NodeKey,
+
+    /// dns record name, e.g. "_acme-challenge.mynode.tail.example.com".
+    pub name: String,
+
+    /// dns record type, typically "TXT".
+    #[serde(rename = "Type")]
+    pub record_type: String,
+
+    /// dns record value (the ACME challenge token).
+    pub value: String,
+}
+
+/// response to a SetDNSRequest. empty on success.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetDNSResponse {}
 
 /// derp map for relay servers.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -510,6 +543,127 @@ pub struct UserProfile {
         skip_serializing_if = "Option::is_none"
     )]
     pub profile_pic_url: Option<String>,
+}
+
+#[cfg(test)]
+mod set_dns_tests {
+    use super::*;
+
+    #[test]
+    fn set_dns_request_serde_roundtrip() {
+        let req = SetDNSRequest {
+            version: CapabilityVersion(106),
+            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            name: "_acme-challenge.mynode.tail.example.com".to_string(),
+            record_type: "TXT".to_string(),
+            value: "abc123-challenge-token".to_string(),
+        };
+
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: SetDNSRequest = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.version.0, 106);
+        assert_eq!(parsed.name, "_acme-challenge.mynode.tail.example.com");
+        assert_eq!(parsed.record_type, "TXT");
+        assert_eq!(parsed.value, "abc123-challenge-token");
+    }
+
+    #[test]
+    fn set_dns_request_uses_pascal_case() {
+        let req = SetDNSRequest {
+            version: CapabilityVersion(106),
+            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            name: "_acme-challenge.test.example.com".to_string(),
+            record_type: "TXT".to_string(),
+            value: "token".to_string(),
+        };
+
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(
+            json.contains("\"Version\""),
+            "expected PascalCase Version: {json}"
+        );
+        assert!(
+            json.contains("\"NodeKey\""),
+            "expected PascalCase NodeKey: {json}"
+        );
+        assert!(
+            json.contains("\"Name\""),
+            "expected PascalCase Name: {json}"
+        );
+        assert!(
+            json.contains("\"Type\""),
+            "expected PascalCase Type: {json}"
+        );
+        assert!(
+            json.contains("\"Value\""),
+            "expected PascalCase Value: {json}"
+        );
+    }
+
+    #[test]
+    fn set_dns_response_is_empty_json_object() {
+        let resp = SetDNSResponse {};
+        let json = serde_json::to_string(&resp).unwrap();
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn dns_config_cert_domains_roundtrip() {
+        let config = DnsConfig {
+            resolvers: vec![],
+            domains: vec![],
+            routes: Default::default(),
+            cert_domains: vec![
+                "mynode.tail.example.com".to_string(),
+                "other.tail.example.com".to_string(),
+            ],
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            json.contains("\"CertDomains\""),
+            "expected CertDomains field: {json}"
+        );
+
+        let parsed: DnsConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.cert_domains.len(), 2);
+        assert_eq!(parsed.cert_domains[0], "mynode.tail.example.com");
+    }
+
+    #[test]
+    fn dns_config_cert_domains_omitted_when_empty() {
+        let config = DnsConfig {
+            resolvers: vec![],
+            domains: vec![],
+            routes: Default::default(),
+            cert_domains: vec![],
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            !json.contains("CertDomains"),
+            "empty cert_domains should be omitted: {json}"
+        );
+    }
+
+    #[test]
+    fn set_dns_request_from_tailscale_json() {
+        // simulate what a real tailscale client sends
+        let json = r#"{
+            "Version": 131,
+            "NodeKey": "nodekey:0101010101010101010101010101010101010101010101010101010101010101",
+            "Name": "_acme-challenge.mynode.tail.example.com",
+            "Type": "TXT",
+            "Value": "dGVzdC1jaGFsbGVuZ2UtdmFsdWU"
+        }"#;
+
+        let req: SetDNSRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.version.0, 131);
+        assert_eq!(req.name, "_acme-challenge.mynode.tail.example.com");
+        assert_eq!(req.record_type, "TXT");
+        assert_eq!(req.value, "dGVzdC1jaGFsbGVuZ2UtdmFsdWU");
+    }
 }
 
 #[cfg(test)]

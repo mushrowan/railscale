@@ -696,7 +696,7 @@ async fn handle_preauth_registration(
 
     let now = chrono::Utc::now();
 
-    let node = if let Some(mut existing) = existing_node {
+    let _node = if let Some(mut existing) = existing_node {
         // re-registration: update existing node's key and metadata in place
         // this preserves the node's IP allocation and identity
         tracing::info!(
