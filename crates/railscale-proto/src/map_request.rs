@@ -399,6 +399,14 @@ pub struct FilterRule {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dst_ports: Vec<NetPortRange>,
 
+    /// ip protocol numbers to match.
+    ///
+    /// empty means tcp, udp, and icmp (the client default).
+    /// when a specific protocol is set (e.g. icmp only), contains those
+    /// iana protocol numbers. icmp includes both v4 (1) and v6 (58).
+    #[serde(rename = "IPProto", default, skip_serializing_if = "Vec::is_empty")]
+    pub ip_proto: Vec<i32>,
+
     /// application capability grants. mutually exclusive with dst_ports.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cap_grant: Vec<CapGrant>,
@@ -552,6 +560,7 @@ mod proptests {
                     .into_iter()
                     .map(|(ip, ports)| NetPortRange { ip, ports })
                     .collect(),
+                ip_proto: vec![],
                 cap_grant: vec![],
             })
     }
@@ -806,6 +815,7 @@ mod proptests {
         let rule = FilterRule {
             src_ips: vec!["*".to_string()],
             dst_ports: vec![],
+            ip_proto: vec![],
             cap_grant: vec![CapGrant {
                 dsts: vec!["100.64.0.0/10".to_string()],
                 cap_map,
@@ -834,6 +844,7 @@ mod proptests {
                 ip: "100.64.0.2".to_string(),
                 ports: PortRange::single(443),
             }],
+            ip_proto: vec![],
             cap_grant: vec![],
         };
 

@@ -137,6 +137,17 @@ impl Protocol {
             Protocol::Sctp => 132,
         }
     }
+
+    /// get ip protocol numbers for filter rules.
+    ///
+    /// icmp returns both v4 (1) and v6 (58) per tailscale convention.
+    /// all other protocols return a single number.
+    pub fn ip_proto_numbers(&self) -> Vec<i32> {
+        match self {
+            Protocol::Icmp => vec![1, 58],
+            other => vec![other.number() as i32],
+        }
+    }
 }
 
 impl NetworkCapability {

@@ -129,6 +129,8 @@ impl GrantsEngine {
     /// generate filter rules for the mapresponse.
     ///
     /// returns rules that define which peers can access this node and on which ports.
+    /// capabilities with different protocols produce separate filter rules, each
+    /// with the appropriate `ip_proto` field set.
     pub fn generate_filter_rules<R: UserResolver>(
         &self,
         node: &Node,
@@ -150,17 +152,19 @@ impl GrantsEngine {
                 continue;
             }
 
-            // convert capabilities to port ranges
-            let dst_ports = self.capabilities_to_port_ranges(&caps, &node.ips());
-            if dst_ports.is_empty() {
-                continue;
+            // group capabilities by protocol signature
+            let grouped = self.group_capabilities_by_protocol(&caps, &node.ips());
+            for (ip_proto, dst_ports) in grouped {
+                if dst_ports.is_empty() {
+                    continue;
+                }
+                rules.push(FilterRule {
+                    src_ips: src_ips.clone(),
+                    dst_ports,
+                    ip_proto,
+                    cap_grant: vec![],
+                });
             }
-
-            rules.push(FilterRule {
-                src_ips,
-                dst_ports,
-                cap_grant: vec![],
-            });
         }
 
         rules
@@ -213,6 +217,7 @@ impl GrantsEngine {
             rules.push(FilterRule {
                 src_ips,
                 dst_ports: vec![],
+                ip_proto: vec![],
                 cap_grant: vec![CapGrant { dsts, cap_map }],
             });
         }
@@ -295,75 +300,69 @@ impl GrantsEngine {
         vec![FilterRule {
             src_ips,
             dst_ports: vec![],
+            ip_proto: vec![],
             cap_grant: vec![CapGrant { dsts, cap_map }],
         }]
     }
 
-    /// convert network capabilities to port ranges.
-    fn capabilities_to_port_ranges(
+    /// group network capabilities by protocol and convert to port ranges.
+    ///
+    /// returns `(ip_proto, dst_ports)` pairs. capabilities without a specific
+    /// protocol (Wildcard, Port, PortRange) get empty ip_proto (client default
+    /// of TCP+UDP+ICMP). protocol-specific capabilities get grouped by their
+    /// ip_proto numbers.
+    fn group_capabilities_by_protocol(
         &self,
         caps: &[NetworkCapability],
         dst_ips: &[std::net::IpAddr],
-    ) -> Vec<NetPortRange> {
-        let mut port_ranges = Vec::new();
+    ) -> Vec<(Vec<i32>, Vec<NetPortRange>)> {
+        
+        use std::collections::BTreeMap;
 
-        for dst_ip in dst_ips {
-            for cap in caps {
-                match cap {
-                    NetworkCapability::Wildcard => {
-                        // all ports on all protocols (simplify to common protocols)
-                        port_ranges.push(NetPortRange {
-                            ip: dst_ip.to_string(),
-                            ports: PortRange::any(),
-                        });
-                    }
-                    NetworkCapability::Port(port) => {
-                        port_ranges.push(NetPortRange {
-                            ip: dst_ip.to_string(),
-                            ports: PortRange::single(*port),
-                        });
-                    }
-                    NetworkCapability::PortRange { start, end } => {
-                        port_ranges.push(NetPortRange {
-                            ip: dst_ip.to_string(),
-                            ports: PortRange {
-                                first: *start,
-                                last: *end,
-                            },
-                        });
-                    }
-                    NetworkCapability::ProtocolPort { protocol: _, port } => {
-                        // for now, ignore protocol distinction in filter rules
-                        port_ranges.push(NetPortRange {
-                            ip: dst_ip.to_string(),
-                            ports: PortRange::single(*port),
-                        });
-                    }
-                    NetworkCapability::ProtocolPortRange {
-                        protocol: _,
-                        start,
-                        end,
-                    } => {
-                        port_ranges.push(NetPortRange {
-                            ip: dst_ip.to_string(),
-                            ports: PortRange {
-                                first: *start,
-                                last: *end,
-                            },
-                        });
-                    }
-                    NetworkCapability::ProtocolWildcard { protocol: _ } => {
-                        // all ports for this protocol
-                        port_ranges.push(NetPortRange {
-                            ip: dst_ip.to_string(),
-                            ports: PortRange::any(),
-                        });
-                    }
+        // group: ip_proto key -> port ranges
+        // empty vec key = no protocol specified (default)
+        let mut groups: BTreeMap<Vec<i32>, Vec<NetPortRange>> = BTreeMap::new();
+
+        for cap in caps {
+            let (ip_proto, ports) = match cap {
+                NetworkCapability::Wildcard => (vec![], PortRange::any()),
+                NetworkCapability::Port(port) => (vec![], PortRange::single(*port)),
+                NetworkCapability::PortRange { start, end } => (
+                    vec![],
+                    PortRange {
+                        first: *start,
+                        last: *end,
+                    },
+                ),
+                NetworkCapability::ProtocolPort { protocol, port } => {
+                    (protocol.ip_proto_numbers(), PortRange::single(*port))
                 }
+                NetworkCapability::ProtocolPortRange {
+                    protocol,
+                    start,
+                    end,
+                } => (
+                    protocol.ip_proto_numbers(),
+                    PortRange {
+                        first: *start,
+                        last: *end,
+                    },
+                ),
+                NetworkCapability::ProtocolWildcard { protocol } => {
+                    (protocol.ip_proto_numbers(), PortRange::any())
+                }
+            };
+
+            let group = groups.entry(ip_proto).or_default();
+            for dst_ip in dst_ips {
+                group.push(NetPortRange {
+                    ip: dst_ip.to_string(),
+                    ports: ports.clone(),
+                });
             }
         }
 
-        port_ranges
+        groups.into_iter().collect()
     }
 
     /// find all grants where src matches src selectors and dst matches dst selectors.
@@ -675,6 +674,7 @@ impl Clone for GrantsEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::Protocol;
     use crate::grant::Grant;
     use railscale_types::{UserId, test_utils::TestNodeBuilder};
     use std::collections::HashMap;
@@ -1702,6 +1702,146 @@ mod tests {
             rules.is_empty(),
             "tagged nodes should not get taildrop rules"
         );
+    }
+
+    #[test]
+    fn test_filter_rules_tcp_port_sets_ip_proto() {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::ProtocolPort {
+                protocol: Protocol::Tcp,
+                port: 22,
+            }],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+        let node1 = test_node(1, vec![]);
+        let node2 = test_node(2, vec![]);
+
+        let rules = engine.generate_filter_rules(&node2, &[node1], &resolver);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].ip_proto, vec![6]); // TCP = 6
+        assert_eq!(rules[0].dst_ports.len(), 1); // one per dst IP (ipv4 only)
+        assert_eq!(rules[0].dst_ports[0].ports.first, 22);
+        assert_eq!(rules[0].dst_ports[0].ports.last, 22);
+    }
+
+    #[test]
+    fn test_filter_rules_icmp_wildcard_sets_both_v4_v6() {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::ProtocolWildcard {
+                protocol: Protocol::Icmp,
+            }],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+        let node1 = test_node(1, vec![]);
+        let node2 = test_node(2, vec![]);
+
+        let rules = engine.generate_filter_rules(&node2, &[node1], &resolver);
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].ip_proto, vec![1, 58]); // ICMPv4 + ICMPv6
+    }
+
+    #[test]
+    fn test_filter_rules_no_protocol_has_empty_ip_proto() {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Port(443)],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+        let node1 = test_node(1, vec![]);
+        let node2 = test_node(2, vec![]);
+
+        let rules = engine.generate_filter_rules(&node2, &[node1], &resolver);
+        assert_eq!(rules.len(), 1);
+        assert!(rules[0].ip_proto.is_empty()); // default = TCP+UDP+ICMP
+    }
+
+    #[test]
+    fn test_filter_rules_mixed_protocols_produce_separate_rules() {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![
+                NetworkCapability::ProtocolPort {
+                    protocol: Protocol::Tcp,
+                    port: 22,
+                },
+                NetworkCapability::ProtocolPort {
+                    protocol: Protocol::Udp,
+                    port: 53,
+                },
+                NetworkCapability::ProtocolWildcard {
+                    protocol: Protocol::Icmp,
+                },
+            ],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+        let node1 = test_node(1, vec![]);
+        let node2 = test_node(2, vec![]);
+
+        let rules = engine.generate_filter_rules(&node2, &[node1], &resolver);
+        // should produce 3 rules: one per protocol
+        assert_eq!(rules.len(), 3);
+
+        // find each rule by ip_proto
+        let tcp_rule = rules.iter().find(|r| r.ip_proto == vec![6]).unwrap();
+        let udp_rule = rules.iter().find(|r| r.ip_proto == vec![17]).unwrap();
+        let icmp_rule = rules.iter().find(|r| r.ip_proto == vec![1, 58]).unwrap();
+
+        assert_eq!(tcp_rule.dst_ports[0].ports.first, 22);
+        assert_eq!(udp_rule.dst_ports[0].ports.first, 53);
+        assert_eq!(icmp_rule.dst_ports[0].ports.first, 0);
+        assert_eq!(icmp_rule.dst_ports[0].ports.last, 65535);
+    }
+
+    #[test]
+    fn test_filter_rules_wildcard_cap_has_empty_ip_proto() {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+        let node1 = test_node(1, vec![]);
+        let node2 = test_node(2, vec![]);
+
+        let rules = engine.generate_filter_rules(&node2, &[node1], &resolver);
+        assert_eq!(rules.len(), 1);
+        assert!(rules[0].ip_proto.is_empty()); // wildcard = default
     }
 
     #[test]
