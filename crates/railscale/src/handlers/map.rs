@@ -394,7 +394,6 @@ async fn build_map_response(
 
     // use shared derp map from state (generated once at startup)
     let derp_map = state.derp_map.read().await.clone();
-    let home_derp = derp_map.regions.keys().next().copied().unwrap_or(1);
 
     // fetch tka info from database
     let tka_info = get_tka_info(&state.db).await;
@@ -415,7 +414,6 @@ async fn build_map_response(
         // self is always online when making this request
         let mut self_node = node_to_map_response_node(
             &node,
-            home_derp,
             Some(true),
             self_sig.as_deref(),
             &state.config.base_domain,
@@ -514,13 +512,8 @@ async fn build_map_response(
 
     // build self node with capabilities (self is always online if we're making this request)
     let self_sig = key_signatures.get(&node.id).map(|v| v.as_slice());
-    let mut self_node = node_to_map_response_node(
-        &node,
-        home_derp,
-        Some(true),
-        self_sig,
-        &state.config.base_domain,
-    );
+    let mut self_node =
+        node_to_map_response_node(&node, Some(true), self_sig, &state.config.base_domain);
     self_node.cap_map = build_self_cap_map(&state.config);
 
     // get online status for all visible peers
@@ -533,7 +526,7 @@ async fn build_map_response(
         .map(|n| {
             let online = online_statuses.get(&n.id).copied();
             let sig = key_signatures.get(&n.id).map(|v| v.as_slice());
-            node_to_map_response_node(n, home_derp, online, sig, &state.config.base_domain)
+            node_to_map_response_node(n, online, sig, &state.config.base_domain)
         })
         .collect();
 
@@ -596,11 +589,17 @@ fn ip_to_cidr(ip: std::net::IpAddr) -> String {
 /// is approved by tailnet lock.
 fn node_to_map_response_node(
     node: &Node,
-    home_derp: i32,
     online: Option<bool>,
     key_sig: Option<&[u8]>,
     base_domain: &str,
 ) -> MapResponseNode {
+    // derive home derp from client's reported preferred region
+    let home_derp = node
+        .hostinfo
+        .as_ref()
+        .and_then(|h| h.net_info.as_ref())
+        .map(|n| n.preferred_derp)
+        .unwrap_or(0);
     // addresses must be in cidr notation for tailscale client
     let mut addresses = Vec::new();
     if let Some(ip) = node.ipv4 {
@@ -701,7 +700,7 @@ mod tests {
 
         let sig_bytes = vec![0xde, 0xad, 0xbe, 0xef];
         let result =
-            node_to_map_response_node(&node, 1, Some(true), Some(&sig_bytes), "railscale.net");
+            node_to_map_response_node(&node, Some(true), Some(&sig_bytes), "railscale.net");
 
         assert!(
             !result.key_signature.is_empty(),
@@ -737,7 +736,7 @@ mod tests {
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
 
-        let result = node_to_map_response_node(&node, 1, Some(true), None, "railscale.net");
+        let result = node_to_map_response_node(&node, Some(true), None, "railscale.net");
 
         assert!(
             result.key_signature.is_empty(),
@@ -752,7 +751,7 @@ mod tests {
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
 
-        let result = node_to_map_response_node(&node, 1, Some(true), None, "example.com");
+        let result = node_to_map_response_node(&node, Some(true), None, "example.com");
         assert_eq!(result.name, "myhost.example.com.");
     }
 
@@ -764,7 +763,7 @@ mod tests {
             .build();
         node.given_name = "renamed".to_string();
 
-        let result = node_to_map_response_node(&node, 1, Some(true), None, "example.com");
+        let result = node_to_map_response_node(&node, Some(true), None, "example.com");
         assert_eq!(result.name, "renamed.example.com.");
     }
 
@@ -774,7 +773,7 @@ mod tests {
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
 
-        let result = node_to_map_response_node(&node, 1, Some(true), None, "example.com");
+        let result = node_to_map_response_node(&node, Some(true), None, "example.com");
         assert_eq!(result.cap, railscale_proto::CapabilityVersion::CURRENT.0);
         assert_ne!(result.cap, 0);
     }
@@ -786,7 +785,36 @@ mod tests {
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
 
-        let result = node_to_map_response_node(&node, 1, Some(true), None, "");
+        let result = node_to_map_response_node(&node, Some(true), None, "");
         assert_eq!(result.name, "myhost.");
+    }
+
+    #[test]
+    fn test_home_derp_from_preferred_derp() {
+        use railscale_types::{HostInfo, NetInfo};
+
+        let node = TestNodeBuilder::new(1)
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .with_hostinfo(HostInfo {
+                net_info: Some(NetInfo {
+                    preferred_derp: 3,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .build();
+
+        let result = node_to_map_response_node(&node, Some(true), None, "example.com");
+        assert_eq!(result.home_derp, 3);
+    }
+
+    #[test]
+    fn test_home_derp_zero_when_no_hostinfo() {
+        let node = TestNodeBuilder::new(1)
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+
+        let result = node_to_map_response_node(&node, Some(true), None, "example.com");
+        assert_eq!(result.home_derp, 0);
     }
 }
