@@ -126,6 +126,64 @@ impl GrantsEngine {
             .collect()
     }
 
+    /// auto-approve routes for a node based on the autoApprovers policy.
+    ///
+    /// checks each of the node's advertised routes (from hostinfo.routable_ips)
+    /// against the policy. a route is approved if the node matches any selector
+    /// for that route prefix (exact match or supernet). exit routes (0.0.0.0/0,
+    /// ::/0) are checked against the separate exit_node selectors.
+    ///
+    /// returns the list of routes that should be approved. never removes
+    /// previously approved routes — only returns new approvals.
+    pub fn auto_approve_routes<R: UserResolver>(
+        &self,
+        node: &Node,
+        resolver: &R,
+    ) -> Vec<ipnet::IpNet> {
+        let announced = node.announced_routes();
+        if announced.is_empty() {
+            return vec![];
+        }
+
+        let auto_approvers = &self.policy.auto_approvers;
+        let mut approved = Vec::new();
+
+        for route in announced {
+            let is_exit = match route {
+                ipnet::IpNet::V4(net) => net.prefix_len() == 0,
+                ipnet::IpNet::V6(net) => net.prefix_len() == 0,
+            };
+
+            if is_exit {
+                // check exit_node selectors
+                if self.node_matches_selectors(node, &auto_approvers.exit_node, resolver, None) {
+                    approved.push(*route);
+                }
+                continue;
+            }
+
+            // check route selectors — exact match or supernet
+            for (prefix_str, selectors) in &auto_approvers.routes {
+                let Ok(policy_prefix) = prefix_str.parse::<ipnet::IpNet>() else {
+                    continue;
+                };
+
+                // route is approved if it's a subset of (or equal to) the policy prefix
+                let route_within_policy = policy_prefix.contains(&route.network())
+                    && policy_prefix.prefix_len() <= route.prefix_len();
+
+                if route_within_policy
+                    && self.node_matches_selectors(node, selectors, resolver, None)
+                {
+                    approved.push(*route);
+                    break; // only need one matching policy entry
+                }
+            }
+        }
+
+        approved
+    }
+
     /// generate filter rules for the mapresponse.
     ///
     /// returns rules that define which peers can access this node and on which ports.
@@ -1841,6 +1899,155 @@ mod tests {
         let rules = engine.generate_filter_rules(&node2, &[node1], &resolver);
         assert_eq!(rules.len(), 1);
         assert!(rules[0].ip_proto.is_empty()); // wildcard = default
+    }
+
+    #[test]
+    fn test_auto_approve_routes_tagged_node() {
+        use crate::policy::AutoApproverPolicy;
+
+        let mut policy = Policy::empty();
+        policy.auto_approvers = AutoApproverPolicy {
+            routes: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(
+                    "10.0.0.0/8".to_string(),
+                    vec![Selector::Tag("infra".to_string())],
+                );
+                m
+            },
+            exit_node: vec![],
+        };
+        // need a grant so nodes exist in the tailnet
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+
+        // tagged node advertising a matching subnet
+        let mut node = test_node(1, vec!["tag:infra"]);
+        node.hostinfo = Some(railscale_types::HostInfo {
+            routable_ips: vec!["10.0.0.0/8".parse().unwrap()],
+            ..Default::default()
+        });
+
+        let approved = engine.auto_approve_routes(&node, &resolver);
+        assert_eq!(
+            approved,
+            vec!["10.0.0.0/8".parse::<ipnet::IpNet>().unwrap()]
+        );
+    }
+
+    #[test]
+    fn test_auto_approve_routes_no_match() {
+        use crate::policy::AutoApproverPolicy;
+
+        let mut policy = Policy::empty();
+        policy.auto_approvers = AutoApproverPolicy {
+            routes: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(
+                    "10.0.0.0/8".to_string(),
+                    vec![Selector::Tag("infra".to_string())],
+                );
+                m
+            },
+            exit_node: vec![],
+        };
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+
+        // node without matching tag
+        let mut node = test_node(1, vec!["tag:web"]);
+        node.hostinfo = Some(railscale_types::HostInfo {
+            routable_ips: vec!["10.0.0.0/8".parse().unwrap()],
+            ..Default::default()
+        });
+
+        let approved = engine.auto_approve_routes(&node, &resolver);
+        assert!(approved.is_empty());
+    }
+
+    #[test]
+    fn test_auto_approve_exit_node() {
+        use crate::policy::AutoApproverPolicy;
+
+        let mut policy = Policy::empty();
+        policy.auto_approvers = AutoApproverPolicy {
+            routes: std::collections::HashMap::new(),
+            exit_node: vec![Selector::Tag("exit".to_string())],
+        };
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+
+        let mut node = test_node(1, vec!["tag:exit"]);
+        node.hostinfo = Some(railscale_types::HostInfo {
+            routable_ips: vec!["0.0.0.0/0".parse().unwrap(), "::/0".parse().unwrap()],
+            ..Default::default()
+        });
+
+        let approved = engine.auto_approve_routes(&node, &resolver);
+        assert_eq!(approved.len(), 2);
+        assert!(approved.contains(&"0.0.0.0/0".parse::<ipnet::IpNet>().unwrap()));
+        assert!(approved.contains(&"::/0".parse::<ipnet::IpNet>().unwrap()));
+    }
+
+    #[test]
+    fn test_auto_approve_subset_route() {
+        use crate::policy::AutoApproverPolicy;
+
+        // policy approves 10.0.0.0/8, node advertises 10.0.1.0/24 (subset)
+        let mut policy = Policy::empty();
+        policy.auto_approvers = AutoApproverPolicy {
+            routes: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(
+                    "10.0.0.0/8".to_string(),
+                    vec![Selector::Tag("infra".to_string())],
+                );
+                m
+            },
+            exit_node: vec![],
+        };
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+
+        let mut node = test_node(1, vec!["tag:infra"]);
+        node.hostinfo = Some(railscale_types::HostInfo {
+            routable_ips: vec!["10.0.1.0/24".parse().unwrap()],
+            ..Default::default()
+        });
+
+        let approved = engine.auto_approve_routes(&node, &resolver);
+        assert_eq!(
+            approved,
+            vec!["10.0.1.0/24".parse::<ipnet::IpNet>().unwrap()]
+        );
+    }
+
+    #[test]
+    fn test_auto_approve_empty_policy() {
+        let policy = Policy::empty();
+        let engine = GrantsEngine::new(policy);
+        let resolver = MockResolver::new();
+
+        let mut node = test_node(1, vec![]);
+        node.hostinfo = Some(railscale_types::HostInfo {
+            routable_ips: vec!["10.0.0.0/8".parse().unwrap()],
+            ..Default::default()
+        });
+
+        let approved = engine.auto_approve_routes(&node, &resolver);
+        assert!(approved.is_empty());
     }
 
     #[test]

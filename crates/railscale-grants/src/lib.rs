@@ -23,7 +23,7 @@ pub use error::{Error, ParseError, Result, ValidationError};
 pub use geoip::MaxmindDbResolver;
 pub use geoip::{GeoIpResolver, NoopGeoIpResolver};
 pub use grant::Grant;
-pub use policy::Policy;
+pub use policy::{AutoApproverPolicy, Policy};
 pub use posture::{PostureAttr, PostureContext, PostureExpr, PostureOp, PostureParseError};
 pub use selector::{Autogroup, Selector};
 pub use ssh::{SshActionType, SshPolicyRule, build_ssh_users_map};

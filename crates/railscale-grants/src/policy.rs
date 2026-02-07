@@ -6,7 +6,36 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 use crate::grant::Grant;
+use crate::selector::Selector;
 use crate::ssh::SshPolicyRule;
+
+/// auto-approver policy for subnet routes and exit nodes.
+///
+/// maps route prefixes to lists of selectors that identify which nodes
+/// can self-approve those routes. when a node advertises a route and
+/// matches a selector, the route is automatically approved.
+///
+/// # Example
+///
+/// ```json
+/// {
+///   "routes": {
+///     "10.0.0.0/8": ["tag:infra"],
+///     "0.0.0.0/0": ["tag:exit-node"]
+///   },
+///   "exitNode": ["tag:exit-node"]
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AutoApproverPolicy {
+    /// route prefix -> selectors that can auto-approve.
+    #[serde(default)]
+    pub routes: HashMap<String, Vec<Selector>>,
+
+    /// selectors that can auto-approve exit node routes (0.0.0.0/0, ::/0).
+    #[serde(default, rename = "exitNode")]
+    pub exit_node: Vec<Selector>,
+}
 
 /// the complete policy document.
 ///
@@ -58,6 +87,10 @@ pub struct Policy {
     /// ssh rules for controlling ssh access
     #[serde(default)]
     pub ssh: Vec<SshPolicyRule>,
+
+    /// auto-approver policy for subnet routes and exit nodes.
+    #[serde(default, rename = "autoApprovers")]
+    pub auto_approvers: AutoApproverPolicy,
 }
 
 impl Policy {
@@ -158,6 +191,7 @@ mod proptests {
                 default_src_posture: vec![],
                 grants: vec![],
                 ssh: vec![],
+                auto_approvers: Default::default(),
             };
 
             let json = serde_json::to_string(&policy).unwrap();

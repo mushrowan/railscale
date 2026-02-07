@@ -1,1 +1,2 @@
 - [x] acceptEnv in ssh access control
+- [ ] /machine/set-dns endpoint for tailscale cert ACME dns-01 challenges (needs external DNS integration strategy — webhook, built-in DNS server, or polling API)

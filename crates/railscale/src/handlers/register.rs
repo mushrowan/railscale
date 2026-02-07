@@ -727,6 +727,20 @@ async fn handle_preauth_registration(
         nl_public_key,
     };
 
+    // auto-approve routes based on policy
+    let grants = state.grants.read().await;
+    let auto_approved = grants.auto_approve_routes(&node, &railscale_grants::engine::EmptyResolver);
+    drop(grants);
+    let mut node = node;
+    if !auto_approved.is_empty() {
+        tracing::info!(
+            node_id = ?node.hostname,
+            routes = ?auto_approved,
+            "auto-approved routes from policy"
+        );
+        node.approved_routes = auto_approved;
+    }
+
     let _node = state.db.create_node(&node).await.map_internal()?;
 
     // notify streaming clients that a new node has been added
