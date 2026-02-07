@@ -413,8 +413,13 @@ async fn build_map_response(
         };
 
         // self is always online when making this request
-        let mut self_node =
-            node_to_map_response_node(&node, home_derp, Some(true), self_sig.as_deref());
+        let mut self_node = node_to_map_response_node(
+            &node,
+            home_derp,
+            Some(true),
+            self_sig.as_deref(),
+            &state.config.base_domain,
+        );
         self_node.cap_map = build_self_cap_map(&state.config);
 
         return Ok(MapResponse {
@@ -428,6 +433,7 @@ async fn build_map_response(
             control_time: Some(chrono::Utc::now().to_rfc3339()),
             ssh_policy: None,
             tka_info,
+            domain: state.config.base_domain.clone(),
         });
     }
 
@@ -508,7 +514,13 @@ async fn build_map_response(
 
     // build self node with capabilities (self is always online if we're making this request)
     let self_sig = key_signatures.get(&node.id).map(|v| v.as_slice());
-    let mut self_node = node_to_map_response_node(&node, home_derp, Some(true), self_sig);
+    let mut self_node = node_to_map_response_node(
+        &node,
+        home_derp,
+        Some(true),
+        self_sig,
+        &state.config.base_domain,
+    );
     self_node.cap_map = build_self_cap_map(&state.config);
 
     // get online status for all visible peers
@@ -521,7 +533,7 @@ async fn build_map_response(
         .map(|n| {
             let online = online_statuses.get(&n.id).copied();
             let sig = key_signatures.get(&n.id).map(|v| v.as_slice());
-            node_to_map_response_node(n, home_derp, online, sig)
+            node_to_map_response_node(n, home_derp, online, sig, &state.config.base_domain)
         })
         .collect();
 
@@ -539,6 +551,7 @@ async fn build_map_response(
         control_time: Some(chrono::Utc::now().to_rfc3339()),
         ssh_policy,
         tka_info,
+        domain: state.config.base_domain.clone(),
     })
 }
 
@@ -586,6 +599,7 @@ fn node_to_map_response_node(
     home_derp: i32,
     online: Option<bool>,
     key_sig: Option<&[u8]>,
+    base_domain: &str,
 ) -> MapResponseNode {
     // addresses must be in cidr notation for tailscale client
     let mut addresses = Vec::new();
@@ -602,10 +616,17 @@ fn node_to_map_response_node(
     MapResponseNode {
         id: node.id.0,
         stable_id: node.id.stable_id(),
-        name: if node.given_name.is_empty() {
-            node.hostname.clone()
-        } else {
-            node.given_name.clone()
+        name: {
+            let hostname = if node.given_name.is_empty() {
+                &node.hostname
+            } else {
+                &node.given_name
+            };
+            if base_domain.is_empty() {
+                format!("{}.", hostname)
+            } else {
+                format!("{}.{}.", hostname, base_domain)
+            }
         },
         node_key: node.node_key.clone(),
         machine_key: node.machine_key.clone(),
@@ -678,7 +699,8 @@ mod tests {
             .build();
 
         let sig_bytes = vec![0xde, 0xad, 0xbe, 0xef];
-        let result = node_to_map_response_node(&node, 1, Some(true), Some(&sig_bytes));
+        let result =
+            node_to_map_response_node(&node, 1, Some(true), Some(&sig_bytes), "railscale.net");
 
         assert!(
             !result.key_signature.is_empty(),
@@ -714,11 +736,45 @@ mod tests {
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
 
-        let result = node_to_map_response_node(&node, 1, Some(true), None);
+        let result = node_to_map_response_node(&node, 1, Some(true), None, "railscale.net");
 
         assert!(
             result.key_signature.is_empty(),
             "key_signature should be empty when not provided"
         );
+    }
+
+    #[test]
+    fn test_node_name_is_fqdn_with_trailing_dot() {
+        let node = TestNodeBuilder::new(1)
+            .with_hostname("myhost")
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+
+        let result = node_to_map_response_node(&node, 1, Some(true), None, "example.com");
+        assert_eq!(result.name, "myhost.example.com.");
+    }
+
+    #[test]
+    fn test_node_name_uses_given_name_over_hostname() {
+        let mut node = TestNodeBuilder::new(1)
+            .with_hostname("original")
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+        node.given_name = "renamed".to_string();
+
+        let result = node_to_map_response_node(&node, 1, Some(true), None, "example.com");
+        assert_eq!(result.name, "renamed.example.com.");
+    }
+
+    #[test]
+    fn test_node_name_empty_base_domain() {
+        let node = TestNodeBuilder::new(1)
+            .with_hostname("myhost")
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+
+        let result = node_to_map_response_node(&node, 1, Some(true), None, "");
+        assert_eq!(result.name, "myhost.");
     }
 }

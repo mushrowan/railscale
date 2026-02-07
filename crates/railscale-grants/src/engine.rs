@@ -316,7 +316,6 @@ impl GrantsEngine {
         caps: &[NetworkCapability],
         dst_ips: &[std::net::IpAddr],
     ) -> Vec<(Vec<i32>, Vec<NetPortRange>)> {
-        
         use std::collections::BTreeMap;
 
         // group: ip_proto key -> port ranges

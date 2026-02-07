@@ -155,6 +155,13 @@ pub struct MapResponse {
     /// non-nil with disabled=true means tka should be disabled.
     #[serde(rename = "TKAInfo", default, skip_serializing_if = "Option::is_none")]
     pub tka_info: Option<TkaInfo>,
+
+    /// tailnet domain name.
+    ///
+    /// used by clients for display and MagicDNS FQDN construction.
+    /// e.g. "example.com" or "user@gmail.com".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub domain: String,
 }
 
 impl MapResponse {
@@ -171,6 +178,7 @@ impl MapResponse {
             control_time: None,
             ssh_policy: None,
             tka_info: None,
+            domain: String::new(),
         }
     }
 }
@@ -582,6 +590,7 @@ mod proptests {
                 control_time: None,
                 ssh_policy: None,
                 tka_info: None,
+                domain: String::new(),
             })
     }
 
