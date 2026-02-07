@@ -3055,6 +3055,7 @@ dependencies = [
  "futures-util",
  "governor",
  "hex",
+ "hmac",
  "http",
  "http-body-util",
  "httparse",

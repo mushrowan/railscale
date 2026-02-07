@@ -17,6 +17,8 @@ pub mod derp;
 /// embedded derp relay server implementation.
 pub mod derp_server;
 mod dns;
+/// dns provider implementations for ACME dns-01 challenges
+pub mod dns_provider;
 mod ephemeral;
 /// http request handlers for tailscale protocol endpoints.
 pub mod handlers;
