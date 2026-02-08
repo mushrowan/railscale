@@ -1,7 +1,8 @@
 - [x] acceptEnv in ssh access control
 - [ ] /machine/set-dns endpoint for tailscale cert ACME dns-01 challenges
-  - DnsProvider trait with cloudflare, godaddy, webhook backends
-  - CertDomains in MapResponse DnsConfig
-  - dns_challenge_records table for tracking created records
-  - background cleanup task for stale TXT records
+  - [x] DnsProvider trait with cloudflare, godaddy, webhook backends
+  - [x] CertDomains in MapResponse DnsConfig
+  - [ ] dns_challenge_records table for tracking created records
+  - [ ] /machine/set-dns handler
+  - [ ] background cleanup task for stale TXT records
 - [ ] (v2, later) wildcard certs per node — *.node.base_domain in CertDomains, requires MagicDNS wildcard resolution support first. do not start until basic cert flow is solid

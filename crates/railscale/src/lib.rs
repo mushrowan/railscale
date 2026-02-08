@@ -457,6 +457,8 @@ fn build_protocol_router(state: &AppState) -> Router {
         .route("/machine/tka/sync/send", post(handlers::tka_sync_send))
         .route("/machine/tka/disable", post(handlers::tka_disable))
         .route("/machine/tka/sign", post(handlers::tka_sign))
+        // dns challenge for tailscale cert
+        .route("/machine/set-dns", post(handlers::set_dns))
         .layer(DefaultBodyLimit::max(64 * 1024));
 
     // build verify router with rate limiting and IP allowlist
