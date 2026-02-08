@@ -65,12 +65,16 @@
 - map handler wires both into `packet_filter` (gated on `taildrop_enabled` for taildrop rules)
 - headscale doesn't implement any of this — railscale is first open-source implementation
 
-## tailscale cert / set-dns — in progress
+## tailscale cert / set-dns — complete
 - **proto types**: `SetDNSRequest`, `SetDNSResponse`, `cert_domains` on `DnsConfig`
 - **config**: `DnsProviderConfig` enum (cloudflare, godaddy, webhook) with secret redaction
 - **dns_provider trait**: `DnsProvider` async trait with `DnsProviderBoxed` object-safe wrapper, `from_config()` factory
 - **cloudflare**: POST/DELETE to zones API with bearer auth, wiremock-tested
 - **godaddy**: PUT to domains/records API with sso-key auth, `relative_name()` for FQDN→record name
 - **webhook**: POST JSON with optional HMAC-SHA256 `X-Signature` header, wiremock-tested
-- 18 unit + integration tests across all providers
-- still TODO: AppState wiring, DB migration, `/machine/set-dns` handler, CertDomains in map, cleanup task
+- **AppState wiring**: `dns_provider: Option<Arc<dyn DnsProviderBoxed>>` on AppState, constructed from config
+- **CertDomains in map**: `with_cert_domains()` stamps per-node cert domain when dns_provider configured
+- **DB migration 000013**: `dns_challenge_records` table with FK to nodes, record_name, record_id, created_at
+- **`/machine/set-dns` handler**: validates node auth + TXT type + name matches cert domain, delegates to provider, persists record
+- **cleanup task**: `DnsChallengeGarbageCollector` removes stale TXT records (>10 min) every 60s
+- 25+ unit + integration tests across providers, handler, and GC
