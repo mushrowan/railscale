@@ -17,6 +17,7 @@ pub mod derp;
 /// embedded derp relay server implementation.
 pub mod derp_server;
 mod dns;
+mod dns_challenge_gc;
 /// dns provider implementations for ACME dns-01 challenges
 pub mod dns_provider;
 mod ephemeral;
@@ -399,6 +400,16 @@ pub async fn create_app_routers_with_policy_handle(
                 &config.base_domain,
             ))
         });
+
+    // spawn dns challenge cleanup task (runs every 60 seconds, removes records older than 10 min)
+    if let Some(ref provider) = dns_provider_boxed {
+        let gc = dns_challenge_gc::DnsChallengeGarbageCollector::new(
+            db.clone(),
+            Arc::clone(provider),
+            600, // 10 minutes
+        );
+        gc.spawn_collector(Duration::from_secs(60));
+    }
 
     let state = AppState {
         db,
