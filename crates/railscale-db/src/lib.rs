@@ -85,6 +85,21 @@ impl From<&TkaState> for entity::tka_state::ActiveModel {
     }
 }
 
+/// a dns challenge TXT record created via /machine/set-dns
+#[derive(Clone, Debug)]
+pub struct DnsChallengeRecord {
+    /// database id
+    pub id: u64,
+    /// the node that requested this record
+    pub node_id: NodeId,
+    /// the TXT record name (e.g. `_acme-challenge.host.domain`)
+    pub record_name: String,
+    /// provider-returned record id for deletion
+    pub record_id: String,
+    /// when the record was created
+    pub created_at: DateTime<Utc>,
+}
+
 /// result type for database operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -291,6 +306,29 @@ pub trait Database: Send + Sync {
     /// get all AUMs from a given hash to the current head.
     /// returns AUMs in order from oldest to newest.
     fn get_aums_after(&self, hash: &str) -> impl Future<Output = Result<Vec<Vec<u8>>>> + Send;
+
+    // ─── DNS Challenge Records ──────────────────────────────────────────────
+
+    /// store a dns challenge record created via set-dns
+    fn create_dns_challenge_record(
+        &self,
+        record: &DnsChallengeRecord,
+    ) -> impl Future<Output = Result<DnsChallengeRecord>> + Send;
+
+    /// list all challenge records for a node
+    fn list_dns_challenge_records_for_node(
+        &self,
+        node_id: NodeId,
+    ) -> impl Future<Output = Result<Vec<DnsChallengeRecord>>> + Send;
+
+    /// find challenge records older than the given duration
+    fn list_stale_dns_challenge_records(
+        &self,
+        max_age: chrono::Duration,
+    ) -> impl Future<Output = Result<Vec<DnsChallengeRecord>>> + Send;
+
+    /// hard-delete a challenge record by id
+    fn delete_dns_challenge_record(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
 }
 
 /// the main database implementation using sea-orm.
@@ -937,6 +975,47 @@ impl Database for RailscaleDb {
         aums.reverse();
         Ok(aums)
     }
+
+    // dns challenge records
+
+    async fn create_dns_challenge_record(
+        &self,
+        record: &DnsChallengeRecord,
+    ) -> Result<DnsChallengeRecord> {
+        let model: entity::dns_challenge_record::ActiveModel = record.into();
+        let result = model.insert(&self.conn).await?;
+        Ok(result.into())
+    }
+
+    async fn list_dns_challenge_records_for_node(
+        &self,
+        node_id: NodeId,
+    ) -> Result<Vec<DnsChallengeRecord>> {
+        let results = entity::dns_challenge_record::Entity::find()
+            .filter(entity::dns_challenge_record::Column::NodeId.eq(node_id.0 as i64))
+            .all(&self.conn)
+            .await?;
+        Ok(results.into_iter().map(Into::into).collect())
+    }
+
+    async fn list_stale_dns_challenge_records(
+        &self,
+        max_age: chrono::Duration,
+    ) -> Result<Vec<DnsChallengeRecord>> {
+        let cutoff = Utc::now() - max_age;
+        let results = entity::dns_challenge_record::Entity::find()
+            .filter(entity::dns_challenge_record::Column::CreatedAt.lt(cutoff))
+            .all(&self.conn)
+            .await?;
+        Ok(results.into_iter().map(Into::into).collect())
+    }
+
+    async fn delete_dns_challenge_record(&self, id: u64) -> Result<()> {
+        entity::dns_challenge_record::Entity::delete_by_id(id as i64)
+            .exec(&self.conn)
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1456,5 +1535,54 @@ mod tests {
         let user2 = User::new(UserId(0), "alice".to_string());
         let result = db.create_user(&user2).await;
         assert!(result.is_err(), "duplicate username should be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_dns_challenge_record_crud() {
+        let db = setup_test_db().await;
+
+        // create user and node
+        let user = User::new(UserId(0), "dnsowner".to_string());
+        let user = db.create_user(&user).await.unwrap();
+
+        let node = railscale_types::test_utils::TestNodeBuilder::new(0)
+            .with_user_id(user.id)
+            .build();
+        let node = db.create_node(&node).await.unwrap();
+
+        // create a challenge record
+        let record = DnsChallengeRecord {
+            id: 0,
+            node_id: node.id,
+            record_name: "_acme-challenge.test-node.example.com".to_string(),
+            record_id: "cf-record-abc123".to_string(),
+            created_at: Utc::now(),
+        };
+        let created = db.create_dns_challenge_record(&record).await.unwrap();
+        assert!(created.id > 0);
+        assert_eq!(created.record_name, "_acme-challenge.test-node.example.com");
+        assert_eq!(created.record_id, "cf-record-abc123");
+
+        // list records for node
+        let records = db
+            .list_dns_challenge_records_for_node(node.id)
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 1);
+
+        // find stale records (none should be stale yet)
+        let stale = db
+            .list_stale_dns_challenge_records(chrono::Duration::minutes(10))
+            .await
+            .unwrap();
+        assert!(stale.is_empty(), "fresh records should not be stale");
+
+        // delete the record
+        db.delete_dns_challenge_record(created.id).await.unwrap();
+        let records = db
+            .list_dns_challenge_records_for_node(node.id)
+            .await
+            .unwrap();
+        assert!(records.is_empty(), "record should be deleted");
     }
 }
