@@ -354,6 +354,7 @@ impl GrantsEngine {
             railscale_proto::PEER_CAP_FILE_SHARING_TARGET.to_string(),
             vec![],
         );
+        cap_map.insert(railscale_proto::PEER_CAP_FILE_SEND.to_string(), vec![]);
 
         vec![FilterRule {
             src_ips,
@@ -1758,6 +1759,98 @@ mod tests {
         assert!(
             rules.is_empty(),
             "tagged nodes should not get taildrop rules"
+        );
+    }
+
+    #[test]
+    fn test_generate_taildrop_rules_same_user_includes_file_send() {
+        // same-user taildrop must emit BOTH file-sharing-target and file-send
+        // so the peer can both appear as a target AND have permission to send
+        let engine = GrantsEngine::empty();
+        let resolver = EmptyResolver;
+
+        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::from(1)));
+        let all_nodes = vec![node1.clone(), node2.clone()];
+
+        let rules = engine.generate_taildrop_rules(&node1, &all_nodes, &resolver);
+        assert!(!rules.is_empty());
+
+        let cap_map = &rules[0].cap_grant[0].cap_map;
+        assert!(
+            cap_map.contains_key(railscale_proto::PEER_CAP_FILE_SHARING_TARGET),
+            "same-user taildrop should include file-sharing-target"
+        );
+        assert!(
+            cap_map.contains_key(railscale_proto::PEER_CAP_FILE_SEND),
+            "same-user taildrop should include file-send so peer can send files"
+        );
+    }
+
+    #[test]
+    fn test_cross_user_taildrop_via_app_grants() {
+        use crate::capability::AppCapability;
+
+        // cross-user file sharing requires explicit policy grant with both caps
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::User("bob@example.com".to_string())],
+            dst: vec![Selector::User("alice@example.com".to_string())],
+            ip: vec![],
+            app: vec![
+                AppCapability {
+                    name: railscale_proto::PEER_CAP_FILE_SHARING_TARGET.to_string(),
+                    params: vec![],
+                },
+                AppCapability {
+                    name: railscale_proto::PEER_CAP_FILE_SEND.to_string(),
+                    params: vec![],
+                },
+            ],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+
+        // alice = user 1, bob = user 2
+        let mut resolver = MockResolver::new();
+        resolver
+            .users
+            .insert(UserId(1), "alice@example.com".to_string());
+        resolver
+            .users
+            .insert(UserId(2), "bob@example.com".to_string());
+
+        let alice = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let bob = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![alice.clone(), bob.clone()];
+
+        // from alice's perspective: bob is a peer, check caps bob→alice
+        let rules = engine.generate_cap_grant_rules(&alice, &all_nodes, &resolver);
+        assert!(
+            !rules.is_empty(),
+            "should generate cap grant rules for cross-user taildrop"
+        );
+
+        // find the rule with bob's IPs as src
+        let bob_rule = rules
+            .iter()
+            .find(|r| {
+                r.src_ips
+                    .iter()
+                    .any(|ip| bob.ips().contains(&ip.parse().unwrap()))
+            })
+            .expect("should have a rule with bob's IP as src");
+
+        let cap_map = &bob_rule.cap_grant[0].cap_map;
+        assert!(
+            cap_map.contains_key(railscale_proto::PEER_CAP_FILE_SHARING_TARGET),
+            "cross-user grant should include file-sharing-target"
+        );
+        assert!(
+            cap_map.contains_key(railscale_proto::PEER_CAP_FILE_SEND),
+            "cross-user grant should include file-send"
         );
     }
 
