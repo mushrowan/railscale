@@ -133,6 +133,10 @@ impl GrantsEngine {
     /// for that route prefix (exact match or supernet). exit routes (0.0.0.0/0,
     /// ::/0) are checked against the separate exit_node selectors.
     ///
+    /// app connector nodes (hostinfo.app_connector == true) that match a
+    /// `connectors` selector in any nodeAttrs app-connector config get all
+    /// their non-exit routes auto-approved (they discover routes dynamically).
+    ///
     /// returns the list of routes that should be approved. never removes
     /// previously approved routes — only returns new approvals.
     pub fn auto_approve_routes<R: UserResolver>(
@@ -144,6 +148,9 @@ impl GrantsEngine {
         if announced.is_empty() {
             return vec![];
         }
+
+        // check if this node is an app connector with matching config
+        let is_app_connector = self.is_app_connector_node(node, resolver);
 
         let auto_approvers = &self.policy.auto_approvers;
         let mut approved = Vec::new();
@@ -159,6 +166,12 @@ impl GrantsEngine {
                 if self.node_matches_selectors(node, &auto_approvers.exit_node, resolver, None) {
                     approved.push(*route);
                 }
+                continue;
+            }
+
+            // app connector nodes get all non-exit routes auto-approved
+            if is_app_connector {
+                approved.push(*route);
                 continue;
             }
 
@@ -182,6 +195,44 @@ impl GrantsEngine {
         }
 
         approved
+    }
+
+    /// check if a node is a recognised app connector.
+    ///
+    /// returns true if the node reports `hostinfo.app_connector == true` AND
+    /// matches a `connectors` selector in any nodeAttrs app-connector config
+    fn is_app_connector_node<R: UserResolver>(&self, node: &Node, resolver: &R) -> bool {
+        // node must claim to be an app connector
+        let is_connector = node
+            .hostinfo
+            .as_ref()
+            .and_then(|h| h.app_connector)
+            .unwrap_or(false);
+        if !is_connector {
+            return false;
+        }
+
+        // check if any nodeAttrs app-connector config has a matching connectors selector
+        for attr in &self.policy.node_attrs {
+            let Some(app_connector_vals) = attr.app.get(railscale_proto::CAP_APP_CONNECTORS) else {
+                continue;
+            };
+
+            for val in app_connector_vals {
+                // parse connectors selectors from the json value
+                if let Some(connectors) = val.get("connectors").and_then(|c| c.as_array()) {
+                    for connector_str in connectors.iter().filter_map(|v| v.as_str()) {
+                        if let Ok(selector) = crate::selector::Selector::parse(connector_str) {
+                            if self.node_matches_selector(node, &selector, resolver, None) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     /// generate filter rules for the mapresponse.
@@ -2277,6 +2328,89 @@ mod tests {
 
         let approved = engine.auto_approve_routes(&node, &resolver);
         assert!(approved.is_empty());
+    }
+
+    #[test]
+    fn test_auto_approve_app_connector_routes() {
+        use crate::policy::NodeAttr;
+
+        let mut policy = Policy::empty();
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Wildcard],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    "tailscale.com/app-connectors".to_string(),
+                    vec![serde_json::json!({
+                        "name": "github",
+                        "domains": ["github.com"],
+                        "connectors": ["tag:connector"],
+                        "routes": ["192.0.2.0/24"]
+                    })],
+                );
+                app
+            },
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // app connector node advertising dynamically discovered routes
+        let mut node = test_node(1, vec!["tag:connector"]);
+        node.hostinfo = Some(railscale_types::HostInfo {
+            app_connector: Some(true),
+            routable_ips: vec![
+                "192.0.2.5/32".parse().unwrap(),   // within declared routes
+                "203.0.113.1/32".parse().unwrap(), // dynamically discovered
+            ],
+            ..Default::default()
+        });
+
+        let approved = engine.auto_approve_routes(&node, &resolver);
+        assert_eq!(
+            approved.len(),
+            2,
+            "app connector should auto-approve all its advertised routes"
+        );
+    }
+
+    #[test]
+    fn test_auto_approve_app_connector_requires_tag_match() {
+        use crate::policy::NodeAttr;
+
+        let mut policy = Policy::empty();
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Wildcard],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    "tailscale.com/app-connectors".to_string(),
+                    vec![serde_json::json!({
+                        "name": "github",
+                        "domains": ["github.com"],
+                        "connectors": ["tag:connector"]
+                    })],
+                );
+                app
+            },
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // node that is NOT tagged as connector but claims app_connector
+        let mut node = test_node(1, vec!["tag:other"]);
+        node.hostinfo = Some(railscale_types::HostInfo {
+            app_connector: Some(true),
+            routable_ips: vec!["192.0.2.5/32".parse().unwrap()],
+            ..Default::default()
+        });
+
+        let approved = engine.auto_approve_routes(&node, &resolver);
+        assert!(
+            approved.is_empty(),
+            "non-matching tag should not get auto-approved routes"
+        );
     }
 
     #[test]
