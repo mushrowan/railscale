@@ -63,6 +63,17 @@ pub const PEER_CAP_WAKE_ON_LAN: &str = "https://tailscale.com/cap/wake-on-lan";
 /// peer can accept ingress traffic
 pub const PEER_CAP_INGRESS: &str = "https://tailscale.com/cap/ingress";
 
+// -- node capabilities (for self node CapMap) --
+
+/// node capability for app connectors.
+///
+/// when present in a node's CapMap, the value is a list of `AppConnectorAttr`
+/// that tells the client which domains to proxy and which routes to advertise
+pub const CAP_APP_CONNECTORS: &str = "tailscale.com/app-connectors";
+
+/// node capability telling the client to persist app connector routes across restarts
+pub const CAP_STORE_APPC_ROUTES: &str = "store-appc-routes";
+
 /// a maprequest from a tailscale client.
 ///
 /// clients send maprequests periodically (every 15-60 seconds) to:
@@ -480,6 +491,31 @@ pub struct CapGrant {
     /// preferred over the deprecated `caps` field.
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub cap_map: std::collections::HashMap<String, Vec<serde_json::Value>>,
+}
+
+/// app connector configuration sent to nodes via CapMap.
+///
+/// tells the client which domains to intercept DNS for and proxy,
+/// and which routes to pre-advertise. matches tailscale's
+/// `appctype.AppConnectorAttr`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppConnectorAttr {
+    /// name of this app connector configuration
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub name: String,
+
+    /// domain names to intercept (e.g. "example.com", "*.example.com")
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub domains: Vec<String>,
+
+    /// pre-configured route prefixes (e.g. "192.0.2.0/24")
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<String>,
+
+    /// selectors for which nodes act as connectors (e.g. "tag:connector", "*")
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub connectors: Vec<String>,
 }
 
 /// a port range (matches tailscale's tailcfg.portrange).
@@ -1010,6 +1046,83 @@ mod proptests {
             "CapGrant should be present: {}",
             json
         );
+    }
+
+    #[test]
+    fn app_connector_attr_serialises_as_camel_case() {
+        let attr = AppConnectorAttr {
+            name: "github".to_string(),
+            domains: vec!["github.com".to_string(), "*.github.com".to_string()],
+            routes: vec!["192.0.2.0/24".to_string()],
+            connectors: vec!["tag:connector".to_string()],
+        };
+
+        let json = serde_json::to_string(&attr).unwrap();
+        // tailscale uses camelCase for AppConnectorAttr
+        assert!(json.contains("\"name\""), "expected name: {}", json);
+        assert!(json.contains("\"domains\""), "expected domains: {}", json);
+        assert!(json.contains("\"routes\""), "expected routes: {}", json);
+        assert!(
+            json.contains("\"connectors\""),
+            "expected connectors: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn app_connector_attr_roundtrips() {
+        let attr = AppConnectorAttr {
+            name: "example-app".to_string(),
+            domains: vec!["example.com".to_string()],
+            routes: vec![],
+            connectors: vec!["tag:example-connector".to_string()],
+        };
+
+        let json = serde_json::to_string(&attr).unwrap();
+        let parsed: AppConnectorAttr = serde_json::from_str(&json).unwrap();
+        assert_eq!(attr, parsed);
+    }
+
+    #[test]
+    fn app_connector_attr_omits_empty_fields() {
+        let attr = AppConnectorAttr {
+            name: "minimal".to_string(),
+            domains: vec!["example.com".to_string()],
+            routes: vec![],
+            connectors: vec![],
+        };
+
+        let json = serde_json::to_string(&attr).unwrap();
+        assert!(
+            !json.contains("routes"),
+            "routes should be omitted: {}",
+            json
+        );
+        assert!(
+            !json.contains("connectors"),
+            "connectors should be omitted: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn app_connector_attr_in_cap_map() {
+        // verify AppConnectorAttr can be serialised into a CapMap value
+        let attrs = vec![AppConnectorAttr {
+            name: "github".to_string(),
+            domains: vec!["github.com".to_string()],
+            routes: vec![],
+            connectors: vec!["tag:connector".to_string()],
+        }];
+
+        let cap_value = serde_json::to_value(&attrs).unwrap();
+
+        let mut cap_map = std::collections::HashMap::new();
+        cap_map.insert(CAP_APP_CONNECTORS.to_string(), vec![cap_value]);
+
+        let json = serde_json::to_string(&cap_map).unwrap();
+        assert!(json.contains("tailscale.com/app-connectors"));
+        assert!(json.contains("github.com"));
     }
 
     #[test]
