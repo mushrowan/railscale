@@ -364,6 +364,33 @@ impl GrantsEngine {
         }]
     }
 
+    /// resolve nodeAttrs for a node, returning extra CapMap entries.
+    ///
+    /// checks each `nodeAttr` in the policy — if the node matches any target
+    /// selector, the `app` entries are merged into the result. this is used
+    /// to populate the self node's CapMap with app connector config etc.
+    pub fn resolve_node_cap_attrs<R: UserResolver>(
+        &self,
+        node: &Node,
+        resolver: &R,
+    ) -> std::collections::HashMap<String, Vec<serde_json::Value>> {
+        let mut result: std::collections::HashMap<String, Vec<serde_json::Value>> =
+            std::collections::HashMap::new();
+
+        for attr in &self.policy.node_attrs {
+            if self.node_matches_selectors(node, &attr.target, resolver, None) {
+                for (key, values) in &attr.app {
+                    result
+                        .entry(key.clone())
+                        .or_default()
+                        .extend(values.iter().cloned());
+                }
+            }
+        }
+
+        result
+    }
+
     /// group network capabilities by protocol and convert to port ranges.
     ///
     /// returns `(ip_proto, dst_ports)` pairs. capabilities without a specific
@@ -1851,6 +1878,115 @@ mod tests {
         assert!(
             cap_map.contains_key(railscale_proto::PEER_CAP_FILE_SEND),
             "cross-user grant should include file-send"
+        );
+    }
+
+    #[test]
+    fn test_resolve_node_cap_attrs_app_connector() {
+        use crate::policy::NodeAttr;
+
+        let mut policy = Policy::empty();
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Tag("connector".to_string())],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    "tailscale.com/app-connectors".to_string(),
+                    vec![serde_json::json!([{
+                        "name": "github",
+                        "domains": ["github.com"],
+                        "connectors": ["tag:connector"]
+                    }])],
+                );
+                app
+            },
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // tagged node matching the target
+        let connector_node = test_node(1, vec!["tag:connector"]);
+        let attrs = engine.resolve_node_cap_attrs(&connector_node, &resolver);
+        assert!(
+            attrs.contains_key("tailscale.com/app-connectors"),
+            "connector node should get app-connectors cap attr"
+        );
+
+        // non-matching node
+        let other_node = test_node(2, vec![]);
+        let attrs = engine.resolve_node_cap_attrs(&other_node, &resolver);
+        assert!(
+            attrs.is_empty(),
+            "non-connector node should get no cap attrs"
+        );
+    }
+
+    #[test]
+    fn test_resolve_node_cap_attrs_wildcard_target() {
+        use crate::policy::NodeAttr;
+
+        let mut policy = Policy::empty();
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Wildcard],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    "tailscale.com/app-connectors".to_string(),
+                    vec![serde_json::json!({"name": "all", "domains": ["example.com"]})],
+                );
+                app
+            },
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // every node should match wildcard
+        let any_node = test_node(1, vec![]);
+        let attrs = engine.resolve_node_cap_attrs(&any_node, &resolver);
+        assert!(!attrs.is_empty(), "wildcard target should match any node");
+    }
+
+    #[test]
+    fn test_resolve_node_cap_attrs_merges_multiple() {
+        use crate::policy::NodeAttr;
+
+        let mut policy = Policy::empty();
+        // two nodeAttrs both targeting the same tag
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Tag("connector".to_string())],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    "tailscale.com/app-connectors".to_string(),
+                    vec![serde_json::json!({"name": "app1", "domains": ["app1.com"]})],
+                );
+                app
+            },
+        });
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Tag("connector".to_string())],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    "tailscale.com/app-connectors".to_string(),
+                    vec![serde_json::json!({"name": "app2", "domains": ["app2.com"]})],
+                );
+                app
+            },
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let node = test_node(1, vec!["tag:connector"]);
+        let attrs = engine.resolve_node_cap_attrs(&node, &resolver);
+        let connectors = &attrs["tailscale.com/app-connectors"];
+        assert_eq!(
+            connectors.len(),
+            2,
+            "should merge values from both nodeAttrs"
         );
     }
 

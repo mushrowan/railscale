@@ -17,13 +17,13 @@ pub mod selector;
 pub mod ssh;
 
 pub use capability::{AppCapability, NetworkCapability, Protocol};
-pub use engine::{GrantsEngine, UserResolver};
+pub use engine::{EmptyResolver, GrantsEngine, UserResolver};
 pub use error::{Error, ParseError, Result, ValidationError};
 #[cfg(feature = "maxminddb")]
 pub use geoip::MaxmindDbResolver;
 pub use geoip::{GeoIpResolver, NoopGeoIpResolver};
 pub use grant::Grant;
-pub use policy::{AutoApproverPolicy, Policy};
+pub use policy::{AutoApproverPolicy, NodeAttr, Policy};
 pub use posture::{PostureAttr, PostureContext, PostureExpr, PostureOp, PostureParseError};
 pub use selector::{Autogroup, Selector};
 pub use ssh::{SshActionType, SshPolicyRule, build_ssh_users_map};

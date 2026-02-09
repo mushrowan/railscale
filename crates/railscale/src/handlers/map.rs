@@ -418,7 +418,7 @@ async fn build_map_response(
             self_sig.as_deref(),
             &state.config.base_domain,
         );
-        self_node.cap_map = build_self_cap_map(&state.config);
+        self_node.cap_map = build_self_cap_map_simple(&state.config);
 
         // add per-node cert_domains when dns_provider is configured
         let hostname = if node.given_name.is_empty() {
@@ -537,7 +537,7 @@ async fn build_map_response(
     let self_sig = key_signatures.get(&node.id).map(|v| v.as_slice());
     let mut self_node =
         node_to_map_response_node(&node, Some(true), self_sig, &state.config.base_domain);
-    self_node.cap_map = build_self_cap_map(&state.config);
+    self_node.cap_map = build_self_cap_map(&state.config, &grants, &node, &resolver);
 
     // get online status for all visible peers
     let peer_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
@@ -678,20 +678,39 @@ fn node_to_map_response_node(
     }
 }
 
-/// build capability map for self node based on config.
+/// build capability map for self node (lightweight, no policy evaluation).
 ///
-/// always includes ssh-env-vars (enables AcceptEnv on ssh rules).
-/// includes file-sharing when taildrop_enabled.
-fn build_self_cap_map(
+/// used in the omit_peers early-return path where grants aren't loaded.
+fn build_self_cap_map_simple(
     config: &railscale_types::Config,
 ) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
     let mut cap_map = std::collections::HashMap::new();
 
-    // always enable ssh environment variable forwarding
     cap_map.insert(railscale_proto::CAP_SSH_ENV_VARS.to_string(), vec![]);
 
     if config.taildrop_enabled {
         cap_map.insert(railscale_proto::CAP_FILE_SHARING.to_string(), vec![]);
+    }
+
+    Some(cap_map)
+}
+
+/// build capability map for self node with full policy evaluation.
+///
+/// always includes ssh-env-vars. includes file-sharing when taildrop_enabled.
+/// merges nodeAttrs from policy (app connector config etc).
+fn build_self_cap_map<R: railscale_grants::UserResolver>(
+    config: &railscale_types::Config,
+    grants: &railscale_grants::GrantsEngine,
+    node: &railscale_types::Node,
+    resolver: &R,
+) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
+    let mut cap_map = build_self_cap_map_simple(config)?;
+
+    // merge nodeAttrs from policy (app connectors, store-appc-routes, etc)
+    let node_attrs = grants.resolve_node_cap_attrs(node, resolver);
+    for (key, values) in node_attrs {
+        cap_map.entry(key).or_default().extend(values);
     }
 
     Some(cap_map)
@@ -736,7 +755,7 @@ mod tests {
     fn test_build_self_cap_map_always_includes_ssh_env_vars() {
         // ssh-env-vars should be present even with taildrop disabled
         let config = railscale_types::Config::default();
-        let cap_map = build_self_cap_map(&config);
+        let cap_map = build_self_cap_map_simple(&config);
         let cap_map = cap_map.expect("cap_map should be Some when ssh-env-vars is always on");
         assert!(
             cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS),
@@ -748,9 +767,59 @@ mod tests {
     fn test_build_self_cap_map_with_taildrop_has_both_caps() {
         let mut config = railscale_types::Config::default();
         config.taildrop_enabled = true;
-        let cap_map = build_self_cap_map(&config).unwrap();
+        let cap_map = build_self_cap_map_simple(&config).unwrap();
         assert!(cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS));
         assert!(cap_map.contains_key(railscale_proto::CAP_FILE_SHARING));
+    }
+
+    #[test]
+    fn test_build_self_cap_map_merges_node_attrs() {
+        use railscale_grants::selector::Selector;
+        use railscale_grants::{
+            GrantsEngine,
+            policy::{NodeAttr, Policy},
+        };
+
+        let mut config = railscale_types::Config::default();
+        config.taildrop_enabled = true;
+
+        let mut policy = Policy::empty();
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Tag("connector".to_string())],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    railscale_proto::CAP_APP_CONNECTORS.to_string(),
+                    vec![serde_json::json!([{"name": "test", "domains": ["test.com"]}])],
+                );
+                app
+            },
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = railscale_grants::EmptyResolver;
+
+        // tagged node matching the target
+        let connector_node = TestNodeBuilder::new(1)
+            .with_tags(vec!["tag:connector".parse().unwrap()])
+            .build();
+
+        let cap_map = build_self_cap_map(&config, &engine, &connector_node, &resolver).unwrap();
+        assert!(cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS));
+        assert!(cap_map.contains_key(railscale_proto::CAP_FILE_SHARING));
+        assert!(
+            cap_map.contains_key(railscale_proto::CAP_APP_CONNECTORS),
+            "connector node should have app-connectors in cap_map"
+        );
+
+        // non-matching node should NOT get app-connectors
+        let regular_node = TestNodeBuilder::new(2).build();
+        let cap_map = build_self_cap_map(&config, &engine, &regular_node, &resolver).unwrap();
+        assert!(cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS));
+        assert!(
+            !cap_map.contains_key(railscale_proto::CAP_APP_CONNECTORS),
+            "regular node should not have app-connectors"
+        );
     }
 
     #[test]
