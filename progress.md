@@ -65,6 +65,11 @@
 - map handler wires both into `packet_filter` (gated on `taildrop_enabled` for taildrop rules)
 - headscale doesn't implement any of this — railscale is first open-source implementation
 
+## cross-user taildrop — complete
+- same-user taildrop now emits both `file-sharing-target` AND `file-send` peer caps (was missing `file-send`)
+- cross-user file sharing works via explicit policy app grants through `generate_cap_grant_rules()`
+- policy example: `{"src": ["bob@"], "dst": ["alice@"], "app": [{"name": "cap/file-sharing-target"}, {"name": "cap/file-send"}]}`
+
 ## tailscale cert / set-dns — complete
 - **proto types**: `SetDNSRequest`, `SetDNSResponse`, `cert_domains` on `DnsConfig`
 - **config**: `DnsProviderConfig` enum (cloudflare, godaddy, webhook) with secret redaction
