@@ -105,6 +105,11 @@ client_secret = "your-client-secret"
 
 ### docker
 
+currently the docker image is completely untested. and you have to build it
+yourself.  
+i'll add testing at some point and then i'll also push to docker hub so that you
+little netizens can download it for yourself.
+
 ```bash
 # build the image (requires nix)
 nix build .#docker
@@ -231,8 +236,9 @@ automatically. cross-user transfers need an explicit policy grant:
 
 ```json
 {
-  "src": ["bob@"], "dst": ["alice@"],
-  "app": [{"name": "cap/file-sharing-target"}, {"name": "cap/file-send"}]
+  "src": ["bob@"],
+  "dst": ["alice@"],
+  "app": [{ "name": "cap/file-sharing-target" }, { "name": "cap/file-send" }]
 }
 ```
 
