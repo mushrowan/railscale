@@ -107,6 +107,28 @@
             default = railscale;
             inherit railscale;
 
+            # OCI container image, pipe to docker/podman load:
+            #   nix build .#docker && ./result | docker load
+            docker = pkgs.dockerTools.streamLayeredImage {
+              name = "railscale";
+              tag = "latest";
+              contents = [
+                railscale
+                pkgs.dockerTools.caCertificates
+              ];
+              config = {
+                Entrypoint = [ "${railscale}/bin/railscale" ];
+                Cmd = [ "serve" ];
+                ExposedPorts = {
+                  "8080/tcp" = { };
+                  "3478/udp" = { };
+                };
+                Env = [
+                  "RAILSCALE_LISTEN_ADDR=0.0.0.0:8080"
+                ];
+              };
+            };
+
             # Smoke test for NixOS module options (not in checks, run manually)
             # Usage: nix build .#module-smoke-test -L
             module-smoke-test = import ./nix/tests/module-smoke.nix {
