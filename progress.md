@@ -70,6 +70,21 @@
 - cross-user file sharing works via explicit policy app grants through `generate_cap_grant_rules()`
 - policy example: `{"src": ["bob@"], "dst": ["alice@"], "app": [{"name": "cap/file-sharing-target"}, {"name": "cap/file-send"}]}`
 
+## app connectors v1 — complete
+- `AppConnectorAttr` type in railscale-proto with `name`, `domains`, `routes`, `connectors` fields
+- `CAP_APP_CONNECTORS` and `CAP_STORE_APPC_ROUTES` capability constants
+- `NodeAttr` type on `Policy` — `target: Vec<Selector>`, `app: HashMap<String, Vec<Value>>`
+- `resolve_node_cap_attrs()` on `GrantsEngine` — evaluates nodeAttrs against node, merges into self CapMap
+- `build_self_cap_map` split into simple/full paths to support nodeAttrs merge in map handler
+- `is_app_connector_node()` helper — checks `hostinfo.app_connector == true` AND matches connector selector
+- app connector nodes get all non-exit routes auto-approved via extended `auto_approve_routes()`
+
+## docker image — complete
+- `streamLayeredImage` in flake.nix under `packages.docker`
+- includes railscale binary + CA certificates
+- entrypoint `railscale`, cmd `serve`, exposes 8080/tcp and 3478/udp
+- usage: `nix build .#docker && ./result | docker load`
+
 ## tailscale cert / set-dns — complete
 - **proto types**: `SetDNSRequest`, `SetDNSResponse`, `cert_domains` on `DnsConfig`
 - **config**: `DnsProviderConfig` enum (cloudflare, godaddy, webhook) with secret redaction

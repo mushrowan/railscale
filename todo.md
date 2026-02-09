@@ -6,6 +6,6 @@
   - [x] /machine/set-dns handler
   - [x] background cleanup task for stale TXT records
 - [x] cross-user taildrop via app capability grants
-- [ ] app connectors v1 (nodeAttrs, CapMap config, route auto-approve)
-- [ ] docker image via nix streamLayeredImage
+- [x] app connectors v1 (nodeAttrs, CapMap config, route auto-approve)
+- [x] docker image via nix streamLayeredImage
 - [ ] (v2, later) wildcard certs per node — *.node.base_domain in CertDomains, requires MagicDNS wildcard resolution support first. do not start until basic cert flow is solid

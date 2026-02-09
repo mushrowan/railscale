@@ -33,7 +33,8 @@ they told me i couldn't do it
 - **device posture** - restrict access based on device attributes and
   geolocation
 - **embedded derp server** - built-in relay with rate limiting
-- **taildrop** - file sharing between nodes (same-user)
+- **taildrop** - file sharing between nodes (same-user and cross-user)
+- **app connectors** - route traffic to specific domains via designated nodes
 - **tailnet lock** - cryptographic verification of node keys
 - **ephemeral nodes** - auto-cleanup of temporary devices
 - **rest api** - manage users, nodes, keys
@@ -104,7 +105,29 @@ client_secret = "your-client-secret"
 
 ### docker
 
-not yet
+```bash
+# build the image (requires nix)
+nix build .#docker
+
+# load into docker
+./result | docker load
+
+# run with a config file
+docker run -v /path/to/config.toml:/etc/railscale/config.toml \
+  -v /path/to/data:/var/lib/railscale \
+  -p 8080:8080 -p 3478:3478/udp \
+  railscale:latest
+```
+
+or with env vars:
+
+```bash
+docker run -e RAILSCALE_SERVER_URL=https://vpn.example.com \
+  -e RAILSCALE_DATABASE_URL=sqlite:///data/db.sqlite \
+  -v /path/to/data:/data \
+  -p 8080:8080 -p 3478:3478/udp \
+  railscale:latest
+```
 
 ## https / reverse proxy
 
@@ -203,9 +226,15 @@ railscale lock disable           # disable tailnet lock
 
 ## taildrop
 
-file sharing between devices on the same tailnet. currently works for same-user
-transfers (alice's laptop -> alice's phone). cross-user transfers need grants
-support which isn't done yet.
+file sharing between devices on the same tailnet. same-user transfers work
+automatically. cross-user transfers need an explicit policy grant:
+
+```json
+{
+  "src": ["bob@"], "dst": ["alice@"],
+  "app": [{"name": "cap/file-sharing-target"}, {"name": "cap/file-send"}]
+}
+```
 
 ```bash
 # send a file
@@ -252,8 +281,6 @@ current limitations:
 - ssh policy works-ish but i'll be honest i only realised that i forgot to
   properly implement it today and then madly wrote it all in like 4 hours so
   yeah it might be broken
-- app connectors - not yet
-- cross-user taildrop (needs grants support for peer capabilities)
 - probably like 50 million other things
 
 cool stuff:

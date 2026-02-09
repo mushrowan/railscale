@@ -367,6 +367,59 @@ randomize_client_port = false
 # allow_non_noise_registration = false
 
 # -----------------------------------------------------------------------------
+# DNS Provider for tailscale cert (Optional)
+# -----------------------------------------------------------------------------
+#
+# Enables `tailscale cert` on nodes by providing a DNS provider for ACME
+# dns-01 challenges. When configured, each node gets a cert domain in its
+# map response and can request TXT records via /machine/set-dns.
+#
+# Cloudflare:
+# [dns_provider]
+# type = "cloudflare"
+# api_token = "your-cloudflare-api-token"  # DNS:Edit permission
+# zone_id = "your-zone-id"
+#
+# GoDaddy:
+# [dns_provider]
+# type = "godaddy"
+# api_key = "your-api-key"
+# api_secret = "your-api-secret"
+#
+# Generic webhook (for unsupported providers):
+# [dns_provider]
+# type = "webhook"
+# url = "https://dns-api.example.com/txt-record"
+# secret = "optional-hmac-sha256-secret"  # signs requests with X-Signature header
+
+# -----------------------------------------------------------------------------
+# App Connectors
+# -----------------------------------------------------------------------------
+#
+# App connectors are configured in the policy file (not this config file).
+# Add nodeAttrs to your policy JSON to designate app connector nodes:
+#
+# {
+#   "nodeAttrs": [
+#     {
+#       "target": ["tag:connector"],
+#       "app": {
+#         "tailscale.com/app-connectors": [
+#           {
+#             "name": "my-app",
+#             "domains": ["app.example.com"],
+#             "connectors": ["tag:connector"]
+#           }
+#         ]
+#       }
+#     }
+#   ]
+# }
+#
+# Nodes matching the target selectors receive the app connector config in
+# their CapMap. App connector nodes get non-exit routes auto-approved.
+
+# -----------------------------------------------------------------------------
 # Performance Tuning
 # -----------------------------------------------------------------------------
 #
