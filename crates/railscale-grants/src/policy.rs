@@ -4,6 +4,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use serde_json::Value;
+
 use crate::error::Error;
 use crate::grant::Grant;
 use crate::selector::Selector;
@@ -91,6 +93,40 @@ pub struct Policy {
     /// auto-approver policy for subnet routes and exit nodes.
     #[serde(default, rename = "autoApprovers")]
     pub auto_approvers: AutoApproverPolicy,
+
+    /// node attribute rules.
+    ///
+    /// each entry targets a set of nodes (by selector) and assigns
+    /// application-level attributes. used for app connectors, etc.
+    #[serde(default, rename = "nodeAttrs")]
+    pub node_attrs: Vec<NodeAttr>,
+}
+
+/// a node attribute rule assigning app-level config to matching nodes.
+///
+/// # Example
+///
+/// ```json
+/// {
+///   "target": ["tag:connector"],
+///   "app": {
+///     "tailscale.com/app-connectors": [
+///       {"name": "github", "domains": ["github.com"], "connectors": ["tag:connector"]}
+///     ]
+///   }
+/// }
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NodeAttr {
+    /// selectors for which nodes this applies to (e.g. ["tag:connector"], ["*"])
+    pub target: Vec<Selector>,
+
+    /// application configuration map.
+    ///
+    /// keys are capability names (e.g. "tailscale.com/app-connectors"),
+    /// values are opaque json arrays passed through to the node's CapMap
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub app: HashMap<String, Vec<Value>>,
 }
 
 impl Policy {
@@ -192,6 +228,7 @@ mod proptests {
                 grants: vec![],
                 ssh: vec![],
                 auto_approvers: Default::default(),
+                node_attrs: vec![],
             };
 
             let json = serde_json::to_string(&policy).unwrap();
@@ -547,5 +584,102 @@ mod tests {
 
         let result = Policy::from_json(json);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_node_attrs_with_app_connectors() {
+        let json = r#"{
+            "grants": [],
+            "nodeAttrs": [
+                {
+                    "target": ["tag:connector"],
+                    "app": {
+                        "tailscale.com/app-connectors": [
+                            {
+                                "name": "github",
+                                "domains": ["github.com", "*.github.com"],
+                                "connectors": ["tag:connector"]
+                            }
+                        ]
+                    }
+                }
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(policy.node_attrs.len(), 1);
+        assert_eq!(
+            policy.node_attrs[0].target,
+            vec![Selector::Tag("connector".to_string())]
+        );
+        assert!(
+            policy.node_attrs[0]
+                .app
+                .contains_key("tailscale.com/app-connectors")
+        );
+
+        let app_connectors = &policy.node_attrs[0].app["tailscale.com/app-connectors"];
+        assert_eq!(app_connectors.len(), 1);
+
+        // verify the inner structure is preserved
+        let attr = &app_connectors[0];
+        assert_eq!(attr["name"], "github");
+        assert_eq!(attr["domains"][0], "github.com");
+    }
+
+    #[test]
+    fn test_node_attrs_defaults_empty() {
+        let json = r#"{"grants": []}"#;
+        let policy = Policy::from_json(json).unwrap();
+        assert!(policy.node_attrs.is_empty());
+    }
+
+    #[test]
+    fn test_node_attrs_multiple_targets() {
+        let json = r#"{
+            "grants": [],
+            "nodeAttrs": [
+                {
+                    "target": ["*"],
+                    "app": {
+                        "tailscale.com/app-connectors": [
+                            {"name": "app1", "domains": ["app1.example.com"], "connectors": ["tag:c1"]},
+                            {"name": "app2", "domains": ["app2.example.com"], "connectors": ["tag:c2"]}
+                        ]
+                    }
+                }
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(policy.node_attrs.len(), 1);
+        assert_eq!(policy.node_attrs[0].target, vec![Selector::Wildcard]);
+
+        let attrs = &policy.node_attrs[0].app["tailscale.com/app-connectors"];
+        assert_eq!(attrs.len(), 2);
+    }
+
+    #[test]
+    fn test_node_attrs_roundtrip() {
+        let json = r#"{
+            "grants": [],
+            "nodeAttrs": [
+                {
+                    "target": ["tag:connector"],
+                    "app": {
+                        "tailscale.com/app-connectors": [
+                            {"name": "test", "domains": ["test.com"], "connectors": ["tag:connector"]}
+                        ]
+                    }
+                }
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        let serialised = serde_json::to_string(&policy).unwrap();
+        let reparsed = Policy::from_json(&serialised).unwrap();
+
+        assert_eq!(policy.node_attrs.len(), reparsed.node_attrs.len());
+        assert_eq!(policy.node_attrs[0].target, reparsed.node_attrs[0].target);
     }
 }
