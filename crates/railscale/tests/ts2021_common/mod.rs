@@ -9,10 +9,8 @@ use railscale::{StateNotifier, create_app};
 use railscale_db::RailscaleDb;
 use railscale_grants::{GrantsEngine, Policy};
 use railscale_types::Config;
-use snow::Builder;
 
 pub const PROTOCOL_VERSION: u16 = 1;
-pub const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
 /// create a test app with default config
 pub async fn create_test_app() -> axum::Router {
@@ -84,8 +82,8 @@ pub fn create_valid_initiation_message(
     let prologue = format!("Tailscale Control Protocol v{}", PROTOCOL_VERSION);
 
     // build initiator with prologue and remote static key
-    let params = NOISE_PATTERN.parse().expect("valid pattern");
-    let mut initiator = Builder::new(params)
+    let mut initiator = railscale_proto::noise_builder()
+        .expect("valid builder")
         .local_private_key(client_private)
         .expect("valid key")
         .remote_public_key(server_public)
@@ -121,9 +119,9 @@ pub fn build_client_handshake(
     protocol_version: u16,
 ) -> snow::HandshakeState {
     let prologue = format!("Tailscale Control Protocol v{}", protocol_version);
-    let params: snow::params::NoiseParams = NOISE_PATTERN.parse().expect("valid pattern");
 
-    Builder::new(params)
+    railscale_proto::noise_builder()
+        .expect("valid builder")
         .local_private_key(client_private)
         .expect("valid key")
         .remote_public_key(server_public)

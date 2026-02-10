@@ -250,11 +250,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use snow::Builder;
     use std::sync::{Arc, Mutex as StdMutex};
     use tokio::io::AsyncWriteExt;
-
-    const NOISE_PATTERN: &str = "Noise_IK_25519_ChaChaPoly_BLAKE2s";
 
     /// tailscale's maximum ciphertext size per frame (4077 plaintext + 16 tag)
     const MAX_CIPHERTEXT_SIZE: usize = 4093;
@@ -296,14 +293,19 @@ mod tests {
         }
     }
 
-    /// creates a completed noise transport pair (client, server).
+    /// creates a completed noise transport pair (client, server)
     fn create_noise_transports() -> (snow::TransportState, snow::TransportState) {
-        let params: snow::params::NoiseParams = NOISE_PATTERN.parse().unwrap();
+        let server_keypair = railscale_proto::noise_builder()
+            .unwrap()
+            .generate_keypair()
+            .unwrap();
+        let client_keypair = railscale_proto::noise_builder()
+            .unwrap()
+            .generate_keypair()
+            .unwrap();
 
-        let server_keypair = Builder::new(params.clone()).generate_keypair().unwrap();
-        let client_keypair = Builder::new(params.clone()).generate_keypair().unwrap();
-
-        let mut client = Builder::new(params.clone())
+        let mut client = railscale_proto::noise_builder()
+            .unwrap()
             .local_private_key(&client_keypair.private)
             .unwrap()
             .remote_public_key(&server_keypair.public)
@@ -311,7 +313,8 @@ mod tests {
             .build_initiator()
             .unwrap();
 
-        let mut server = Builder::new(params)
+        let mut server = railscale_proto::noise_builder()
+            .unwrap()
             .local_private_key(&server_keypair.private)
             .unwrap()
             .build_responder()

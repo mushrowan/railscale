@@ -22,7 +22,7 @@ pub use map_request::{
     PEER_CAP_FILE_SEND, PEER_CAP_FILE_SHARING_TARGET, PEER_CAP_INGRESS, PEER_CAP_WAKE_ON_LAN,
     PortRange, SetDNSRequest, SetDNSResponse, UserProfile,
 };
-pub use noise::{NoiseHandshake, NoiseTransport, generate_keypair};
+pub use noise::{NoiseHandshake, NoiseTransport, builder as noise_builder, generate_keypair};
 pub use snow::Keypair;
 pub use ssh::{SshAction, SshPolicy, SshPrincipal, SshRecorderFailureAction, SshRule};
 pub use tka::{

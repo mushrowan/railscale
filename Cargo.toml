@@ -76,6 +76,3 @@ railscale-proto = { path = "crates/railscale-proto" }
 railscale-grants = { path = "crates/railscale-grants" }
 railscale-admin = { path = "crates/railscale-admin" }
 railscale-tka = { path = "crates/railscale-tka" }
-
-[patch.crates-io]
-snow = { path = "vendor/snow" }

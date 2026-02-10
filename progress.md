@@ -1,4 +1,13 @@
-# audit remediation progress
+# progress
+
+## unvendor snow — complete
+- removed vendored `vendor/snow` fork and `[patch.crates-io]` override
+- custom `TailscaleResolver` in `railscale-proto::noise` overrides ChaChaPoly with big-endian nonce encoding (tailscale compatibility)
+- `noise::builder()` factory centralises all `Builder::with_resolver` calls — no more `Builder::new` in the codebase
+- test helper functions `build_initiator` / `build_initiator_with_prologue` deduplicate test setup
+- `test_tailscale_resolver_uses_be_nonces` proves BE/LE divergence at nonce > 0
+
+## audit remediation progress
 
 ## phase 1 — complete
 - **1-1..1-3, 2-10** ts2021 fixes: body limits, frame buffer, partial write, ws spin loop
