@@ -50,6 +50,18 @@
           # Import package build
           packageSet = import ./nix/package.nix { inherit pkgs craneLib; };
           inherit (packageSet) railscale cargoArtifacts commonArgs;
+
+          # Static musl build
+          muslRustToolchain = pkgs.rust-bin.stable.latest.default.override {
+            targets = [ "x86_64-unknown-linux-musl" ];
+          };
+          pkgsMusl = pkgs.pkgsCross.musl64;
+          craneMusl = (crane.mkLib pkgsMusl).overrideToolchain muslRustToolchain;
+          muslPackageSet = import ./nix/package.nix {
+            pkgs = pkgsMusl;
+            craneLib = craneMusl;
+          };
+          railscaleStatic = muslPackageSet.railscale;
         in
         {
           _module.args.pkgs = import inputs.nixpkgs {
@@ -105,7 +117,14 @@
 
           packages = {
             default = railscale;
-            inherit railscale;
+            inherit railscale railscaleStatic;
+
+            # release tarball with static musl binary
+            railscale-tarball = pkgs.runCommand "railscale-${railscaleStatic.version}-x86_64-linux-musl.tar.gz" { } ''
+              mkdir -p railscale-${railscaleStatic.version}
+              cp ${railscaleStatic}/bin/railscale railscale-${railscaleStatic.version}/
+              tar czf $out -C . railscale-${railscaleStatic.version}
+            '';
 
             # OCI container image, pipe to docker/podman load:
             #   nix build .#docker && ./result | docker load
