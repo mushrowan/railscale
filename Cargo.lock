@@ -3232,7 +3232,6 @@ dependencies = [
  "minicbor",
  "proptest",
  "rand 0.10.0",
- "secrecy",
  "serde",
  "serde_json",
  "subtle",

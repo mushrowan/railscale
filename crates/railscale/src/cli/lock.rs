@@ -283,7 +283,7 @@ async fn status(args: StatusArgs) -> Result<()> {
     if !status.keys.is_empty() {
         println!();
         println!("Trusted keys:");
-        println!("{:<66} {}", "KEY ID", "VOTES");
+        println!("{:<66} VOTES", "KEY ID");
         println!("{}", "-".repeat(72));
         for key in &status.keys {
             println!("{:<66} {}", key.key_id, key.votes);

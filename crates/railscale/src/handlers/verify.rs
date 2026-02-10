@@ -50,7 +50,6 @@ pub struct VerifyRequest {
     /// the client's public node key.
     pub node_public: NodeKey,
     /// the client's ip address (informational).
-    #[allow(dead_code)]
     pub source: String,
 }
 
@@ -77,6 +76,12 @@ pub async fn verify(
     Json(request): Json<VerifyRequest>,
 ) -> Json<VerifyResponse> {
     use tracing::{debug, warn};
+
+    debug!(
+        node_key = ?request.node_public,
+        source = %request.source,
+        "derp verify request"
+    );
 
     // check if the node key exists in the database
     let node = match state.db.get_node_by_node_key(&request.node_public).await {

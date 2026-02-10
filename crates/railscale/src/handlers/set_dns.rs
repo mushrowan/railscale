@@ -123,15 +123,16 @@ mod tests {
     }
 
     fn test_config() -> Config {
-        let mut config = Config::default();
-        config.allow_non_noise_registration = true;
-        config.base_domain = "example.com".to_string();
-        // use webhook provider pointing at a dummy URL (will be mocked)
-        config.dns_provider = Some(DnsProviderConfig::Webhook {
-            url: "http://127.0.0.1:1/noop".to_string(),
-            secret: None,
-        });
-        config
+        Config {
+            allow_non_noise_registration: true,
+            base_domain: "example.com".to_string(),
+            // use webhook provider pointing at a dummy URL (will be mocked)
+            dns_provider: Some(DnsProviderConfig::Webhook {
+                url: "http://127.0.0.1:1/noop".to_string(),
+                secret: None,
+            }),
+            ..Default::default()
+        }
     }
 
     #[tokio::test]

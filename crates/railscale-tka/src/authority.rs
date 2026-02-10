@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(authority.keys().len(), 2);
 
         // remove second key (signed by first key)
-        let aum = authority.create_remove_key_aum(key2_id.clone());
+        let aum = authority.create_remove_key_aum(key2_id);
         let signed_aum = authority.sign_aum(aum, &private1).unwrap();
         authority.apply_aum(signed_aum).unwrap();
 

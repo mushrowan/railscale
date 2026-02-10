@@ -53,10 +53,10 @@ pub async fn fetch_derp_map_from_url(url: &str) -> Result<DerpMap, DerpError> {
     let response = client.get(url).send().await?;
 
     // check content-length if available before reading body
-    if let Some(len) = response.content_length() {
-        if len as usize > MAX_DERP_MAP_SIZE {
-            return Err(DerpError::TooLarge(len as usize));
-        }
+    if let Some(len) = response.content_length()
+        && len as usize > MAX_DERP_MAP_SIZE
+    {
+        return Err(DerpError::TooLarge(len as usize));
     }
 
     let bytes = response.bytes().await?;

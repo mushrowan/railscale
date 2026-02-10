@@ -11,7 +11,7 @@ use axum::{
 use base64::Engine;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-use ts2021_common::{create_test_app, create_test_initiation_message};
+use ts2021_common::{create_invalid_initiation_message, create_test_app};
 
 /// test that /ts2021 endpoint exists and requires WebSocket upgrade
 #[tokio::test]
@@ -52,12 +52,8 @@ async fn test_ts2021_endpoint_requires_upgrade() {
 async fn test_ts2021_recognizes_websocket_upgrade() {
     let app = create_test_app().await;
 
-    // generate a client keypair for the handshake
-    let client_keypair =
-        railscale_proto::generate_keypair().expect("failed to generate client keypair");
-
-    // create initial handshake message (noise ik initiation)
-    let init_message = create_test_initiation_message(&client_keypair.private);
+    // create an invalid initiation message (correct framing, bad noise payload)
+    let init_message = create_invalid_initiation_message();
     let init_b64 = base64::engine::general_purpose::STANDARD.encode(&init_message);
 
     let response = app

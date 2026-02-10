@@ -596,7 +596,7 @@ pub async fn tka_sync_send(
         };
 
         // get prev hash
-        let prev_hash = aum.prev_aum_hash.as_ref().map(|h| hex::encode(h));
+        let prev_hash = aum.prev_aum_hash.as_ref().map(hex::encode);
 
         // verify the AUM chains properly: prev_hash must match current head
         // (or be absent for genesis, which shouldn't happen during sync_send)

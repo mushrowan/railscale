@@ -132,13 +132,13 @@ async fn create_user(
     Json(req): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<CreateUserResponse>), ApiError> {
     // validate display name length if provided
-    if let Some(ref display_name) = req.display_name {
-        if display_name.chars().count() > MAX_DISPLAY_NAME_LEN {
-            return Err(ApiError::bad_request(format!(
-                "display_name exceeds maximum length of {} characters",
-                MAX_DISPLAY_NAME_LEN
-            )));
-        }
+    if let Some(ref display_name) = req.display_name
+        && display_name.chars().count() > MAX_DISPLAY_NAME_LEN
+    {
+        return Err(ApiError::bad_request(format!(
+            "display_name exceeds maximum length of {} characters",
+            MAX_DISPLAY_NAME_LEN
+        )));
     }
 
     // username is already validated by serde deserialization
@@ -216,10 +216,10 @@ async fn delete_user(
         let mut allocator = state.ip_allocator.lock().await;
         for node in &user_nodes {
             if let Some(v4) = node.ipv4 {
-                allocator.release(v4.into());
+                allocator.release(v4);
             }
             if let Some(v6) = node.ipv6 {
-                allocator.release(v6.into());
+                allocator.release(v6);
             }
         }
     }
@@ -266,13 +266,12 @@ async fn rename_user(
         .get_user_by_name(new_name.as_str())
         .await
         .map_err(ApiError::internal)?
+        && existing.id != user_id
     {
-        if existing.id != user_id {
-            return Err(ApiError::conflict(format!(
-                "user '{}' already exists",
-                new_name
-            )));
-        }
+        return Err(ApiError::conflict(format!(
+            "user '{}' already exists",
+            new_name
+        )));
     }
 
     // update name

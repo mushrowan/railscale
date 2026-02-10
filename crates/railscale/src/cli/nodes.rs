@@ -261,8 +261,8 @@ async fn list_nodes(args: ListNodesArgs) -> Result<()> {
     }
 
     println!(
-        "{:<6} {:<20} {:<16} {:<8} {:<10} {}",
-        "ID", "NAME", "IPv4", "USER", "ONLINE", "TAGS"
+        "{:<6} {:<20} {:<16} {:<8} {:<10} TAGS",
+        "ID", "NAME", "IPv4", "USER", "ONLINE"
     );
     println!("{}", "-".repeat(80));
 

@@ -46,7 +46,7 @@ use hyper_util::rt::TokioIo;
 use railscale_proto::NoiseHandshake;
 use serde::Deserialize;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, info, trace, warn};
 use zeroize::Zeroizing;
 
 use http_noise_stream::HttpNoiseStream;
@@ -83,7 +83,6 @@ pub(crate) fn build_noise_router(state: AppState) -> Router {
 /// ts2021 message types.
 const MSG_TYPE_INITIATION: u8 = 0x01;
 const MSG_TYPE_RESPONSE: u8 = 0x02;
-#[allow(dead_code)]
 const MSG_TYPE_ERROR: u8 = 0x03;
 /// post-handshake data record type.
 const MSG_TYPE_RECORD: u8 = 0x04;
@@ -247,6 +246,13 @@ async fn handle_ts2021_connection(
         version, msg_type, payload_len
     );
 
+    if msg_type == MSG_TYPE_ERROR {
+        let error_payload = &init_message[5..5 + payload_len as usize];
+        let error_msg = String::from_utf8_lossy(error_payload);
+        warn!("client sent error during noise handshake: {}", error_msg);
+        return Err(format!("client error during handshake: {}", error_msg).into());
+    }
+
     if msg_type != MSG_TYPE_INITIATION {
         return Err(format!("expected initiation type 0x01, got 0x{:02x}", msg_type).into());
     }
@@ -369,6 +375,13 @@ async fn handle_ts2021_http_connection(
         "initiation: version={}, type={}, payload_len={}",
         version, msg_type, payload_len
     );
+
+    if msg_type == MSG_TYPE_ERROR {
+        let error_payload = &init_message[5..5 + payload_len as usize];
+        let error_msg = String::from_utf8_lossy(error_payload);
+        warn!("client sent error during noise handshake: {}", error_msg);
+        return Err(format!("client error during handshake: {}", error_msg).into());
+    }
 
     if msg_type != MSG_TYPE_INITIATION {
         return Err(format!("expected initiation type 0x01, got 0x{:02x}", msg_type).into());

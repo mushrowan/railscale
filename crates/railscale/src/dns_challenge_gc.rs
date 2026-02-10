@@ -130,26 +130,21 @@ mod tests {
     }
 
     impl crate::dns_provider::DnsProvider for MockDnsProvider {
-        fn set_txt_record(
+        async fn set_txt_record(
             &self,
             _name: String,
             _value: String,
-        ) -> impl std::future::Future<
-            Output = Result<String, crate::dns_provider::DnsProviderError>,
-        > + Send {
-            async { Ok("mock-id".to_string()) }
+        ) -> Result<String, crate::dns_provider::DnsProviderError> {
+            Ok("mock-id".to_string())
         }
 
-        fn clear_txt_record(
+        async fn clear_txt_record(
             &self,
             name: String,
             record_id: String,
-        ) -> impl std::future::Future<Output = Result<(), crate::dns_provider::DnsProviderError>> + Send
-        {
-            async move {
-                self.cleared.lock().await.push((name, record_id));
-                Ok(())
-            }
+        ) -> Result<(), crate::dns_provider::DnsProviderError> {
+            self.cleared.lock().await.push((name, record_id));
+            Ok(())
         }
     }
 

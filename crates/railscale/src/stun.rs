@@ -111,11 +111,11 @@ pub async fn spawn_stun_server_with_config(
             }
 
             // check rate limit per ip
-            if let Some(ref limiter) = rate_limiter {
-                if limiter.check_key(&peer_addr.ip()).is_err() {
-                    debug!("STUN request rate limited from {}", peer_addr);
-                    continue; // Silently drop - UDP, no response
-                }
+            if let Some(ref limiter) = rate_limiter
+                && limiter.check_key(&peer_addr.ip()).is_err()
+            {
+                debug!("STUN request rate limited from {}", peer_addr);
+                continue; // Silently drop - UDP, no response
             }
 
             let Some(txid) = extract_transaction_id(packet) else {

@@ -470,8 +470,10 @@ async fn test_full_interactive_login_flow() {
 
     // create app with OIDC
     // enable allow_non_noise_registration for testing without noise handshake
-    let mut config = Config::default();
-    config.allow_non_noise_registration = true;
+    let config = Config {
+        allow_non_noise_registration: true,
+        ..Default::default()
+    };
     let app = railscale::create_app(
         db.clone(),
         default_grants(),

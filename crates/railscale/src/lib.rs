@@ -495,7 +495,7 @@ fn build_protocol_router(state: &AppState) -> Router {
     if let Some(oidc_config) = &state.config.oidc {
         if oidc_config.rate_limit_per_minute > 0 {
             let replenish_interval_ms = 60_000 / oidc_config.rate_limit_per_minute as u64;
-            let burst_size = (oidc_config.rate_limit_per_minute / 6).clamp(3, 20) as u32;
+            let burst_size = (oidc_config.rate_limit_per_minute / 6).clamp(3, 20);
 
             let governor_conf = GovernorConfigBuilder::default()
                 .per_millisecond(replenish_interval_ms)

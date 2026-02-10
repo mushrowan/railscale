@@ -1,2 +1,7 @@
 - [x] unvendor the snow crate — custom CryptoResolver with BE nonces instead of patching upstream
 - [x] wildcard certs per node — *.node.base_domain in CertDomains via dns-subdomain-resolve nodeAttr + peer CapMap propagation
+- [x] admin api: enrich node API endpoints with live presence data (online, connected_at) from PresenceTracker
+- [x] version test: assert on dirty field to verify build metadata is complete
+- [x] ts2021: handle MSG_TYPE_ERROR (0x03) from clients during noise handshake
+- [x] verify: log VerifyRequest.source ip for DERP client audit trail
+- [x] ts2021 tests: rename stub to create_invalid_initiation_message for clarity

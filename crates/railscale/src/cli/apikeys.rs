@@ -147,8 +147,8 @@ async fn list_keys(args: ListArgs) -> Result<()> {
     }
 
     println!(
-        "{:<6} {:<12} {:<20} {:<6} {:<20} {}",
-        "ID", "PREFIX", "NAME", "USER", "EXPIRES", "LAST USED"
+        "{:<6} {:<12} {:<20} {:<6} {:<20} LAST USED",
+        "ID", "PREFIX", "NAME", "USER", "EXPIRES"
     );
     println!("{}", "-".repeat(90));
 

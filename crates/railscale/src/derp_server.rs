@@ -236,12 +236,12 @@ pub async fn spawn_derp_listener(config: DerpListenerConfig) -> eyre::Result<Joi
                     let peer_ip = addr.ip();
 
                     // check connection rate limit per ip
-                    if let Some(ref limiter) = connection_rate_limiter {
-                        if limiter.check_key(&peer_ip).is_err() {
-                            debug!(peer = %addr, "DERP connection rejected: rate limited");
-                            drop(stream);
-                            continue;
-                        }
+                    if let Some(ref limiter) = connection_rate_limiter
+                        && limiter.check_key(&peer_ip).is_err()
+                    {
+                        debug!(peer = %addr, "DERP connection rejected: rate limited");
+                        drop(stream);
+                        continue;
                     }
 
                     // try to acquire a permit - if at capacity, reject the connection
@@ -866,15 +866,15 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     while let Some(frame) = rx.recv().await {
-        if let Err(err) = write_frame(&mut writer, frame.frame_type, &frame.payload).await {
-            if matches!(
+        if let Err(err) = write_frame(&mut writer, frame.frame_type, &frame.payload).await
+            && matches!(
                 err.kind(),
                 io::ErrorKind::BrokenPipe
                     | io::ErrorKind::UnexpectedEof
                     | io::ErrorKind::ConnectionReset
-            ) {
-                break;
-            }
+            )
+        {
+            break;
         }
     }
 }

@@ -711,8 +711,10 @@ async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
     db.create_node(&node).await.unwrap();
 
     // config with taildrop DISABLED
-    let mut config = Config::default();
-    config.taildrop_enabled = false;
+    let config = Config {
+        taildrop_enabled: false,
+        ..Default::default()
+    };
 
     let grants = GrantsEngine::new(map_common::wildcard_policy());
     let app = railscale::create_app(

@@ -222,10 +222,10 @@ impl GrantsEngine {
                 // parse connectors selectors from the json value
                 if let Some(connectors) = val.get("connectors").and_then(|c| c.as_array()) {
                     for connector_str in connectors.iter().filter_map(|v| v.as_str()) {
-                        if let Ok(selector) = crate::selector::Selector::parse(connector_str) {
-                            if self.node_matches_selector(node, &selector, resolver, None) {
-                                return true;
-                            }
+                        if let Ok(selector) = crate::selector::Selector::parse(connector_str)
+                            && self.node_matches_selector(node, &selector, resolver, None)
+                        {
+                            return true;
                         }
                     }
                 }
@@ -731,10 +731,8 @@ impl GrantsEngine {
                 }
 
                 // for autogroup:self destinations, only same-user untagged nodes are sources
-                if has_self_dst {
-                    if src_node.is_tagged() || node.user_id != src_node.user_id {
-                        continue;
-                    }
+                if has_self_dst && (src_node.is_tagged() || node.user_id != src_node.user_id) {
+                    continue;
                 }
 
                 // check if this source node matches any source selector

@@ -109,18 +109,18 @@ pub async fn map(
     // lookup country from client IP if geoip is configured
     if let (Some(geoip), Some(addr)) = (&state.geoip, client_addr) {
         let client_ip = addr.ip();
-        if let Some(country) = geoip.lookup_country(client_ip) {
-            if node.last_seen_country.as_ref() != Some(&country) {
-                tracing::debug!(
-                    node_id = node.id.0,
-                    old_country = ?node.last_seen_country,
-                    new_country = %country,
-                    "node country changed"
-                );
-                node.last_seen_country = Some(country);
-                needs_update = true;
-                country_changed = true;
-            }
+        if let Some(country) = geoip.lookup_country(client_ip)
+            && node.last_seen_country.as_ref() != Some(&country)
+        {
+            tracing::debug!(
+                node_id = node.id.0,
+                old_country = ?node.last_seen_country,
+                new_country = %country,
+                "node country changed"
+            );
+            node.last_seen_country = Some(country);
+            needs_update = true;
+            country_changed = true;
         }
     }
 
@@ -794,8 +794,10 @@ mod tests {
 
     #[test]
     fn test_build_self_cap_map_with_taildrop_has_both_caps() {
-        let mut config = railscale_types::Config::default();
-        config.taildrop_enabled = true;
+        let config = railscale_types::Config {
+            taildrop_enabled: true,
+            ..Default::default()
+        };
         let cap_map = build_self_cap_map_simple(&config).unwrap();
         assert!(cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS));
         assert!(cap_map.contains_key(railscale_proto::CAP_FILE_SHARING));
@@ -809,8 +811,10 @@ mod tests {
             policy::{NodeAttr, Policy},
         };
 
-        let mut config = railscale_types::Config::default();
-        config.taildrop_enabled = true;
+        let config = railscale_types::Config {
+            taildrop_enabled: true,
+            ..Default::default()
+        };
 
         let mut policy = Policy::empty();
         policy.node_attrs.push(NodeAttr {

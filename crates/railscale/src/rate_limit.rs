@@ -136,10 +136,10 @@ impl KeyExtractor for TrustedProxyKeyExtractor {
             .ok_or(tower_governor::GovernorError::UnableToExtractKey)?;
 
         // if the peer is a trusted proxy, try to get the real client IP
-        if self.is_trusted_proxy(peer_ip) {
-            if let Some(forwarded_ip) = self.extract_forwarded_ip(request) {
-                return Ok(forwarded_ip);
-            }
+        if self.is_trusted_proxy(peer_ip)
+            && let Some(forwarded_ip) = self.extract_forwarded_ip(request)
+        {
+            return Ok(forwarded_ip);
         }
 
         // either not from a trusted proxy, or no valid X-Forwarded-For header
@@ -352,16 +352,12 @@ impl IpAllowlistFilter {
             .trusted_networks
             .iter()
             .any(|net| net.contains(&peer_ip))
+            && let Some(xff) = request.headers().get("x-forwarded-for")
+            && let Ok(xff_str) = xff.to_str()
+            && let Some(first_ip) = xff_str.split(',').next()
+            && let Ok(client_ip) = first_ip.trim().parse::<IpAddr>()
         {
-            if let Some(xff) = request.headers().get("x-forwarded-for") {
-                if let Ok(xff_str) = xff.to_str() {
-                    if let Some(first_ip) = xff_str.split(',').next() {
-                        if let Ok(client_ip) = first_ip.trim().parse::<IpAddr>() {
-                            return Some(client_ip);
-                        }
-                    }
-                }
-            }
+            return Some(client_ip);
         }
 
         Some(peer_ip)

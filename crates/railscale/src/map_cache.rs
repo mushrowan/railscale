@@ -89,10 +89,10 @@ impl MapCache {
 
         // double-check: another task may have rebuilt while we waited for the lock
         let current_gen = self.generation.load(Ordering::Acquire);
-        if let Some(ref snap) = *guard {
-            if snap.generation == current_gen {
-                return Ok((snap.nodes.clone(), snap.users.clone()));
-            }
+        if let Some(ref snap) = *guard
+            && snap.generation == current_gen
+        {
+            return Ok((snap.nodes.clone(), snap.users.clone()));
         }
 
         // rebuild from database

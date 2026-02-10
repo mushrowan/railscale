@@ -38,8 +38,10 @@ async fn test_register_with_preauth_key() {
     let grants = GrantsEngine::new(policy);
 
     // create app with allow_non_noise_registration for testing without Noise
-    let mut config = railscale_types::Config::default();
-    config.allow_non_noise_registration = true;
+    let config = railscale_types::Config {
+        allow_non_noise_registration: true,
+        ..Default::default()
+    };
     let app = railscale::create_app(
         db,
         grants,
@@ -123,8 +125,10 @@ async fn test_register_with_tailscale_format() {
     let grants = GrantsEngine::new(policy);
 
     // create app with allow_non_noise_registration for testing without Noise
-    let mut config = railscale_types::Config::default();
-    config.allow_non_noise_registration = true;
+    let config = railscale_types::Config {
+        allow_non_noise_registration: true,
+        ..Default::default()
+    };
     let app = railscale::create_app(
         db,
         grants,
@@ -221,8 +225,10 @@ async fn test_register_allocates_ip_addresses() {
     let grants = GrantsEngine::new(policy);
 
     // create app with allow_non_noise_registration for testing without Noise
-    let mut config = railscale_types::Config::default();
-    config.allow_non_noise_registration = true;
+    let config = railscale_types::Config {
+        allow_non_noise_registration: true,
+        ..Default::default()
+    };
     let app = railscale::create_app(
         db.clone(),
         grants,
@@ -341,8 +347,10 @@ async fn test_register_without_content_type_header() {
     let grants = GrantsEngine::new(policy);
 
     // create app with allow_non_noise_registration for testing without Noise
-    let mut config = railscale_types::Config::default();
-    config.allow_non_noise_registration = true;
+    let config = railscale_types::Config {
+        allow_non_noise_registration: true,
+        ..Default::default()
+    };
     let app = railscale::create_app(
         db,
         grants,

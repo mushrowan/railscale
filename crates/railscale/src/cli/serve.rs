@@ -91,26 +91,26 @@ pub fn apply_headscale_env_migration() {
         let hs_val = env::var(&hs_key).ok();
 
         // only set railscale_* if it's not already set and headscale_* is
-        if rs_val.is_none() {
-            if let Some(hs) = hs_val {
-                tracing::debug!(
-                    "Migrating {} -> {} = {}",
-                    hs_key,
-                    rs_key,
-                    if suffix.contains("SECRET") || suffix.contains("KEY") {
-                        "[redacted]"
-                    } else {
-                        &hs
-                    }
-                );
-                // SAFETY: env::set_var is unsafe in edition 2024 because modifying
-                // env vars while other threads read them is UB. this function is
-                // called from main() before tokio::main starts the runtime, so no
-                // other threads exist. callers must not invoke this after spawning
-                // threads or entering an async runtime.
-                unsafe {
-                    env::set_var(&rs_key, &hs);
+        if rs_val.is_none()
+            && let Some(hs) = hs_val
+        {
+            tracing::debug!(
+                "Migrating {} -> {} = {}",
+                hs_key,
+                rs_key,
+                if suffix.contains("SECRET") || suffix.contains("KEY") {
+                    "[redacted]"
+                } else {
+                    &hs
                 }
+            );
+            // SAFETY: env::set_var is unsafe in edition 2024 because modifying
+            // env vars while other threads read them is UB. this function is
+            // called from main() before tokio::main starts the runtime, so no
+            // other threads exist. callers must not invoke this after spawning
+            // threads or entering an async runtime.
+            unsafe {
+                env::set_var(&rs_key, &hs);
             }
         }
     }
@@ -444,7 +444,7 @@ impl ServeCommand {
             let tls_assets = derp_server::load_or_generate_derp_tls(
                 &config.derp.embedded_derp.cert_path,
                 &config.derp.embedded_derp.tls_key_path,
-                &[advertise_host.clone()],
+                std::slice::from_ref(&advertise_host),
             )
             .context("failed to set up DERP TLS")?;
             info!(
@@ -658,12 +658,12 @@ impl ServeCommand {
             let _ = std::fs::remove_file(&admin_socket_path);
 
             // create parent directory if needed
-            if let Some(parent) = admin_socket_path.parent() {
-                if !parent.exists() {
-                    std::fs::create_dir_all(parent).with_context(|| {
-                        format!("failed to create admin socket directory: {:?}", parent)
-                    })?;
-                }
+            if let Some(parent) = admin_socket_path.parent()
+                && !parent.exists()
+            {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("failed to create admin socket directory: {:?}", parent)
+                })?;
             }
 
             let uds = UnixListener::bind(&admin_socket_path)
@@ -760,12 +760,12 @@ fn extract_port(addr: &str) -> Option<u16> {
 /// handles postgresql urls like: postgres://user:password@host/db
 fn redact_db_password(conn_str: &str) -> String {
     // try to parse as url
-    if let Ok(mut url) = url::Url::parse(conn_str) {
-        if url.password().is_some() {
-            // replace password with [redacted]
-            let _ = url.set_password(Some("[REDACTED]"));
-            return url.to_string();
-        }
+    if let Ok(mut url) = url::Url::parse(conn_str)
+        && url.password().is_some()
+    {
+        // replace password with [redacted]
+        let _ = url.set_password(Some("[REDACTED]"));
+        return url.to_string();
     }
     // if not a url or no password, return as-is (e.g., sqlite paths)
     conn_str.to_string()

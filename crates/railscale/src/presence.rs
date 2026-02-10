@@ -22,15 +22,11 @@ pub struct PresenceTracker {
 }
 
 /// information about a connected node.
-///
-/// fields are stored for future use (diagnostics, admin api).
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
     /// node key of the connected node.
-    #[allow(dead_code)]
     pub node_key: NodeKey,
     /// when the connection was established.
-    #[allow(dead_code)]
     pub connected_at: DateTime<Utc>,
 }
 
@@ -91,6 +87,12 @@ impl PresenceTracker {
     pub async fn connected_nodes(&self) -> Vec<NodeId> {
         let connected = self.connected.read().await;
         connected.keys().copied().collect()
+    }
+
+    /// get connection info for a specific node, if connected.
+    pub async fn get_connection_info(&self, node_id: NodeId) -> Option<ConnectionInfo> {
+        let connected = self.connected.read().await;
+        connected.get(&node_id).cloned()
     }
 }
 
@@ -163,6 +165,25 @@ mod tests {
         assert_eq!(statuses.get(&NodeId(2)), Some(&false));
         assert_eq!(statuses.get(&NodeId(3)), Some(&true));
         assert_eq!(statuses.get(&NodeId(4)), Some(&false));
+    }
+
+    #[tokio::test]
+    async fn test_get_connection_info() {
+        let tracker = PresenceTracker::new();
+        let node_id = NodeId(1);
+        let node_key = test_node_key();
+
+        // not connected
+        assert!(tracker.get_connection_info(node_id).await.is_none());
+
+        // connect
+        tracker.connect(node_id, node_key.clone()).await;
+        let info = tracker.get_connection_info(node_id).await.unwrap();
+        assert_eq!(info.node_key, node_key);
+
+        // disconnect
+        tracker.disconnect(node_id).await;
+        assert!(tracker.get_connection_info(node_id).await.is_none());
     }
 
     #[tokio::test]

@@ -2,14 +2,12 @@ use railscale_grants::UserResolver;
 use railscale_types::{OidcGroupPrefix, User, UserId};
 use std::collections::HashMap;
 
-/// 2. oidc groups (synced from identity provider claims)
-///optional prefix to apply to oidc group names
-/// this is typically constructed in the map handler where we already
-/// have the list of users loaded from the database and the policy groups.
+/// resolves user identity and group membership for map responses.
 ///
-/// groups are resolved from two sources:
-/// 1. Policy file groups (email-based membership)
-/// 2. OIDC groups (synced from identity provider claims)
+/// constructed in the map handler with users from the database and
+/// policy groups. groups are resolved from two sources:
+/// 1. policy file groups (email-based membership)
+/// 2. oidc groups (synced from identity provider claims)
 pub struct MapUserResolver {
     users: HashMap<UserId, User>,
     /// maps group name (with "group:" prefix) to list of member emails.

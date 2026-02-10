@@ -125,7 +125,7 @@ impl TestDerpClient {
     }
 
     fn public_key_bytes(&self) -> [u8; 32] {
-        self.public.as_bytes().clone()
+        *self.public.as_bytes()
     }
 
     async fn send_packet(&self, dst: [u8; 32], data: Vec<u8>) -> Result<()> {

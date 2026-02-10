@@ -871,10 +871,10 @@ impl Database for RailscaleDb {
 
         let mut map = std::collections::HashMap::new();
         for model in results {
-            if let Some(sig) = model.key_signature {
-                if !sig.is_empty() {
-                    map.insert(NodeId(model.id as u64), sig);
-                }
+            if let Some(sig) = model.key_signature
+                && !sig.is_empty()
+            {
+                map.insert(NodeId(model.id as u64), sig);
             }
         }
 
@@ -1434,7 +1434,7 @@ mod tests {
 
         assert_eq!(sigs.len(), 2);
         assert_eq!(sigs.get(&nodes[0].id), Some(&vec![0xaa, 0xbb]));
-        assert!(sigs.get(&nodes[1].id).is_none());
+        assert!(!sigs.contains_key(&nodes[1].id));
         assert_eq!(sigs.get(&nodes[2].id), Some(&vec![0xcc, 0xdd]));
 
         // empty input returns empty map

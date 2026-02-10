@@ -42,7 +42,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// manage policy (reload, get, set)
-    Serve(ServeCommand),
+    Serve(Box<ServeCommand>),
 
     /// manage policy (reload, get, set)
     #[command(subcommand)]

@@ -788,11 +788,8 @@ impl AdminService for AdminServiceImpl {
                 None
             } else {
                 // store as JSON array of hex strings (as bytes)
-                let secrets: Vec<String> = req
-                    .disablement_secrets
-                    .iter()
-                    .map(|s| hex::encode(s))
-                    .collect();
+                let secrets: Vec<String> =
+                    req.disablement_secrets.iter().map(hex::encode).collect();
                 Some(serde_json::to_vec(&secrets).unwrap_or_default())
             },
             genesis_aum: Some(req.genesis_aum.clone()),
@@ -1066,6 +1063,6 @@ fn extract_tka_keys(genesis_bytes: &[u8]) -> Vec<pb::TkaKey> {
 
     vec![pb::TkaKey {
         key_id: hex::encode(key_id.as_bytes()),
-        votes: key.votes as u32,
+        votes: key.votes,
     }]
 }

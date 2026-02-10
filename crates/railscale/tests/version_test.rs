@@ -21,7 +21,6 @@ struct VersionResponse {
     commit: String,
     build_time: String,
     rustc: String,
-    #[allow(dead_code)]
     dirty: bool,
 }
 
@@ -85,7 +84,8 @@ async fn test_version_endpoint_returns_info() {
         !version_response.rustc.is_empty(),
         "rustc should not be empty"
     );
-    // dirty is a bool, always valid
+    // dirty should be a valid bool (true when working tree has uncommitted changes)
+    let _ = version_response.dirty;
 }
 
 /// response from `/version` when build metadata is hidden
@@ -110,8 +110,10 @@ async fn test_version_endpoint_hides_build_metadata() {
         .await
         .expect("failed to create in-memory database");
     let grants = GrantsEngine::new(Policy::empty());
-    let mut config = Config::default();
-    config.hide_build_metadata = true;
+    let config = Config {
+        hide_build_metadata: true,
+        ..Default::default()
+    };
     let notifier = StateNotifier::default();
 
     let app = create_app(db, grants, config, None, notifier, None).await;

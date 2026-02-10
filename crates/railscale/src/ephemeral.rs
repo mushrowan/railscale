@@ -128,10 +128,10 @@ impl EphemeralGarbageCollector {
                 Ok(Some(n)) => {
                     let mut ips = Vec::new();
                     if let Some(v4) = n.ipv4 {
-                        ips.push(v4.into());
+                        ips.push(v4);
                     }
                     if let Some(v6) = n.ipv6 {
-                        ips.push(v6.into());
+                        ips.push(v6);
                     }
                     ips
                 }

@@ -168,8 +168,8 @@ async fn list_keys(args: ListArgs) -> Result<()> {
     }
 
     println!(
-        "{:<6} {:<12} {:<6} {:<8} {:<8} {:<20} {}",
-        "ID", "KEY", "USER", "REUSABLE", "USED", "EXPIRES", "TAGS"
+        "{:<6} {:<12} {:<6} {:<8} {:<8} {:<20} TAGS",
+        "ID", "KEY", "USER", "REUSABLE", "USED", "EXPIRES"
     );
     println!("{}", "-".repeat(80));
 

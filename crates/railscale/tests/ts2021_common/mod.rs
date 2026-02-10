@@ -36,19 +36,17 @@ pub async fn create_test_app_with_keypair(keypair: railscale::Keypair) -> axum::
     create_app(db, grants, config, None, notifier, Some(keypair)).await
 }
 
-/// create a test Noise IK initiation message (placeholder)
+/// create an invalid Noise IK initiation message for testing rejection paths.
+///
+/// has correct framing (version, type, length) but zeroed-out noise payload,
+/// so the server will recognise the upgrade but fail the cryptographic handshake.
 ///
 /// format (101 bytes total):
 /// - 2 bytes: protocol version (big-endian)
 /// - 1 byte: message type (0x01 = initiation)
 /// - 2 bytes: payload length (96, big-endian)
-/// - 32 bytes: client ephemeral public key (cleartext)
-/// - 48 bytes: encrypted client static public key
-/// - 16 bytes: authentication tag
-#[allow(dead_code)]
-pub fn create_test_initiation_message(client_private_key: &[u8]) -> Vec<u8> {
-    // for now, create a placeholder message
-    // the actual implementation will need proper Noise handshake
+/// - 96 bytes: zeroed placeholder (invalid noise payload)
+pub fn create_invalid_initiation_message() -> Vec<u8> {
     let mut msg = vec![0u8; 101];
 
     // protocol version (1)
@@ -62,10 +60,8 @@ pub fn create_test_initiation_message(client_private_key: &[u8]) -> Vec<u8> {
     msg[3] = 0x00;
     msg[4] = 0x60; // 96 in big-endian
 
-    // rest is placeholder - ephemeral key, encrypted static key, tag
-    // this will fail the handshake but tests the upgrade path
-    _ = client_private_key; // Will be used in proper implementation
-
+    // rest is zeroed — invalid noise payload that will fail the handshake
+    // but tests the upgrade/framing path
     msg
 }
 

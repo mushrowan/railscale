@@ -83,6 +83,8 @@ pub struct NodeResponse {
     pub approved_routes: Vec<String>,
     pub created_at: String,
     pub online: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connected_at: Option<String>,
 }
 
 /// format a key as "prefix:<first 8 hex chars>..." (redacted)
@@ -113,7 +115,19 @@ impl From<Node> for NodeResponse {
             approved_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
             created_at: node.created_at.to_rfc3339(),
             online: node.is_online.unwrap_or(false),
+            connected_at: None,
         }
+    }
+}
+
+impl NodeResponse {
+    /// overlay live presence data onto the response
+    fn with_presence(mut self, info: Option<&crate::presence::ConnectionInfo>) -> Self {
+        if let Some(info) = info {
+            self.online = true;
+            self.connected_at = Some(info.connected_at.to_rfc3339());
+        }
+        self
     }
 }
 
@@ -185,13 +199,14 @@ async fn list_nodes(
 ) -> Result<Json<ListNodesResponse>, ApiError> {
     let nodes = state.db.list_nodes().await.map_err(ApiError::internal)?;
 
-    let nodes: Vec<NodeResponse> = pagination
-        .apply(nodes)
-        .into_iter()
-        .map(NodeResponse::from)
-        .collect();
+    let mut responses = Vec::with_capacity(nodes.len());
+    for node in pagination.apply(nodes) {
+        let node_id = node.id;
+        let info = state.presence.get_connection_info(node_id).await;
+        responses.push(NodeResponse::from(node).with_presence(info.as_ref()));
+    }
 
-    Ok(Json(ListNodesResponse { nodes }))
+    Ok(Json(ListNodesResponse { nodes: responses }))
 }
 
 /// get a specific node.
@@ -211,8 +226,10 @@ async fn get_node(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
+    let info = state.presence.get_connection_info(node_id).await;
+
     Ok(Json(GetNodeResponse {
-        node: NodeResponse::from(node),
+        node: NodeResponse::from(node).with_presence(info.as_ref()),
     }))
 }
 
@@ -244,10 +261,10 @@ async fn delete_node(
     {
         let mut allocator = state.ip_allocator.lock().await;
         if let Some(v4) = node.ipv4 {
-            allocator.release(v4.into());
+            allocator.release(v4);
         }
         if let Some(v6) = node.ipv6 {
-            allocator.release(v6.into());
+            allocator.release(v6);
         }
     }
 
@@ -294,8 +311,9 @@ async fn expire_node(
     // notify connected clients
     state.notifier.notify_state_changed();
 
+    let info = state.presence.get_connection_info(node_id).await;
     Ok(Json(GetNodeResponse {
-        node: NodeResponse::from(node),
+        node: NodeResponse::from(node).with_presence(info.as_ref()),
     }))
 }
 
@@ -329,8 +347,9 @@ async fn rename_node(
     // notify connected clients
     state.notifier.notify_state_changed();
 
+    let info = state.presence.get_connection_info(node_id).await;
     Ok(Json(RenameNodeResponse {
-        node: NodeResponse::from(node),
+        node: NodeResponse::from(node).with_presence(info.as_ref()),
     }))
 }
 
@@ -374,8 +393,9 @@ async fn set_tags(
     // notify connected clients
     state.notifier.notify_state_changed();
 
+    let info = state.presence.get_connection_info(node_id).await;
     Ok(Json(SetTagsResponse {
-        node: NodeResponse::from(node),
+        node: NodeResponse::from(node).with_presence(info.as_ref()),
     }))
 }
 
@@ -409,8 +429,9 @@ async fn set_routes(
     // notify connected clients
     state.notifier.notify_state_changed();
 
+    let info = state.presence.get_connection_info(node_id).await;
     Ok(Json(SetRoutesResponse {
-        node: NodeResponse::from(node),
+        node: NodeResponse::from(node).with_presence(info.as_ref()),
     }))
 }
 
@@ -479,8 +500,9 @@ async fn set_posture_attributes(
     // notify connected clients
     state.notifier.notify_state_changed();
 
+    let info = state.presence.get_connection_info(node_id).await;
     Ok(Json(SetPostureAttributesResponse {
-        node: NodeResponse::from(node),
+        node: NodeResponse::from(node).with_presence(info.as_ref()),
     }))
 }
 
@@ -579,7 +601,7 @@ mod tests {
         );
 
         // must NOT contain full 64-char hex (32 bytes)
-        let mkey_hex = response.machine_key.split(':').last().unwrap();
+        let mkey_hex = response.machine_key.split(':').next_back().unwrap();
         assert!(
             mkey_hex.len() < 64,
             "machine_key should be truncated, got {} chars",

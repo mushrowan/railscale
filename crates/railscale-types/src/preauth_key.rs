@@ -1,12 +1,8 @@
 //! pre-authentication key type for automated node registration.
+//! pre-authentication keys for automated node registration.
 //!
-//! ## Security
-//! and can optionally tag the nodes they register.
-//!preauthkeys use split token storage for security:
-//! - `key_prefix`: Short identifier for display/lookup (e.g., "tskey-auth-0123456789ab")
-//!- `key_hash`: SHA-256 hash for verification
 //! preauthkeys use split token storage for security:
-//! the full key is only returned at creation time and is never stored
+//! - `key_prefix`: short identifier for display/lookup
 //! - `key_hash`: SHA-256 hash for verification
 //!
 //! the full key is only returned at creation time and is never stored.
@@ -23,17 +19,15 @@ use crate::user::UserId;
 ///
 /// preauthkeys can be:
 /// - **reusable**: can register multiple nodes
-/// ## Security
+/// - **ephemeral**: registered nodes are auto-removed on disconnect
 /// - **tagged**: nodes registered get these tags (tags-as-identity)
-///the full key is never stored. Instead, we store:
-/// - `key_prefix`: For identification in logs and api responses
-///- `key_hash`: For secure verification during registration
-/// the key prefix for identification (e.g., "tskey-auth-0123456789ab")
-/// - `key_prefix`: For identification in logs and API responses
-/// this is safe to display in logs and api responses
+///
+/// the full key is never stored. instead, we store:
+/// - `key_prefix`: for identification in logs and api responses
+/// - `key_hash`: for secure verification during registration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PreAuthKey {
-    /// sHA-256 hash of the full key for verification
+    /// unique identifier
     pub id: u64,
 
     /// the key prefix for identification (e.g., "tskey-auth-0123456789ab").

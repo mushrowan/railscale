@@ -129,450 +129,6 @@ fn parse_nl_public_key(s: &str) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode},
-    };
-    use railscale_db::RailscaleDb;
-    use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
-    use tower::ServiceExt;
-
-    #[test]
-    fn test_register_request_parses_followup() {
-        let json = r#"{
-            "Version": 68,
-            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
-            "Followup": "/register/abc123"
-        }"#;
-
-        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
-        assert_eq!(req.followup, "/register/abc123");
-    }
-
-    #[test]
-    fn test_register_request_followup_defaults_to_empty() {
-        let json = r#"{
-            "Version": 68,
-            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000"
-        }"#;
-
-        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
-        assert!(req.followup.is_empty());
-    }
-
-    #[test]
-    fn test_register_request_parses_nl_key() {
-        let json = r#"{
-            "Version": 68,
-            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
-            "NLKey": "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
-        }"#;
-
-        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
-        assert_eq!(
-            req.nl_key,
-            "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
-        );
-    }
-
-    #[test]
-    fn test_register_request_nl_key_defaults_to_empty() {
-        let json = r#"{
-            "Version": 68,
-            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000"
-        }"#;
-
-        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
-        assert!(req.nl_key.is_empty());
-    }
-
-    #[test]
-    fn test_parse_nl_public_key_valid() {
-        let hex_str = "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        let result = parse_nl_public_key(hex_str);
-        assert!(result.is_some());
-        let bytes = result.unwrap();
-        assert_eq!(bytes.len(), 32);
-        assert_eq!(bytes[0], 0x01);
-        assert_eq!(bytes[31], 0x20);
-    }
-
-    #[test]
-    fn test_parse_nl_public_key_empty() {
-        assert!(parse_nl_public_key("").is_none());
-    }
-
-    #[test]
-    fn test_parse_nl_public_key_wrong_prefix() {
-        let hex_str = "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        assert!(parse_nl_public_key(hex_str).is_none());
-    }
-
-    #[test]
-    fn test_parse_nl_public_key_wrong_length() {
-        // only 16 bytes instead of 32
-        let hex_str = "nlpub:0102030405060708090a0b0c0d0e0f10";
-        assert!(parse_nl_public_key(hex_str).is_none());
-    }
-
-    fn default_grants() -> GrantsEngine {
-        let mut policy = Policy::empty();
-        policy.grants.push(Grant {
-            src: vec![Selector::Wildcard],
-            dst: vec![Selector::Wildcard],
-            ip: vec![NetworkCapability::Wildcard],
-            app: vec![],
-            src_posture: vec![],
-            via: vec![],
-        });
-        GrantsEngine::new(policy)
-    }
-
-    #[tokio::test]
-    async fn test_register_rejects_non_noise_requests_by_default() {
-        // set up test database
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create app with default config (allow_non_noise_registration = false)
-        let config = railscale_types::Config::default();
-        assert!(
-            !config.allow_non_noise_registration,
-            "default should reject non-Noise registration"
-        );
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // send register request without Noise context
-        let req_body = serde_json::json!({
-            "Version": 68,
-            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
-        });
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/register")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // should reject with 400 bad request
-        assert_eq!(
-            response.status(),
-            StatusCode::BAD_REQUEST,
-            "should reject registration without Noise context"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_register_without_auth_key_returns_auth_url_when_oidc_disabled() {
-        // set up test database
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create app with allow_non_noise_registration enabled for testing
-        let mut config = railscale_types::Config::default();
-        config.allow_non_noise_registration = true;
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None, // No OIDC
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // send register request without auth_key
-        let req_body = serde_json::json!({
-            "Version": 68,
-            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
-        });
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/register")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // without oidc, should return 200 with auth_url pointing to web registration
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // parse response body
-        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
-
-        // should not be authorized yet
-        assert!(!resp.machine_authorized);
-
-        // should have an auth_url for web registration
-        assert!(
-            resp.auth_url.starts_with("/register/"),
-            "auth_url should start with /register/, got: {}",
-            resp.auth_url
-        );
-    }
-
-    #[tokio::test]
-    async fn test_register_followup_waits_for_completion() {
-        // set up test database
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create app with allow_non_noise_registration enabled for testing
-        let mut config = railscale_types::Config::default();
-        config.allow_non_noise_registration = true;
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // step 1: initial request without auth_key creates pending registration
-        let req_body = serde_json::json!({
-            "Version": 68,
-            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
-        });
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/register")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // get the auth_url from the response
-        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
-            .await
-            .unwrap();
-        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
-        assert!(!resp.machine_authorized);
-        let auth_url = resp.auth_url;
-        assert!(auth_url.starts_with("/register/"));
-
-        // step 2: send followup request - since nothing completed it,
-        // it should timeout and return auth_url again
-        let req_body = serde_json::json!({
-            "Version": 68,
-            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
-            "Followup": auth_url
-        });
-
-        // use a short timeout for the test
-        let followup_response = tokio::time::timeout(
-            tokio::time::Duration::from_secs(2),
-            app.clone().oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/register")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                    .unwrap(),
-            ),
-        )
-        .await;
-
-        // the followup should return quickly with a timeout response
-        // (or error if registration not found due to different app instance)
-        match followup_response {
-            Ok(Ok(response)) => {
-                // got a response - could be timeout or not found
-                let status = response.status();
-                assert!(
-                    status == StatusCode::OK || status == StatusCode::BAD_REQUEST,
-                    "expected 200 or 400, got {}",
-                    status
-                );
-            }
-            Ok(Err(e)) => {
-                panic!("Request error: {:?}", e);
-            }
-            Err(_) => {
-                // test timeout - that's okay, the followup is waiting
-                // this shouldn't happen with our 30s server timeout vs 2s test timeout
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_non_noise_registration_gets_unique_machine_keys() {
-        use railscale_db::Database;
-
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a preauth key so registration can complete
-        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let token = railscale_types::PreAuthKeyToken::generate();
-        let mut preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
-        preauth.reusable = true;
-        db.create_preauth_key(&preauth).await.unwrap();
-        let auth_key_str = token.to_string();
-
-        let mut config = railscale_types::Config::default();
-        config.allow_non_noise_registration = true;
-
-        // register two nodes with same allow_non_noise path
-        let mut machine_keys = vec![];
-        for i in 0u8..2 {
-            let app = crate::create_app(
-                db.clone(),
-                default_grants(),
-                config.clone(),
-                None,
-                crate::StateNotifier::default(),
-                None,
-            )
-            .await;
-
-            let mut node_key_bytes = vec![0u8; 32];
-            node_key_bytes[0] = i + 1;
-            let node_key_hex: String = node_key_bytes.iter().map(|b| format!("{b:02x}")).collect();
-
-            let req_body = serde_json::json!({
-                "Version": 68,
-                "NodeKey": format!("nodekey:{node_key_hex}"),
-                "Auth": { "AuthKey": auth_key_str }
-            });
-
-            let response = app
-                .oneshot(
-                    Request::builder()
-                        .method("POST")
-                        .uri("/machine/register")
-                        .header("content-type", "application/json")
-                        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-
-            assert_eq!(response.status(), StatusCode::OK);
-
-            // look up the node's machine key
-            let nk = railscale_types::NodeKey::from_bytes(node_key_bytes);
-            let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
-            machine_keys.push(node.machine_key.as_bytes().to_vec());
-        }
-
-        // machine keys must be different (not all zeros)
-        assert_ne!(
-            machine_keys[0], machine_keys[1],
-            "non-noise registrations must get unique machine keys"
-        );
-        assert_ne!(
-            machine_keys[0],
-            vec![0u8; 32],
-            "machine key must not be all zeros"
-        );
-        assert_ne!(
-            machine_keys[1],
-            vec![0u8; 32],
-            "machine key must not be all zeros"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_register_stores_nl_key() {
-        use railscale_db::Database;
-
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a preauth key
-        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let token = railscale_types::PreAuthKeyToken::generate();
-        let preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
-        db.create_preauth_key(&preauth).await.unwrap();
-        let auth_key_str = token.to_string();
-
-        let mut config = railscale_types::Config::default();
-        config.allow_non_noise_registration = true;
-
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        let nl_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        let req_body = serde_json::json!({
-            "Version": 68,
-            "NodeKey": "nodekey:aabbccdd00000000000000000000000000000000000000000000000000000000",
-            "NLKey": format!("nlpub:{nl_key_hex}"),
-            "Auth": { "AuthKey": auth_key_str }
-        });
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/register")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // verify NL key was stored on the node
-        let nk = railscale_types::NodeKey::from_bytes(
-            hex::decode("aabbccdd00000000000000000000000000000000000000000000000000000000")
-                .unwrap(),
-        );
-        let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
-        let expected_bytes = hex::decode(nl_key_hex).unwrap();
-        assert_eq!(
-            node.nl_public_key,
-            Some(expected_bytes),
-            "nl_public_key should be stored from NLKey in register request"
-        );
-    }
-}
-
 /// handle node registration.
 ///
 /// this endpoint is called by tailscale clients to register a new node
@@ -630,7 +186,7 @@ pub async fn register(
         return handle_preauth_registration(state, req, machine_key, &auth_key_str).await;
     } else {
         // interactive registration - return auth_url
-        return handle_interactive_registration(state, req, machine_key).await;
+        handle_interactive_registration(state, req, machine_key).await
     }
 }
 
@@ -845,9 +401,7 @@ async fn handle_interactive_registration(
         machine_key,
         req.hostinfo,
     ));
-    state
-        .pending_registrations
-        .insert(registration_id.clone(), pending);
+    state.pending_registrations.insert(registration_id, pending);
 
     // build auth_url - this is where the user will be redirected to authenticate
     let auth_url = format!("/register/{}", registration_id);
@@ -951,4 +505,456 @@ fn build_success_response(
         auth_url: String::new(),
         error: String::new(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use railscale_db::RailscaleDb;
+    use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
+    use tower::ServiceExt;
+
+    #[test]
+    fn test_register_request_parses_followup() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+            "Followup": "/register/abc123"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert_eq!(req.followup, "/register/abc123");
+    }
+
+    #[test]
+    fn test_register_request_followup_defaults_to_empty() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert!(req.followup.is_empty());
+    }
+
+    #[test]
+    fn test_register_request_parses_nl_key() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+            "NLKey": "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert_eq!(
+            req.nl_key,
+            "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        );
+    }
+
+    #[test]
+    fn test_register_request_nl_key_defaults_to_empty() {
+        let json = r#"{
+            "Version": 68,
+            "NodeKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000"
+        }"#;
+
+        let req: RegisterRequest = serde_json::from_str(json).expect("should parse");
+        assert!(req.nl_key.is_empty());
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_valid() {
+        let hex_str = "nlpub:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let result = parse_nl_public_key(hex_str);
+        assert!(result.is_some());
+        let bytes = result.unwrap();
+        assert_eq!(bytes.len(), 32);
+        assert_eq!(bytes[0], 0x01);
+        assert_eq!(bytes[31], 0x20);
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_empty() {
+        assert!(parse_nl_public_key("").is_none());
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_wrong_prefix() {
+        let hex_str = "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        assert!(parse_nl_public_key(hex_str).is_none());
+    }
+
+    #[test]
+    fn test_parse_nl_public_key_wrong_length() {
+        // only 16 bytes instead of 32
+        let hex_str = "nlpub:0102030405060708090a0b0c0d0e0f10";
+        assert!(parse_nl_public_key(hex_str).is_none());
+    }
+
+    fn default_grants() -> GrantsEngine {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+        GrantsEngine::new(policy)
+    }
+
+    #[tokio::test]
+    async fn test_register_rejects_non_noise_requests_by_default() {
+        // set up test database
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create app with default config (allow_non_noise_registration = false)
+        let config = railscale_types::Config::default();
+        assert!(
+            !config.allow_non_noise_registration,
+            "default should reject non-Noise registration"
+        );
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // send register request without Noise context
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // should reject with 400 bad request
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "should reject registration without Noise context"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_without_auth_key_returns_auth_url_when_oidc_disabled() {
+        // set up test database
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create app with allow_non_noise_registration enabled for testing
+        let config = railscale_types::Config {
+            allow_non_noise_registration: true,
+            ..Default::default()
+        };
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None, // No OIDC
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // send register request without auth_key
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // without oidc, should return 200 with auth_url pointing to web registration
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // parse response body
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+
+        // should not be authorized yet
+        assert!(!resp.machine_authorized);
+
+        // should have an auth_url for web registration
+        assert!(
+            resp.auth_url.starts_with("/register/"),
+            "auth_url should start with /register/, got: {}",
+            resp.auth_url
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_followup_waits_for_completion() {
+        // set up test database
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create app with allow_non_noise_registration enabled for testing
+        let config = railscale_types::Config {
+            allow_non_noise_registration: true,
+            ..Default::default()
+        };
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        // step 1: initial request without auth_key creates pending registration
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+        });
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // get the auth_url from the response
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+        assert!(!resp.machine_authorized);
+        let auth_url = resp.auth_url;
+        assert!(auth_url.starts_with("/register/"));
+
+        // step 2: send followup request - since nothing completed it,
+        // it should timeout and return auth_url again
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+            "Followup": auth_url
+        });
+
+        // use a short timeout for the test
+        let followup_response = tokio::time::timeout(
+            tokio::time::Duration::from_secs(2),
+            app.clone().oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            ),
+        )
+        .await;
+
+        // the followup should return quickly with a timeout response
+        // (or error if registration not found due to different app instance)
+        match followup_response {
+            Ok(Ok(response)) => {
+                // got a response - could be timeout or not found
+                let status = response.status();
+                assert!(
+                    status == StatusCode::OK || status == StatusCode::BAD_REQUEST,
+                    "expected 200 or 400, got {}",
+                    status
+                );
+            }
+            Ok(Err(e)) => {
+                panic!("Request error: {:?}", e);
+            }
+            Err(_) => {
+                // test timeout - that's okay, the followup is waiting
+                // this shouldn't happen with our 30s server timeout vs 2s test timeout
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_non_noise_registration_gets_unique_machine_keys() {
+        use railscale_db::Database;
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a preauth key so registration can complete
+        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let token = railscale_types::PreAuthKeyToken::generate();
+        let mut preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
+        preauth.reusable = true;
+        db.create_preauth_key(&preauth).await.unwrap();
+        let auth_key_str = token.to_string();
+
+        let config = railscale_types::Config {
+            allow_non_noise_registration: true,
+            ..Default::default()
+        };
+
+        // register two nodes with same allow_non_noise path
+        let mut machine_keys = vec![];
+        for i in 0u8..2 {
+            let app = crate::create_app(
+                db.clone(),
+                default_grants(),
+                config.clone(),
+                None,
+                crate::StateNotifier::default(),
+                None,
+            )
+            .await;
+
+            let mut node_key_bytes = vec![0u8; 32];
+            node_key_bytes[0] = i + 1;
+            let node_key_hex: String = node_key_bytes.iter().map(|b| format!("{b:02x}")).collect();
+
+            let req_body = serde_json::json!({
+                "Version": 68,
+                "NodeKey": format!("nodekey:{node_key_hex}"),
+                "Auth": { "AuthKey": auth_key_str }
+            });
+
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/machine/register")
+                        .header("content-type", "application/json")
+                        .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+
+            // look up the node's machine key
+            let nk = railscale_types::NodeKey::from_bytes(node_key_bytes);
+            let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
+            machine_keys.push(node.machine_key.as_bytes().to_vec());
+        }
+
+        // machine keys must be different (not all zeros)
+        assert_ne!(
+            machine_keys[0], machine_keys[1],
+            "non-noise registrations must get unique machine keys"
+        );
+        assert_ne!(
+            machine_keys[0],
+            vec![0u8; 32],
+            "machine key must not be all zeros"
+        );
+        assert_ne!(
+            machine_keys[1],
+            vec![0u8; 32],
+            "machine key must not be all zeros"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_stores_nl_key() {
+        use railscale_db::Database;
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create a preauth key
+        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let token = railscale_types::PreAuthKeyToken::generate();
+        let preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
+        db.create_preauth_key(&preauth).await.unwrap();
+        let auth_key_str = token.to_string();
+
+        let config = railscale_types::Config {
+            allow_non_noise_registration: true,
+            ..Default::default()
+        };
+
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        let nl_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": "nodekey:aabbccdd00000000000000000000000000000000000000000000000000000000",
+            "NLKey": format!("nlpub:{nl_key_hex}"),
+            "Auth": { "AuthKey": auth_key_str }
+        });
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/machine/register")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // verify NL key was stored on the node
+        let nk = railscale_types::NodeKey::from_bytes(
+            hex::decode("aabbccdd00000000000000000000000000000000000000000000000000000000")
+                .unwrap(),
+        );
+        let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
+        let expected_bytes = hex::decode(nl_key_hex).unwrap();
+        assert_eq!(
+            node.nl_public_key,
+            Some(expected_bytes),
+            "nl_public_key should be stored from NLKey in register request"
+        );
+    }
 }

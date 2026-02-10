@@ -573,7 +573,7 @@ mod tests {
     #[test]
     fn test_evaluate_multiple_conditions_and() {
         // a posture with multiple conditions uses AND semantics
-        let conditions = vec![
+        let conditions = [
             "node:os IN ['macos', 'linux']"
                 .parse::<PostureExpr>()
                 .unwrap(),
