@@ -21,4 +21,4 @@ maxminddb = { workspace = true, optional = true }
 
 [dev-dependencies]
 chrono = { workspace = true }
-proptest = "1.9"
+proptest = "1.10"

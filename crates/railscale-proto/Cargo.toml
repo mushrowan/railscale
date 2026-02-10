@@ -17,4 +17,4 @@ snow = "0.10"
 chacha20poly1305 = "0.10"
 
 [dev-dependencies]
-proptest = "1.9"
+proptest = "1.10"

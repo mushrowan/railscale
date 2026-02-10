@@ -17,7 +17,7 @@ impl RegistrationId {
 
     /// generate a new random registration ID.
     pub fn generate() -> Self {
-        use rand::RngCore;
+        use rand::Rng;
         let mut bytes = [0u8; 32];
         rand::rng().fill_bytes(&mut bytes);
         Self(bytes)

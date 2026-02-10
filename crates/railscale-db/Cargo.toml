@@ -14,7 +14,7 @@ tracing = { workspace = true }
 chrono = { workspace = true }
 ipnet = { workspace = true }
 hex = "0.4"
-rand = "0.9"
+rand = "0.10"
 
 # Database
 sea-orm = { version = "1", features = [

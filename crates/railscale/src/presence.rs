@@ -22,11 +22,15 @@ pub struct PresenceTracker {
 }
 
 /// information about a connected node.
+///
+/// fields are stored for future use (diagnostics, admin api).
 #[derive(Debug, Clone)]
 pub struct ConnectionInfo {
     /// node key of the connected node.
+    #[allow(dead_code)]
     pub node_key: NodeKey,
     /// when the connection was established.
+    #[allow(dead_code)]
     pub connected_at: DateTime<Utc>,
 }
 

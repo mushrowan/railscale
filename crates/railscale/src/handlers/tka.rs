@@ -27,9 +27,6 @@ const MAX_AUM_SIZE: usize = 32 * 1024;
 /// max number of AUMs in a single sync_send request
 const MAX_AUMS_PER_REQUEST: usize = 100;
 
-/// max number of signatures in a single init_finish request
-const MAX_SIGNATURES_PER_REQUEST: usize = 1000;
-
 /// verify the requesting node exists in the database, returning UNAUTHORIZED if not
 async fn verify_requesting_node(
     db: &impl Database,
@@ -1141,7 +1138,7 @@ mod tests {
     async fn tka_init_finish_enables_tka_with_valid_signatures() {
         use railscale_db::Database;
         use railscale_tka::{
-            Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey, NodeKeySignature, TkaKeyId,
+            Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey, NodeKeySignature,
         };
         use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
         use std::collections::HashMap;

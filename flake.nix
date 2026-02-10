@@ -120,11 +120,13 @@
             inherit railscale railscaleStatic;
 
             # release tarball with static musl binary
-            railscale-tarball = pkgs.runCommand "railscale-${railscaleStatic.version}-x86_64-linux-musl.tar.gz" { } ''
-              mkdir -p railscale-${railscaleStatic.version}
-              cp ${railscaleStatic}/bin/railscale railscale-${railscaleStatic.version}/
-              tar czf $out -C . railscale-${railscaleStatic.version}
-            '';
+            railscale-tarball =
+              pkgs.runCommand "railscale-${railscaleStatic.version}-x86_64-linux-musl.tar.gz" { }
+                ''
+                  mkdir -p railscale-${railscaleStatic.version}
+                  cp ${railscaleStatic}/bin/railscale railscale-${railscaleStatic.version}/
+                  tar czf $out -C . railscale-${railscaleStatic.version}
+                '';
 
             # OCI container image, pipe to docker/podman load:
             #   nix build .#docker && ./result | docker load

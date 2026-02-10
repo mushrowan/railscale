@@ -55,6 +55,7 @@ const ENV_VAR_SUFFIXES: &[&str] = &[
 /// migrate a single env var from headscale_* to railscale_* if needed.
 ///
 /// returns the value to use (railscale_* takes precedence).
+#[cfg(test)]
 fn migrate_env_var(
     _suffix: &str,
     headscale_val: Option<&str>,

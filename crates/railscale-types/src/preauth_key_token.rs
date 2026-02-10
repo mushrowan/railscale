@@ -43,7 +43,7 @@ impl PreAuthKeyToken {
 
     /// generate a new random pre-auth key token.
     pub fn generate() -> Self {
-        use rand::Rng;
+        use rand::RngExt;
         let mut rng = rand::rng();
         let bytes: [u8; 24] = rng.random();
         Self(format!("{}{}", PREAUTH_KEY_PREFIX, hex::encode(bytes)))

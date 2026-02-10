@@ -15,10 +15,10 @@ email_address = { workspace = true }
 secrecy = { workspace = true }
 base64 = "0.22"
 hex = "0.4"
-rand = "0.9"
+rand = "0.10"
 sha2 = "0.10"
 subtle = "2.6"
 zeroize = { version = "1.8", features = ["derive"] }
 
 [dev-dependencies]
-proptest = "1.9"
+proptest = "1.10"

@@ -8,7 +8,7 @@ use std::net::IpAddr;
 
 use ipnet::IpNet;
 use railscale_types::AllocationStrategy;
-use rand::Rng;
+use rand::RngExt;
 
 use crate::Error;
 

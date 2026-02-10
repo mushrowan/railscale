@@ -21,6 +21,7 @@ struct VersionResponse {
     commit: String,
     build_time: String,
     rustc: String,
+    #[allow(dead_code)]
     dirty: bool,
 }
 

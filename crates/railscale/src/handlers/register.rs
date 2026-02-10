@@ -609,7 +609,7 @@ pub async fn register(
             // generate a random machine key for non-noise registrations
             // to ensure each node gets a unique identity
             let mut bytes = [0u8; 32];
-            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
+            rand::Rng::fill_bytes(&mut rand::rng(), &mut bytes);
             MachineKey::from_bytes(bytes.to_vec())
         }
     };
