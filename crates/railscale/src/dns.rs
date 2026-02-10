@@ -118,16 +118,25 @@ fn generate_minimal_dns_config(config: &Config) -> Option<DnsConfig> {
 ///
 /// when a dns_provider is configured, each node gets its FQDN as a cert domain
 /// so `tailscale cert` can provision TLS certificates via ACME dns-01.
+///
+/// when `wildcard_certs` is true (node has `dns-subdomain-resolve` capability),
+/// also adds `*.hostname.base_domain` for wildcard TLS certificate provisioning
 pub fn with_cert_domains(
     dns_config: Option<DnsConfig>,
     hostname: &str,
     base_domain: &str,
     has_dns_provider: bool,
+    wildcard_certs: bool,
 ) -> Option<DnsConfig> {
     let mut config = dns_config?;
 
     if has_dns_provider && !base_domain.is_empty() && !hostname.is_empty() {
-        config.cert_domains = vec![format!("{}.{}", hostname, base_domain)];
+        let fqdn = format!("{}.{}", hostname, base_domain);
+        config.cert_domains = if wildcard_certs {
+            vec![fqdn.clone(), format!("*.{}", fqdn)]
+        } else {
+            vec![fqdn]
+        };
     }
 
     Some(config)
@@ -251,35 +260,76 @@ mod tests {
 
     #[test]
     fn with_cert_domains_adds_fqdn_when_provider_configured() {
-        let config = with_cert_domains(Some(sample_dns_config()), "myhost", "example.com", true);
+        let config = with_cert_domains(
+            Some(sample_dns_config()),
+            "myhost",
+            "example.com",
+            true,
+            false,
+        );
         let config = config.unwrap();
         assert_eq!(config.cert_domains, vec!["myhost.example.com"]);
     }
 
     #[test]
     fn with_cert_domains_empty_when_no_provider() {
-        let config = with_cert_domains(Some(sample_dns_config()), "myhost", "example.com", false);
+        let config = with_cert_domains(
+            Some(sample_dns_config()),
+            "myhost",
+            "example.com",
+            false,
+            false,
+        );
         let config = config.unwrap();
         assert!(config.cert_domains.is_empty());
     }
 
     #[test]
     fn with_cert_domains_none_passthrough() {
-        let config = with_cert_domains(None, "myhost", "example.com", true);
+        let config = with_cert_domains(None, "myhost", "example.com", true, false);
         assert!(config.is_none());
     }
 
     #[test]
     fn with_cert_domains_empty_base_domain() {
-        let config = with_cert_domains(Some(sample_dns_config()), "myhost", "", true);
+        let config = with_cert_domains(Some(sample_dns_config()), "myhost", "", true, false);
         let config = config.unwrap();
         assert!(config.cert_domains.is_empty());
     }
 
     #[test]
     fn with_cert_domains_empty_hostname() {
-        let config = with_cert_domains(Some(sample_dns_config()), "", "example.com", true);
+        let config = with_cert_domains(Some(sample_dns_config()), "", "example.com", true, false);
         let config = config.unwrap();
         assert!(config.cert_domains.is_empty());
+    }
+
+    #[test]
+    fn with_cert_domains_wildcard_adds_both() {
+        let config = with_cert_domains(
+            Some(sample_dns_config()),
+            "myhost",
+            "example.com",
+            true,
+            true,
+        );
+        let config = config.unwrap();
+        assert_eq!(
+            config.cert_domains,
+            vec!["myhost.example.com", "*.myhost.example.com"]
+        );
+    }
+
+    #[test]
+    fn with_cert_domains_wildcard_false_only_adds_fqdn() {
+        let config = with_cert_domains(
+            Some(sample_dns_config()),
+            "myhost",
+            "example.com",
+            true,
+            false,
+        );
+        let config = config.unwrap();
+        assert_eq!(config.cert_domains, vec!["myhost.example.com"]);
     }
 }

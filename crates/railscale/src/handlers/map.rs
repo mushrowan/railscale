@@ -431,6 +431,7 @@ async fn build_map_response(
             hostname,
             &state.config.base_domain,
             state.dns_provider.is_some(),
+            false,
         );
 
         return Ok(MapResponse {
@@ -507,19 +508,6 @@ async fn build_map_response(
     // compile ssh policy for this node
     let ssh_policy = grants.compile_ssh_policy(&node, &all_nodes, &resolver);
 
-    // add per-node cert_domains when dns_provider is configured
-    let hostname = if node.given_name.is_empty() {
-        &node.hostname
-    } else {
-        &node.given_name
-    };
-    let dns_config = crate::dns::with_cert_domains(
-        state.map_cache.dns_config(),
-        hostname,
-        &state.config.base_domain,
-        state.dns_provider.is_some(),
-    );
-
     // batch-fetch TKA key signatures when tailnet lock is enabled
     let key_signatures = if tka_info.is_some() {
         let mut all_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
@@ -539,17 +527,35 @@ async fn build_map_response(
         node_to_map_response_node(&node, Some(true), self_sig, &state.config.base_domain);
     self_node.cap_map = build_self_cap_map(&state.config, &grants, &node, &resolver);
 
+    // add per-node cert_domains when dns_provider is configured
+    // wildcard certs enabled when node has dns-subdomain-resolve capability
+    let hostname = if node.given_name.is_empty() {
+        &node.hostname
+    } else {
+        &node.given_name
+    };
+    let wildcard_certs = has_wildcard_certs(&self_node.cap_map);
+    let dns_config = crate::dns::with_cert_domains(
+        state.map_cache.dns_config(),
+        hostname,
+        &state.config.base_domain,
+        state.dns_provider.is_some(),
+        wildcard_certs,
+    );
+
     // get online status for all visible peers
     let peer_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
     let online_statuses = state.presence.get_online_statuses(&peer_ids).await;
 
-    // build peer nodes with online status and TKA signatures
+    // build peer nodes with online status, TKA signatures, and nodeAttrs cap_map
     let peers: Vec<MapResponseNode> = visible_peers
         .iter()
         .map(|n| {
             let online = online_statuses.get(&n.id).copied();
             let sig = key_signatures.get(&n.id).map(|v| v.as_slice());
-            node_to_map_response_node(n, online, sig, &state.config.base_domain)
+            let mut peer = node_to_map_response_node(n, online, sig, &state.config.base_domain);
+            peer.cap_map = build_peer_cap_map(&grants, n, &resolver);
+            peer
         })
         .collect();
 
@@ -714,6 +720,29 @@ fn build_self_cap_map<R: railscale_grants::UserResolver>(
     }
 
     Some(cap_map)
+}
+
+/// check if a cap_map contains dns-subdomain-resolve, indicating
+/// the node should get wildcard cert domains
+fn has_wildcard_certs(
+    cap_map: &Option<std::collections::HashMap<String, Vec<serde_json::Value>>>,
+) -> bool {
+    cap_map
+        .as_ref()
+        .is_some_and(|m| m.contains_key(railscale_proto::CAP_DNS_SUBDOMAIN_RESOLVE))
+}
+
+/// build capability map for a peer node from nodeAttrs policy.
+///
+/// unlike self nodes, peers don't get ssh-env-vars or file-sharing —
+/// only capabilities from nodeAttrs (e.g., dns-subdomain-resolve)
+fn build_peer_cap_map<R: railscale_grants::UserResolver>(
+    grants: &railscale_grants::GrantsEngine,
+    node: &railscale_types::Node,
+    resolver: &R,
+) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
+    let attrs = grants.resolve_node_cap_attrs(node, resolver);
+    if attrs.is_empty() { None } else { Some(attrs) }
 }
 
 /// fetch tka info from the database.
@@ -908,5 +937,72 @@ mod tests {
 
         let result = node_to_map_response_node(&node, Some(true), None, "example.com");
         assert_eq!(result.home_derp, 0);
+    }
+
+    #[test]
+    fn test_has_wildcard_certs_true_when_cap_present() {
+        let mut cap_map = std::collections::HashMap::new();
+        cap_map.insert(
+            railscale_proto::CAP_DNS_SUBDOMAIN_RESOLVE.to_string(),
+            vec![],
+        );
+        assert!(has_wildcard_certs(&Some(cap_map)));
+    }
+
+    #[test]
+    fn test_has_wildcard_certs_false_when_cap_absent() {
+        let cap_map = std::collections::HashMap::new();
+        assert!(!has_wildcard_certs(&Some(cap_map)));
+    }
+
+    #[test]
+    fn test_has_wildcard_certs_false_when_none() {
+        assert!(!has_wildcard_certs(&None));
+    }
+
+    #[test]
+    fn test_build_peer_cap_map_includes_node_attrs() {
+        use railscale_grants::selector::Selector;
+        use railscale_grants::{
+            GrantsEngine,
+            policy::{NodeAttr, Policy},
+        };
+
+        let mut policy = Policy::empty();
+        policy.node_attrs.push(NodeAttr {
+            target: vec![Selector::Tag("webserver".to_string())],
+            app: {
+                let mut app = std::collections::HashMap::new();
+                app.insert(
+                    railscale_proto::CAP_DNS_SUBDOMAIN_RESOLVE.to_string(),
+                    vec![],
+                );
+                app
+            },
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = railscale_grants::EmptyResolver;
+
+        // peer matching the target should get dns-subdomain-resolve
+        let peer = TestNodeBuilder::new(1)
+            .with_tags(vec!["tag:webserver".parse().unwrap()])
+            .build();
+        let cap_map = build_peer_cap_map(&engine, &peer, &resolver);
+        assert!(cap_map.is_some());
+        assert!(
+            cap_map
+                .unwrap()
+                .contains_key(railscale_proto::CAP_DNS_SUBDOMAIN_RESOLVE),
+            "matching peer should have dns-subdomain-resolve"
+        );
+
+        // non-matching peer should get None
+        let other = TestNodeBuilder::new(2).build();
+        let cap_map = build_peer_cap_map(&engine, &other, &resolver);
+        assert!(
+            cap_map.is_none(),
+            "non-matching peer should have no cap_map"
+        );
     }
 }

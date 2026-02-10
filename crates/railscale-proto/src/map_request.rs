@@ -74,6 +74,13 @@ pub const CAP_APP_CONNECTORS: &str = "tailscale.com/app-connectors";
 /// node capability telling the client to persist app connector routes across restarts
 pub const CAP_STORE_APPC_ROUTES: &str = "store-appc-routes";
 
+/// node capability enabling wildcard DNS resolution and wildcard certs
+///
+/// when set on a node (via nodeAttrs), the tailscale client will:
+/// - resolve subdomains of that node's MagicDNS name to the node's IPs
+/// - allow `tailscale cert *.hostname.base_domain` for wildcard TLS certs
+pub const CAP_DNS_SUBDOMAIN_RESOLVE: &str = "dns-subdomain-resolve";
+
 /// a maprequest from a tailscale client.
 ///
 /// clients send maprequests periodically (every 15-60 seconds) to:
@@ -1148,5 +1155,11 @@ mod proptests {
             "CapGrant should be omitted: {}",
             json
         );
+    }
+
+    #[test]
+    fn test_dns_subdomain_resolve_capability_value() {
+        // must match the tailscale NodeAttrDNSSubdomainResolve constant
+        assert_eq!(super::CAP_DNS_SUBDOMAIN_RESOLVE, "dns-subdomain-resolve");
     }
 }

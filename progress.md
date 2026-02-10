@@ -94,6 +94,13 @@
 - entrypoint `railscale`, cmd `serve`, exposes 8080/tcp and 3478/udp
 - usage: `nix build .#docker && ./result | docker load`
 
+## wildcard certs + peer CapMap — complete
+- `CAP_DNS_SUBDOMAIN_RESOLVE` constant in railscale-proto for the `dns-subdomain-resolve` nodeAttr
+- `with_cert_domains()` gains `wildcard_certs` flag — adds `*.hostname.base_domain` alongside the regular cert domain
+- `has_wildcard_certs()` helper checks node's cap_map for `dns-subdomain-resolve`
+- `build_peer_cap_map()` evaluates `resolve_node_cap_attrs()` for peer nodes, propagating nodeAttrs into peer CapMap
+- configured via policy `node_attrs` targeting selectors, no code changes needed for set-dns (ACME dns-01 `_acme-challenge` record has no wildcard prefix)
+
 ## tailscale cert / set-dns — complete
 - **proto types**: `SetDNSRequest`, `SetDNSResponse`, `cert_domains` on `DnsConfig`
 - **config**: `DnsProviderConfig` enum (cloudflare, godaddy, webhook) with secret redaction
