@@ -105,33 +105,57 @@ client_secret = "your-client-secret"
 
 ### docker
 
-currently the docker image is completely untested. and you have to build it
-yourself.  
-i'll add testing at some point and then i'll also push to docker hub so that you
-little netizens can download it for yourself.
-
 ```bash
-# build the image (requires nix)
-nix build .#docker
-
-# load into docker
-./result | docker load
-
-# run with a config file
-docker run -v /path/to/config.toml:/etc/railscale/config.toml \
-  -v /path/to/data:/var/lib/railscale \
-  -p 8080:8080 -p 3478:3478/udp \
-  railscale:latest
+docker pull littleropeep/railscale:latest
 ```
 
-or with env vars:
+or with docker compose:
+
+```yaml
+# compose.yaml
+services:
+  railscale:
+    image: littleropeep/railscale:latest
+    ports:
+      - "8080:8080"
+      - "3478:3478/udp" # stun - nat traversal for embedded derp relay
+    volumes:
+      - ./config.toml:/etc/railscale/config.toml:ro
+      - railscale-data:/var/lib/railscale
+    environment:
+      - RAILSCALE_LISTEN_ADDR=0.0.0.0:8080
+    restart: unless-stopped
+
+volumes:
+  railscale-data:
+```
+
+or skip the config file and use env vars:
+
+```yaml
+services:
+  railscale:
+    image: littleropeep/railscale:latest
+    ports:
+      - "8080:8080"
+      - "3478:3478/udp" # stun - nat traversal for embedded derp relay
+    volumes:
+      - railscale-data:/var/lib/railscale
+    environment:
+      - RAILSCALE_SERVER_URL=https://vpn.example.com
+      - RAILSCALE_BASE_DOMAIN=ts.example.com
+      - RAILSCALE_DATABASE_URL=sqlite:///var/lib/railscale/db.sqlite
+      - RAILSCALE_LISTEN_ADDR=0.0.0.0:8080
+    restart: unless-stopped
+
+volumes:
+  railscale-data:
+```
+
+if you want to build the image yourself (requires nix):
 
 ```bash
-docker run -e RAILSCALE_SERVER_URL=https://vpn.example.com \
-  -e RAILSCALE_DATABASE_URL=sqlite:///data/db.sqlite \
-  -v /path/to/data:/data \
-  -p 8080:8080 -p 3478:3478/udp \
-  railscale:latest
+nix build .#docker && ./result | docker load
 ```
 
 ## https / reverse proxy

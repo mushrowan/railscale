@@ -1,0 +1,95 @@
+# tools managed by mise
+# see: https://mise.jdx.dev/
+
+[tools]
+
+[env]
+
+# tasks
+[tasks.info]
+description = "Show project info"
+run = "echo 'railscale — tailscale control server'"
+
+[tasks.fmt]
+description = "Format all files"
+run = "treefmt"
+
+[tasks.fmt-check]
+description = "Check formatting"
+run = "treefmt --fail-on-change"
+
+[tasks.build]
+description = "Build the binary"
+run = "nix build"
+
+[tasks.build-static]
+description = "Build static musl binary"
+run = "nix build .#railscaleStatic"
+
+[tasks.build-tarball]
+description = "Build release tarball (static musl)"
+run = "nix build .#railscale-tarball"
+
+[tasks.docker-build]
+description = "Build docker image and load into local docker"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+nix build .#docker && ./result | docker load
+"""
+
+[tasks.docker-push]
+description = "Build and push docker image to registry"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+REGISTRY="${1:-}"
+if [[ -z "$REGISTRY" ]]; then
+  echo "usage: mise run docker-push <registry/image:tag>"
+  echo "example: mise run docker-push docker.io/littleropeep/railscale:latest"
+  exit 1
+fi
+
+echo "building and pushing to $REGISTRY..."
+nix build .#docker
+./result | skopeo copy docker-archive:/dev/stdin "docker://$REGISTRY"
+echo "pushed to $REGISTRY"
+"""
+
+[tasks.docker-push-hub]
+description = "Push to Docker Hub (littleropeep/railscale)"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+TAG="${1:-latest}"
+REGISTRY="docker.io/littleropeep/railscale:$TAG"
+
+echo "building and pushing to $REGISTRY..."
+nix build .#docker
+./result | skopeo copy docker-archive:/dev/stdin "docker://$REGISTRY"
+echo "pushed to $REGISTRY"
+"""
+
+[tasks.release]
+description = "Build tarball, tag, and create GitHub release"
+run = """
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[] | select(.name == "railscale") | .version')
+TAG="v$VERSION"
+TARBALL="railscale-$VERSION-x86_64-linux-musl.tar.gz"
+
+echo "building release tarball for $TAG..."
+nix build .#railscale-tarball
+cp result "/tmp/$TARBALL"
+
+echo "creating github release $TAG..."
+GH_REPO="mushrowan/railscale" gh release create "$TAG" \
+  "/tmp/$TARBALL" \
+  --title "$TAG"
+
+echo "released $TAG: https://github.com/mushrowan/railscale/releases/tag/$TAG"
+"""
