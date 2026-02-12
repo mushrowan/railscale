@@ -84,7 +84,11 @@ TARBALL="railscale-$VERSION-x86_64-linux-musl.tar.gz"
 
 echo "building release tarball for $TAG..."
 nix build .#railscale-tarball
-cp result "/tmp/$TARBALL"
+cp -Lf result "/tmp/$TARBALL"
+
+echo "tagging $TAG..."
+git tag -f "$TAG"
+git push github "$TAG"
 
 echo "creating github release $TAG..."
 GH_REPO="mushrowan/railscale" gh release create "$TAG" \

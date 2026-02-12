@@ -89,3 +89,116 @@ impl Default for StateNotifier {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::{Duration, timeout};
+
+    #[tokio::test]
+    async fn subscribe_receives_notification() {
+        let notifier = StateNotifier::new();
+        let mut rx = notifier.subscribe();
+
+        notifier.notify_state_changed();
+
+        let result = timeout(Duration::from_millis(100), rx.recv()).await;
+        assert!(result.is_ok(), "subscriber should receive notification");
+    }
+
+    #[tokio::test]
+    async fn multiple_subscribers_all_receive() {
+        let notifier = StateNotifier::new();
+        let mut rx1 = notifier.subscribe();
+        let mut rx2 = notifier.subscribe();
+
+        notifier.notify_state_changed();
+
+        let r1 = timeout(Duration::from_millis(100), rx1.recv()).await;
+        let r2 = timeout(Duration::from_millis(100), rx2.recv()).await;
+        assert!(r1.is_ok(), "first subscriber should receive");
+        assert!(r2.is_ok(), "second subscriber should receive");
+    }
+
+    #[tokio::test]
+    async fn no_subscribers_does_not_panic() {
+        let notifier = StateNotifier::new();
+        // should not panic when there are no receivers
+        notifier.notify_state_changed();
+    }
+
+    #[tokio::test]
+    async fn clone_shares_state() {
+        let notifier = StateNotifier::new();
+        let clone = notifier.clone();
+        let mut rx = notifier.subscribe();
+
+        // notify via the clone
+        clone.notify_state_changed();
+
+        let result = timeout(Duration::from_millis(100), rx.recv()).await;
+        assert!(result.is_ok(), "clone should notify on shared channel");
+    }
+
+    #[tokio::test]
+    async fn set_map_cache_invalidates_on_notify() {
+        let cache = Arc::new(MapCache::new(None));
+        let gen_before = cache.generation();
+
+        let notifier = StateNotifier::new();
+        notifier.set_map_cache(cache.clone());
+        notifier.notify_state_changed();
+
+        assert_eq!(
+            cache.generation(),
+            gen_before + 1,
+            "cache should be invalidated on notify"
+        );
+    }
+
+    #[tokio::test]
+    async fn notify_without_cache_does_not_invalidate() {
+        // no cache attached — should just send without error
+        let notifier = StateNotifier::new();
+        let mut rx = notifier.subscribe();
+
+        notifier.notify_state_changed();
+
+        let result = timeout(Duration::from_millis(100), rx.recv()).await;
+        assert!(
+            result.is_ok(),
+            "should still notify subscribers without cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_map_cache_on_clone_visible_to_original() {
+        let notifier = StateNotifier::new();
+        let clone = notifier.clone();
+
+        let cache = Arc::new(MapCache::new(None));
+        let gen_before = cache.generation();
+
+        // attach cache via clone
+        clone.set_map_cache(cache.clone());
+        // notify via original
+        notifier.notify_state_changed();
+
+        assert_eq!(
+            cache.generation(),
+            gen_before + 1,
+            "cache attached on clone should be invalidated by original"
+        );
+    }
+
+    #[tokio::test]
+    async fn default_creates_working_notifier() {
+        let notifier = StateNotifier::default();
+        let mut rx = notifier.subscribe();
+
+        notifier.notify_state_changed();
+
+        let result = timeout(Duration::from_millis(100), rx.recv()).await;
+        assert!(result.is_ok());
+    }
+}
