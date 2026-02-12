@@ -5,6 +5,7 @@
 //! invalidation via generation counters — the cache is only rebuilt
 //! from the database on the first read after a state change.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use railscale_db::{Database, RailscaleDb};
@@ -15,8 +16,8 @@ use tracing::debug;
 
 /// cached snapshot of nodes and users for map response building
 struct Snapshot {
-    nodes: Vec<Node>,
-    users: Vec<User>,
+    nodes: Arc<Vec<Node>>,
+    users: Arc<Vec<User>>,
     generation: u64,
 }
 
@@ -66,12 +67,12 @@ impl MapCache {
 
     /// get a fresh snapshot of nodes and users
     ///
-    /// if the cache is stale, rebuilds from the database (one DB query
-    /// shared across all concurrent readers). if fresh, returns cached data.
+    /// returns Arc-wrapped vecs so concurrent readers share the same
+    /// allocation instead of cloning on every map request.
     pub async fn get_snapshot(
         &self,
         db: &RailscaleDb,
-    ) -> Result<(Vec<Node>, Vec<User>), railscale_db::Error> {
+    ) -> Result<(Arc<Vec<Node>>, Arc<Vec<User>>), railscale_db::Error> {
         let current_gen = self.generation.load(Ordering::Acquire);
         let cached_gen = self.cached_generation.load(Ordering::Acquire);
 
@@ -79,7 +80,7 @@ impl MapCache {
         if current_gen == cached_gen {
             let guard = self.snapshot.read().await;
             if let Some(ref snap) = *guard {
-                return Ok((snap.nodes.clone(), snap.users.clone()));
+                return Ok((Arc::clone(&snap.nodes), Arc::clone(&snap.users)));
             }
             // snapshot is None despite generations matching — fall through to rebuild
         }
@@ -92,17 +93,17 @@ impl MapCache {
         if let Some(ref snap) = *guard
             && snap.generation == current_gen
         {
-            return Ok((snap.nodes.clone(), snap.users.clone()));
+            return Ok((Arc::clone(&snap.nodes), Arc::clone(&snap.users)));
         }
 
         // rebuild from database
         debug!("map cache: rebuilding snapshot from database");
-        let nodes = db.list_nodes().await?;
-        let users = db.list_users().await?;
+        let nodes = Arc::new(db.list_nodes().await?);
+        let users = Arc::new(db.list_users().await?);
 
         let snapshot = Snapshot {
-            nodes: nodes.clone(),
-            users: users.clone(),
+            nodes: Arc::clone(&nodes),
+            users: Arc::clone(&users),
             generation: current_gen,
         };
 

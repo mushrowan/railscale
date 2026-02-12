@@ -466,7 +466,7 @@ async fn build_map_response(
         .and_then(|oidc| oidc.group_prefix.clone());
 
     let resolver = crate::resolver::MapUserResolver::with_groups(
-        users.clone(),
+        (*users).clone(),
         grants.policy().groups.clone(),
         oidc_group_prefix,
     );
