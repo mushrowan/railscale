@@ -17,6 +17,9 @@ mod ts2021;
 mod verify;
 mod version;
 
+#[cfg(test)]
+pub(crate) mod test_helpers;
+
 pub use api_auth::{ApiAuthError, ApiKeyContext, AuthMethod};
 pub use bootstrap_dns::bootstrap_dns;
 pub use error::{ApiError, OptionExt, ResultExt};

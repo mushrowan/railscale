@@ -510,12 +510,12 @@ fn build_success_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handlers::test_helpers::default_grants;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
     };
     use railscale_db::RailscaleDb;
-    use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
     use tower::ServiceExt;
 
     #[test]
@@ -594,19 +594,6 @@ mod tests {
         // only 16 bytes instead of 32
         let hex_str = "nlpub:0102030405060708090a0b0c0d0e0f10";
         assert!(parse_nl_public_key(hex_str).is_none());
-    }
-
-    fn default_grants() -> GrantsEngine {
-        let mut policy = Policy::empty();
-        policy.grants.push(Grant {
-            src: vec![Selector::Wildcard],
-            dst: vec![Selector::Wildcard],
-            ip: vec![NetworkCapability::Wildcard],
-            app: vec![],
-            src_posture: vec![],
-            via: vec![],
-        });
-        GrantsEngine::new(policy)
     }
 
     #[tokio::test]

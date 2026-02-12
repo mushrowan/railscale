@@ -554,25 +554,12 @@ pub async fn tka_sign(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handlers::test_helpers::default_grants;
     use axum::{body::Body, http::Request, http::StatusCode};
     use railscale_db::RailscaleDb;
-    use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
     use railscale_proto::CapabilityVersion;
     use railscale_types::NodeKey;
     use tower::ServiceExt;
-
-    fn default_grants() -> GrantsEngine {
-        let mut policy = Policy::empty();
-        policy.grants.push(Grant {
-            src: vec![Selector::Wildcard],
-            dst: vec![Selector::Wildcard],
-            ip: vec![NetworkCapability::Wildcard],
-            app: vec![],
-            src_posture: vec![],
-            via: vec![],
-        });
-        GrantsEngine::new(policy)
-    }
 
     #[tokio::test]
     async fn tka_init_begin_returns_nodes_needing_signatures() {

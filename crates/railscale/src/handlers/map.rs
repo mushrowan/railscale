@@ -406,7 +406,10 @@ async fn build_map_response(
                 .db
                 .get_node_key_signature(node.id)
                 .await
-                .unwrap_or(None)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, node_id = %node.id, "failed to fetch tka signature for self");
+                    None
+                })
         } else {
             None
         };
@@ -516,7 +519,10 @@ async fn build_map_response(
             .db
             .get_node_key_signatures_batch(&all_ids)
             .await
-            .unwrap_or_default()
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to fetch tka signatures batch");
+                std::collections::HashMap::new()
+            })
     } else {
         std::collections::HashMap::new()
     };

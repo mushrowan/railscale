@@ -91,26 +91,13 @@ pub async fn set_dns(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::handlers::test_helpers::default_grants;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use railscale_db::RailscaleDb;
-    use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
     use railscale_types::test_utils::TestNodeBuilder;
     use railscale_types::{Config, DnsProviderConfig, NodeKey};
     use tower::ServiceExt;
-
-    fn default_grants() -> GrantsEngine {
-        let mut policy = Policy::empty();
-        policy.grants.push(Grant {
-            src: vec![Selector::Wildcard],
-            dst: vec![Selector::Wildcard],
-            ip: vec![NetworkCapability::Wildcard],
-            app: Default::default(),
-            src_posture: vec![],
-            via: vec![],
-        });
-        GrantsEngine::new(policy)
-    }
 
     /// serialise a node key to its JSON string value (e.g. "nodekey:0102...")
     fn node_key_json(key: &railscale_types::NodeKey) -> serde_json::Value {

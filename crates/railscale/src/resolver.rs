@@ -65,7 +65,7 @@ impl UserResolver for MapUserResolver {
 
         let mut result = Vec::new();
 
-        // 2. Add policy groups (email-based membership)
+        // add OIDC groups
         for oidc_group in &user.oidc_groups {
             let group_name = match &self.oidc_group_prefix {
                 Some(prefix) => prefix.apply(oidc_group),
@@ -74,7 +74,7 @@ impl UserResolver for MapUserResolver {
             result.push(group_name);
         }
 
-        // 2. Add policy groups (email-based membership)
+        // add policy groups (email-based membership)
         if let Some(email) = &user.email {
             let email_lower = email.to_lowercase();
             for (group_name, members) in &self.groups {

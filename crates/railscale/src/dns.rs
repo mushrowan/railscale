@@ -5,14 +5,12 @@ use railscale_proto::{DnsConfig, DnsResolver};
 use railscale_types::Config;
 use std::collections::HashMap;
 
-/// the magicdns resolver address.
-/// returns `None` if:
-/// - Magicdns is disabled, OR
+/// the magicdns resolver address
 const MAGIC_DNS_RESOLVER: &str = "100.100.100.100";
 
-//if override_local_dns is false, don't override client's dns
-//(but we still need routes for tailscale-specific domains)
-/// returns `none` if:
+/// generate dns config for the tailnet
+///
+/// returns `None` if:
 /// - MagicDNS is disabled, OR
 /// - `override_local_dns` is false (client keeps local DNS settings)
 pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
