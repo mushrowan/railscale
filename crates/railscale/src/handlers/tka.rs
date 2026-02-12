@@ -9,7 +9,7 @@
 //! - /machine/tka/disable - disable tka with secret
 //! - /machine/tka/sign - submit node-key signature
 
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{Json, extract::State};
 use railscale_db::Database;
 use railscale_proto::{
     TkaBootstrapRequest, TkaBootstrapResponse, TkaDisableRequest, TkaDisableResponse,
@@ -19,6 +19,7 @@ use railscale_proto::{
 };
 use tracing::{debug, info};
 
+use super::ApiError;
 use crate::AppState;
 
 /// max size of a single AUM in bytes (32 KiB)
@@ -34,46 +35,48 @@ struct ParsedGenesis {
 }
 
 /// parse a stored genesis AUM, extracting the TKA public key and hash
-fn parse_genesis(genesis_bytes: &[u8], endpoint: &str) -> Result<ParsedGenesis, StatusCode> {
+fn parse_genesis(genesis_bytes: &[u8], endpoint: &str) -> Result<ParsedGenesis, ApiError> {
     let genesis = railscale_tka::Aum::from_cbor(genesis_bytes).map_err(|e| {
         info!(error = %e, "{endpoint}: failed to parse genesis");
-        StatusCode::INTERNAL_SERVER_ERROR
+        ApiError::internal(format!("{endpoint}: failed to parse genesis"))
     })?;
 
     let tka_key = genesis.key.as_ref().ok_or_else(|| {
         info!("{endpoint}: genesis has no key");
-        StatusCode::BAD_REQUEST
+        ApiError::bad_request(format!("{endpoint}: genesis has no key"))
     })?;
 
     let public_key =
         railscale_tka::NlPublicKey::try_from(tka_key.public.as_slice()).map_err(|e| {
             info!(error = %e, "{endpoint}: invalid tka public key");
-            StatusCode::BAD_REQUEST
+            ApiError::bad_request(format!("{endpoint}: invalid tka public key"))
         })?;
 
     let hash = genesis.hash().map_err(|e| {
         info!(error = %e, "{endpoint}: failed to hash genesis");
-        StatusCode::INTERNAL_SERVER_ERROR
+        ApiError::internal(format!("{endpoint}: failed to hash genesis"))
     })?;
 
     Ok(ParsedGenesis { public_key, hash })
 }
 
-/// verify the requesting node exists in the database, returning UNAUTHORIZED if not
+/// verify the requesting node exists in the database
 async fn verify_requesting_node(
     db: &impl Database,
     node_key: &railscale_types::NodeKey,
     endpoint: &str,
-) -> Result<(), StatusCode> {
+) -> Result<(), ApiError> {
     match db.get_node_by_node_key(node_key).await {
         Ok(Some(_)) => Ok(()),
         Ok(None) => {
             info!(node_key = ?node_key, "{endpoint}: node not found");
-            Err(StatusCode::UNAUTHORIZED)
+            Err(ApiError::unauthorized(format!(
+                "{endpoint}: node not found"
+            )))
         }
         Err(e) => {
             info!(error = %e, "{endpoint}: db error looking up node");
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            Err(ApiError::internal(format!("{endpoint}: db error")))
         }
     }
 }
@@ -85,52 +88,40 @@ async fn verify_requesting_node(
 pub async fn tka_init_begin(
     State(state): State<AppState>,
     Json(req): Json<TkaInitBeginRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TkaInitBeginResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
         genesis_len = req.genesis_aum.as_bytes().len(),
         "tka init begin request"
     );
 
-    // verify requesting node exists
-    if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka init begin").await {
-        return (status, Json(TkaInitBeginResponse::default()));
-    }
+    verify_requesting_node(&state.db, &req.node_key, "tka init begin").await?;
 
-    // check genesis AUM size
     if req.genesis_aum.as_bytes().len() > MAX_AUM_SIZE {
         info!(
             size = req.genesis_aum.as_bytes().len(),
             max = MAX_AUM_SIZE,
             "tka init begin: genesis aum too large"
         );
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(TkaInitBeginResponse::default()),
-        );
+        return Err(ApiError::bad_request("genesis aum too large"));
     }
 
-    // reject if TKA is already enabled — cannot overwrite existing state
+    // reject if TKA is already enabled
     match state.db.get_tka_state().await {
         Ok(Some(s)) if s.enabled => {
             info!("tka init begin: tka already enabled, rejecting");
-            return (StatusCode::CONFLICT, Json(TkaInitBeginResponse::default()));
+            return Err(ApiError::conflict("tka already enabled"));
         }
-        Ok(_) => {} // not enabled or no state, proceed
+        Ok(_) => {}
         Err(e) => {
-            info!(error = %e, "tka init begin: db error checking tka state");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaInitBeginResponse::default()),
-            );
+            return Err(ApiError::internal(format!("tka init begin: db error: {e}")));
         }
     }
 
-    // store genesis AUM in database (not enabled yet, just storing)
     let now = chrono::Utc::now();
     let tka_state = railscale_db::TkaState {
         id: 0,
-        enabled: false, // not enabled until init_finish
+        enabled: false,
         head: None,
         state_checkpoint: None,
         disablement_secrets: None,
@@ -139,27 +130,18 @@ pub async fn tka_init_begin(
         updated_at: now,
     };
 
-    if let Err(e) = state.db.upsert_tka_state(&tka_state).await {
-        info!(error = %e, "tka init begin: failed to store genesis");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(TkaInitBeginResponse::default()),
-        );
-    }
+    state
+        .db
+        .upsert_tka_state(&tka_state)
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to store genesis: {e}")))?;
 
-    // get all nodes that need signatures
-    let nodes = match state.db.list_nodes().await {
-        Ok(n) => n,
-        Err(e) => {
-            info!(error = %e, "tka init begin: failed to list nodes");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaInitBeginResponse::default()),
-            );
-        }
-    };
+    let nodes = state
+        .db
+        .list_nodes()
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to list nodes: {e}")))?;
 
-    // convert to TkaSignInfo
     let need_signatures: Vec<TkaSignInfo> = nodes
         .into_iter()
         .map(|n| TkaSignInfo {
@@ -173,10 +155,7 @@ pub async fn tka_init_begin(
         nodes = need_signatures.len(),
         "tka init begin: returning nodes needing signatures"
     );
-    (
-        StatusCode::OK,
-        Json(TkaInitBeginResponse { need_signatures }),
-    )
+    Ok(Json(TkaInitBeginResponse { need_signatures }))
 }
 
 /// POST /machine/tka/init/finish
@@ -185,140 +164,72 @@ pub async fn tka_init_begin(
 pub async fn tka_init_finish(
     State(state): State<AppState>,
     Json(req): Json<TkaInitFinishRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TkaInitFinishResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
         signatures = req.signatures.len(),
         "tka init finish request"
     );
 
-    // verify requesting node exists
-    let _node = match state.db.get_node_by_node_key(&req.node_key).await {
-        Ok(Some(n)) => n,
-        Ok(None) => {
-            info!(node_key = ?req.node_key, "tka init finish: node not found");
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-        Err(e) => {
-            info!(error = %e, "tka init finish: db error");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-    };
+    verify_requesting_node(&state.db, &req.node_key, "tka init finish").await?;
 
-    // load stored tka state with genesis
-    let tka_state = match state.db.get_tka_state().await {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            info!("tka init finish: no tka state (init_begin not called?)");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-        Err(e) => {
-            info!(error = %e, "tka init finish: db error");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-    };
+    let tka_state = state
+        .db
+        .get_tka_state()
+        .await
+        .map_err(|e| ApiError::internal(format!("tka init finish: db error: {e}")))?
+        .ok_or_else(|| ApiError::bad_request("no tka state (init_begin not called?)"))?;
 
-    let genesis_bytes = match &tka_state.genesis_aum {
-        Some(b) => b,
-        None => {
-            info!("tka init finish: no genesis aum stored");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-    };
+    let genesis_bytes = tka_state
+        .genesis_aum
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request("no genesis aum stored"))?;
 
-    let parsed = match parse_genesis(genesis_bytes, "tka init finish") {
-        Ok(p) => p,
-        Err(status) => return (status, Json(TkaInitFinishResponse::default())),
-    };
+    let parsed = parse_genesis(genesis_bytes, "tka init finish")?;
 
-    // verify and store each signature
     for (node_id, sig_bytes) in &req.signatures {
         let node_id = railscale_types::NodeId(*node_id);
 
-        // parse the signature
-        let sig = match railscale_tka::NodeKeySignature::from_cbor(sig_bytes.as_bytes()) {
-            Ok(s) => s,
-            Err(e) => {
+        let sig =
+            railscale_tka::NodeKeySignature::from_cbor(sig_bytes.as_bytes()).map_err(|e| {
                 info!(node_id = %node_id, error = %e, "tka init finish: invalid signature");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(TkaInitFinishResponse::default()),
-                );
-            }
-        };
+                ApiError::bad_request("invalid signature")
+            })?;
 
-        // verify the signature
-        if let Err(e) = sig.verify(&parsed.public_key) {
+        sig.verify(&parsed.public_key).map_err(|e| {
             info!(node_id = %node_id, error = %e, "tka init finish: signature verification failed");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
+            ApiError::bad_request("signature verification failed")
+        })?;
 
-        // store the signature
-        if let Err(e) = state
+        state
             .db
             .set_node_key_signature(node_id, sig_bytes.as_bytes())
             .await
-        {
-            info!(node_id = %node_id, error = %e, "tka init finish: failed to store signature");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
+            .map_err(|e| ApiError::internal(format!("failed to store signature: {e}")))?;
     }
 
-    let genesis_hash = &parsed.hash;
-
-    // store genesis AUM in the chain
-    if let Err(e) = state
+    state
         .db
-        .store_aum(&genesis_hash.to_string(), None, genesis_bytes)
+        .store_aum(&parsed.hash.to_string(), None, genesis_bytes)
         .await
-    {
-        info!(error = %e, "tka init finish: failed to store genesis aum");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(TkaInitFinishResponse::default()),
-        );
-    }
+        .map_err(|e| ApiError::internal(format!("failed to store genesis aum: {e}")))?;
 
-    // enable TKA
     let now = chrono::Utc::now();
     let updated_state = railscale_db::TkaState {
         enabled: true,
-        head: Some(genesis_hash.to_string()),
+        head: Some(parsed.hash.to_string()),
         updated_at: now,
         ..tka_state
     };
 
-    if let Err(e) = state.db.upsert_tka_state(&updated_state).await {
-        info!(error = %e, "tka init finish: failed to enable tka");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(TkaInitFinishResponse::default()),
-        );
-    }
+    state
+        .db
+        .upsert_tka_state(&updated_state)
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to enable tka: {e}")))?;
 
-    info!(head = %genesis_hash, "tka enabled");
-    (StatusCode::OK, Json(TkaInitFinishResponse::default()))
+    info!(head = %parsed.hash, "tka enabled");
+    Ok(Json(TkaInitFinishResponse::default()))
 }
 
 /// POST /machine/tka/bootstrap
@@ -330,49 +241,30 @@ pub async fn tka_init_finish(
 pub async fn tka_bootstrap(
     State(state): State<AppState>,
     Json(req): Json<TkaBootstrapRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TkaBootstrapResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
         head = %req.head,
         "tka bootstrap request"
     );
 
-    // verify requesting node exists
-    if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka bootstrap").await {
-        return (status, Json(TkaBootstrapResponse::default()));
-    }
+    verify_requesting_node(&state.db, &req.node_key, "tka bootstrap").await?;
 
-    // fetch tka state from database
     let tka_state = match state.db.get_tka_state().await {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            // no tka state, return empty response
-            debug!("tka not initialised");
-            return (StatusCode::OK, Json(TkaBootstrapResponse::default()));
-        }
-        Err(e) => {
-            info!(error = %e, "failed to get tka state");
-            return (StatusCode::OK, Json(TkaBootstrapResponse::default()));
+        Ok(Some(s)) if s.enabled => s,
+        _ => {
+            debug!("tka not initialised or not enabled");
+            return Ok(Json(TkaBootstrapResponse::default()));
         }
     };
 
-    if !tka_state.enabled {
-        // tka not enabled, return empty response
-        debug!("tka not enabled");
-        return (StatusCode::OK, Json(TkaBootstrapResponse::default()));
-    }
-
-    // tka is enabled - return genesis_aum if available
     let genesis_aum = tka_state.genesis_aum.map(|bytes| bytes.into());
 
     debug!(head = ?tka_state.head, has_genesis = genesis_aum.is_some(), "tka bootstrap response");
-    (
-        StatusCode::OK,
-        Json(TkaBootstrapResponse {
-            genesis_aum,
-            disablement_secret: vec![],
-        }),
-    )
+    Ok(Json(TkaBootstrapResponse {
+        genesis_aum,
+        disablement_secret: vec![],
+    }))
 }
 
 /// POST /machine/tka/sync/offer
@@ -383,7 +275,7 @@ pub async fn tka_bootstrap(
 pub async fn tka_sync_offer(
     State(state): State<AppState>,
     Json(req): Json<TkaSyncOfferRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TkaSyncOfferResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
         head = %req.head,
@@ -391,55 +283,33 @@ pub async fn tka_sync_offer(
         "tka sync offer request"
     );
 
-    // verify requesting node exists
-    if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka sync offer").await {
-        return (status, Json(TkaSyncOfferResponse::default()));
-    }
+    verify_requesting_node(&state.db, &req.node_key, "tka sync offer").await?;
 
-    // get server's TKA state
     let tka_state = match state.db.get_tka_state().await {
         Ok(Some(s)) if s.enabled => s,
-        Ok(Some(_)) => {
-            // TKA not enabled, return empty
-            debug!("tka sync offer: tka not enabled");
-            return (StatusCode::OK, Json(TkaSyncOfferResponse::default()));
+        Ok(_) => {
+            debug!("tka sync offer: tka not enabled or no state");
+            return Ok(Json(TkaSyncOfferResponse::default()));
         }
-        Ok(None) => {
-            debug!("tka sync offer: no tka state");
-            return (StatusCode::OK, Json(TkaSyncOfferResponse::default()));
-        }
-        Err(e) => {
-            info!(error = %e, "tka sync offer: db error");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSyncOfferResponse::default()),
-            );
-        }
+        Err(e) => return Err(ApiError::internal(format!("tka sync offer: db error: {e}"))),
     };
 
     let server_head = tka_state.head.unwrap_or_default();
 
-    // if heads match, no sync needed
     if req.head == server_head {
         debug!("tka sync offer: heads match, no sync needed");
-        return (
-            StatusCode::OK,
-            Json(TkaSyncOfferResponse {
-                head: server_head,
-                ancestors: vec![],
-                missing_aums: vec![],
-            }),
-        );
+        return Ok(Json(TkaSyncOfferResponse {
+            head: server_head,
+            ancestors: vec![],
+            missing_aums: vec![],
+        }));
     }
 
-    // if client has no head (empty), they need all AUMs from genesis to head
     if req.head.is_empty() {
         debug!("tka sync offer: client has no head, sending full chain");
-        // get all AUMs from the beginning (use empty string to get everything)
         let missing_aums = match state.db.get_aums_after("").await {
             Ok(aums) => aums.into_iter().map(|a| a.into()).collect(),
             Err(e) => {
-                // fall back to genesis_aum if chain retrieval fails
                 info!(error = %e, "tka sync offer: failed to get aum chain, using genesis");
                 match &tka_state.genesis_aum {
                     Some(genesis) => vec![genesis.clone().into()],
@@ -447,24 +317,19 @@ pub async fn tka_sync_offer(
                 }
             }
         };
-        return (
-            StatusCode::OK,
-            Json(TkaSyncOfferResponse {
-                head: server_head,
-                ancestors: vec![],
-                missing_aums,
-            }),
-        );
+        return Ok(Json(TkaSyncOfferResponse {
+            head: server_head,
+            ancestors: vec![],
+            missing_aums,
+        }));
     }
 
-    // client has a different head - get AUMs they're missing
     debug!(
         client_head = %req.head,
         server_head = %server_head,
         "tka sync offer: heads differ, finding missing aums"
     );
 
-    // check if client's head is in our chain (they're behind us)
     let missing_aums = match state.db.get_aums_after(&req.head).await {
         Ok(aums) => aums.into_iter().map(|a| a.into()).collect(),
         Err(e) => {
@@ -473,14 +338,11 @@ pub async fn tka_sync_offer(
         }
     };
 
-    (
-        StatusCode::OK,
-        Json(TkaSyncOfferResponse {
-            head: server_head,
-            ancestors: vec![],
-            missing_aums,
-        }),
-    )
+    Ok(Json(TkaSyncOfferResponse {
+        head: server_head,
+        ancestors: vec![],
+        missing_aums,
+    }))
 }
 
 /// POST /machine/tka/sync/send
@@ -491,7 +353,7 @@ pub async fn tka_sync_offer(
 pub async fn tka_sync_send(
     State(state): State<AppState>,
     Json(req): Json<TkaSyncSendRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TkaSyncSendResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
         head = %req.head,
@@ -499,140 +361,63 @@ pub async fn tka_sync_send(
         "tka sync send request"
     );
 
-    // verify requesting node exists
-    if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka sync send").await {
-        return (status, Json(TkaSyncSendResponse::default()));
-    }
+    verify_requesting_node(&state.db, &req.node_key, "tka sync send").await?;
 
-    // check aum count limit
     if req.missing_aums.len() > MAX_AUMS_PER_REQUEST {
-        info!(
-            count = req.missing_aums.len(),
-            max = MAX_AUMS_PER_REQUEST,
-            "tka sync send: too many aums"
-        );
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(TkaSyncSendResponse::default()),
-        );
+        return Err(ApiError::bad_request("too many aums"));
     }
 
-    // check individual aum sizes
     for (i, aum) in req.missing_aums.iter().enumerate() {
         if aum.as_bytes().len() > MAX_AUM_SIZE {
-            info!(
-                index = i,
-                size = aum.as_bytes().len(),
-                max = MAX_AUM_SIZE,
-                "tka sync send: aum too large"
-            );
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaSyncSendResponse::default()),
-            );
+            info!(index = i, size = aum.as_bytes().len(), "aum too large");
+            return Err(ApiError::bad_request("aum too large"));
         }
     }
 
-    // get current TKA state
     let tka_state = match state.db.get_tka_state().await {
         Ok(Some(s)) if s.enabled => s,
-        Ok(Some(_)) => {
-            info!("tka sync send: tka not enabled");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaSyncSendResponse::default()),
-            );
-        }
-        Ok(None) => {
-            info!("tka sync send: no tka state");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaSyncSendResponse::default()),
-            );
-        }
-        Err(e) => {
-            info!(error = %e, "tka sync send: db error");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSyncSendResponse::default()),
-            );
-        }
+        Ok(_) => return Err(ApiError::bad_request("tka not enabled")),
+        Err(e) => return Err(ApiError::internal(format!("tka sync send: db error: {e}"))),
     };
 
     let mut current_head = tka_state.head.unwrap_or_default();
 
-    // process each AUM
     for aum_bytes in &req.missing_aums {
-        // parse the AUM
-        let aum = match railscale_tka::Aum::from_cbor(aum_bytes.as_bytes()) {
-            Ok(a) => a,
-            Err(e) => {
-                info!(error = %e, "tka sync send: invalid aum");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(TkaSyncSendResponse { head: current_head }),
-                );
-            }
-        };
+        let aum = railscale_tka::Aum::from_cbor(aum_bytes.as_bytes())
+            .map_err(|e| ApiError::bad_request(format!("invalid aum: {e}")))?;
 
-        // compute hash
-        let aum_hash = match aum.hash() {
-            Ok(h) => h.to_string(),
-            Err(e) => {
-                info!(error = %e, "tka sync send: failed to hash aum");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(TkaSyncSendResponse { head: current_head }),
-                );
-            }
-        };
+        let aum_hash = aum
+            .hash()
+            .map_err(|e| ApiError::bad_request(format!("failed to hash aum: {e}")))?
+            .to_string();
 
-        // get prev hash
         let prev_hash = aum.prev_aum_hash.as_ref().map(hex::encode);
 
-        // verify the AUM chains properly: prev_hash must match current head
-        // (or be absent for genesis, which shouldn't happen during sync_send)
         match &prev_hash {
             Some(ph) if *ph != current_head => {
-                info!(
-                    prev_hash = %ph,
-                    current_head = %current_head,
-                    "tka sync send: aum prev_hash doesn't chain to current head"
-                );
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(TkaSyncSendResponse { head: current_head }),
-                );
+                info!(prev_hash = %ph, current_head = %current_head, "broken chain");
+                return Err(ApiError::bad_request(
+                    "aum prev_hash doesn't chain to current head",
+                ));
             }
             None => {
-                // no prev_hash means genesis-like AUM, which shouldn't appear in sync_send
-                info!("tka sync send: aum has no prev_hash (unexpected in sync)");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(TkaSyncSendResponse { head: current_head }),
-                );
+                return Err(ApiError::bad_request(
+                    "aum has no prev_hash (unexpected in sync)",
+                ));
             }
-            _ => {} // prev_hash matches current_head, proceed
+            _ => {}
         }
 
-        // store the AUM
-        if let Err(e) = state
+        state
             .db
             .store_aum(&aum_hash, prev_hash.as_deref(), aum_bytes.as_bytes())
             .await
-        {
-            info!(error = %e, "tka sync send: failed to store aum");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSyncSendResponse { head: current_head }),
-            );
-        }
+            .map_err(|e| ApiError::internal(format!("failed to store aum: {e}")))?;
 
         debug!(hash = %aum_hash, "tka sync send: stored aum");
         current_head = aum_hash;
     }
 
-    // update head in tka_state if we received any AUMs
     if !req.missing_aums.is_empty() {
         let now = chrono::Utc::now();
         let updated_state = railscale_db::TkaState {
@@ -641,20 +426,15 @@ pub async fn tka_sync_send(
             ..tka_state
         };
 
-        if let Err(e) = state.db.upsert_tka_state(&updated_state).await {
-            info!(error = %e, "tka sync send: failed to update head");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSyncSendResponse { head: current_head }),
-            );
-        }
+        state
+            .db
+            .upsert_tka_state(&updated_state)
+            .await
+            .map_err(|e| ApiError::internal(format!("failed to update head: {e}")))?;
     }
 
     info!(head = %current_head, aums = req.missing_aums.len(), "tka sync send: processed");
-    (
-        StatusCode::OK,
-        Json(TkaSyncSendResponse { head: current_head }),
-    )
+    Ok(Json(TkaSyncSendResponse { head: current_head }))
 }
 
 /// POST /machine/tka/disable
@@ -663,73 +443,42 @@ pub async fn tka_sync_send(
 pub async fn tka_disable(
     State(state): State<AppState>,
     Json(req): Json<TkaDisableRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TkaDisableResponse>, ApiError> {
     debug!(node_key = ?req.node_key, head = %req.head, "tka disable request");
 
-    // verify requesting node exists
-    if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka disable").await {
-        return (status, Json(TkaDisableResponse::default()));
-    }
+    verify_requesting_node(&state.db, &req.node_key, "tka disable").await?;
 
-    // verify TKA is enabled
     let tka_state = match state.db.get_tka_state().await {
         Ok(Some(s)) if s.enabled => s,
-        Ok(Some(_)) => {
-            info!("tka disable: tka not enabled");
-            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
-        }
-        Ok(None) => {
-            info!("tka disable: no tka state");
-            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
-        }
-        Err(e) => {
-            info!(error = %e, "tka disable: db error");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaDisableResponse::default()),
-            );
-        }
+        Ok(_) => return Err(ApiError::bad_request("tka not enabled")),
+        Err(e) => return Err(ApiError::internal(format!("tka disable: db error: {e}"))),
     };
 
-    // get stored disablement secret hashes
-    let stored_hashes = match &tka_state.disablement_secrets {
-        Some(h) if !h.is_empty() => h,
-        _ => {
-            info!("tka disable: no disablement secrets configured");
-            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
-        }
-    };
+    let stored_hashes = tka_state
+        .disablement_secrets
+        .as_ref()
+        .filter(|h| !h.is_empty())
+        .ok_or_else(|| ApiError::bad_request("no disablement secrets configured"))?;
 
-    // verify the provided secret against stored hashes
-    // stored as concatenated 32-byte hashes
-    let secret_bytes: [u8; 32] = match req.disablement_secret.as_slice().try_into() {
-        Ok(b) => b,
-        Err(_) => {
-            info!("tka disable: invalid secret length");
-            return (StatusCode::BAD_REQUEST, Json(TkaDisableResponse::default()));
-        }
-    };
+    let secret_bytes: [u8; 32] = req
+        .disablement_secret
+        .as_slice()
+        .try_into()
+        .map_err(|_| ApiError::bad_request("invalid secret length"))?;
 
     let secret = railscale_tka::DisablementSecret::from(secret_bytes);
 
-    // check each stored hash (32 bytes each)
-    let mut valid = false;
-    for chunk in stored_hashes.chunks(32) {
-        if chunk.len() == 32 {
+    let valid = stored_hashes.chunks(32).any(|chunk| {
+        chunk.len() == 32 && {
             let hash: [u8; 32] = chunk.try_into().unwrap();
-            if secret.verify(&hash) {
-                valid = true;
-                break;
-            }
+            secret.verify(&hash)
         }
-    }
+    });
 
     if !valid {
-        info!("tka disable: invalid disablement secret");
-        return (StatusCode::FORBIDDEN, Json(TkaDisableResponse::default()));
+        return Err(ApiError::forbidden("invalid disablement secret"));
     }
 
-    // disable TKA
     let now = chrono::Utc::now();
     let updated_state = railscale_db::TkaState {
         enabled: false,
@@ -737,16 +486,14 @@ pub async fn tka_disable(
         ..tka_state
     };
 
-    if let Err(e) = state.db.upsert_tka_state(&updated_state).await {
-        info!(error = %e, "tka disable: failed to update state");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(TkaDisableResponse::default()),
-        );
-    }
+    state
+        .db
+        .upsert_tka_state(&updated_state)
+        .await
+        .map_err(|e| ApiError::internal(format!("failed to disable tka: {e}")))?;
 
     info!("tka disabled");
-    (StatusCode::OK, Json(TkaDisableResponse::default()))
+    Ok(Json(TkaDisableResponse::default()))
 }
 
 /// POST /machine/tka/sign
@@ -755,131 +502,59 @@ pub async fn tka_disable(
 pub async fn tka_sign(
     State(state): State<AppState>,
     Json(req): Json<TkaSubmitSignatureRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<TkaSubmitSignatureResponse>, ApiError> {
     debug!(node_key = ?req.node_key, "tka sign request");
 
-    // verify requesting node exists
-    if let Err(status) = verify_requesting_node(&state.db, &req.node_key, "tka sign").await {
-        return (status, Json(TkaSubmitSignatureResponse::default()));
-    }
+    verify_requesting_node(&state.db, &req.node_key, "tka sign").await?;
 
-    // verify TKA is enabled
     let tka_state = match state.db.get_tka_state().await {
         Ok(Some(s)) if s.enabled => s,
-        Ok(Some(_)) => {
-            info!("tka sign: tka not enabled");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-        Ok(None) => {
-            info!("tka sign: no tka state");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-        Err(e) => {
-            info!(error = %e, "tka sign: db error");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
+        Ok(_) => return Err(ApiError::bad_request("tka not enabled")),
+        Err(e) => return Err(ApiError::internal(format!("tka sign: db error: {e}"))),
     };
 
-    // load genesis to get TKA public key
-    let genesis_bytes = match &tka_state.genesis_aum {
-        Some(b) => b,
-        None => {
-            info!("tka sign: no genesis aum stored");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-    };
+    let genesis_bytes = tka_state
+        .genesis_aum
+        .as_ref()
+        .ok_or_else(|| ApiError::internal("no genesis aum stored"))?;
 
-    let parsed = match parse_genesis(genesis_bytes, "tka sign") {
-        Ok(p) => p,
-        Err(status) => return (status, Json(TkaSubmitSignatureResponse::default())),
-    };
+    let parsed = parse_genesis(genesis_bytes, "tka sign")?;
 
-    // parse the signature
-    let sig = match railscale_tka::NodeKeySignature::from_cbor(req.signature.as_bytes()) {
-        Ok(s) => s,
-        Err(e) => {
-            info!(error = %e, "tka sign: invalid signature");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-    };
+    let sig = railscale_tka::NodeKeySignature::from_cbor(req.signature.as_bytes())
+        .map_err(|e| ApiError::bad_request(format!("invalid signature: {e}")))?;
 
-    // verify the signature
-    if let Err(e) = sig.verify(&parsed.public_key) {
+    sig.verify(&parsed.public_key).map_err(|e| {
         info!(error = %e, "tka sign: signature verification failed");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(TkaSubmitSignatureResponse::default()),
-        );
-    }
+        ApiError::bad_request("signature verification failed")
+    })?;
 
-    // extract the node key from the signature
-    let signed_pubkey = match &sig.pubkey {
-        Some(p) => p,
-        None => {
-            info!("tka sign: signature has no pubkey");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-    };
+    let signed_pubkey = sig
+        .pubkey
+        .as_ref()
+        .ok_or_else(|| ApiError::bad_request("signature has no pubkey"))?;
 
-    // find the node with this pubkey
     let signed_node_key = railscale_types::NodeKey::from_bytes(signed_pubkey.clone());
-    let node = match state.db.get_node_by_node_key(&signed_node_key).await {
-        Ok(Some(n)) => n,
-        Ok(None) => {
-            info!(node_key = ?signed_node_key, "tka sign: node not found");
-            return (
-                StatusCode::NOT_FOUND,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-        Err(e) => {
-            info!(error = %e, "tka sign: db error");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-    };
+    let node = state
+        .db
+        .get_node_by_node_key(&signed_node_key)
+        .await
+        .map_err(|e| ApiError::internal(format!("tka sign: db error: {e}")))?
+        .ok_or_else(|| ApiError::not_found("signed node not found"))?;
 
-    // store the signature
-    if let Err(e) = state
+    state
         .db
         .set_node_key_signature(node.id, req.signature.as_bytes())
         .await
-    {
-        info!(node_id = %node.id, error = %e, "tka sign: failed to store signature");
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(TkaSubmitSignatureResponse::default()),
-        );
-    }
+        .map_err(|e| ApiError::internal(format!("failed to store signature: {e}")))?;
 
     info!(node_id = %node.id, "tka sign: signature stored");
-    (StatusCode::OK, Json(TkaSubmitSignatureResponse::default()))
+    Ok(Json(TkaSubmitSignatureResponse::default()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{body::Body, http::Request};
+    use axum::{body::Body, http::Request, http::StatusCode};
     use railscale_db::RailscaleDb;
     use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
     use railscale_proto::CapabilityVersion;
