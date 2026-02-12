@@ -27,6 +27,38 @@ const MAX_AUM_SIZE: usize = 32 * 1024;
 /// max number of AUMs in a single sync_send request
 const MAX_AUMS_PER_REQUEST: usize = 100;
 
+/// parsed genesis AUM with its public key and hash
+struct ParsedGenesis {
+    public_key: railscale_tka::NlPublicKey,
+    hash: railscale_tka::AumHash,
+}
+
+/// parse a stored genesis AUM, extracting the TKA public key and hash
+fn parse_genesis(genesis_bytes: &[u8], endpoint: &str) -> Result<ParsedGenesis, StatusCode> {
+    let genesis = railscale_tka::Aum::from_cbor(genesis_bytes).map_err(|e| {
+        info!(error = %e, "{endpoint}: failed to parse genesis");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let tka_key = genesis.key.as_ref().ok_or_else(|| {
+        info!("{endpoint}: genesis has no key");
+        StatusCode::BAD_REQUEST
+    })?;
+
+    let public_key =
+        railscale_tka::NlPublicKey::try_from(tka_key.public.as_slice()).map_err(|e| {
+            info!(error = %e, "{endpoint}: invalid tka public key");
+            StatusCode::BAD_REQUEST
+        })?;
+
+    let hash = genesis.hash().map_err(|e| {
+        info!(error = %e, "{endpoint}: failed to hash genesis");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(ParsedGenesis { public_key, hash })
+}
+
 /// verify the requesting node exists in the database, returning UNAUTHORIZED if not
 async fn verify_requesting_node(
     db: &impl Database,
@@ -209,39 +241,9 @@ pub async fn tka_init_finish(
         }
     };
 
-    // parse genesis AUM to get the TKA public key
-    let genesis = match railscale_tka::Aum::from_cbor(genesis_bytes) {
-        Ok(a) => a,
-        Err(e) => {
-            info!(error = %e, "tka init finish: failed to parse genesis");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-    };
-
-    // extract the TKA public key from the genesis AddKey AUM
-    let tka_key = match &genesis.key {
-        Some(k) => k,
-        None => {
-            info!("tka init finish: genesis has no key");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-    };
-
-    let tka_public = match railscale_tka::NlPublicKey::try_from(tka_key.public.as_slice()) {
+    let parsed = match parse_genesis(genesis_bytes, "tka init finish") {
         Ok(p) => p,
-        Err(e) => {
-            info!(error = %e, "tka init finish: invalid tka public key");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
+        Err(status) => return (status, Json(TkaInitFinishResponse::default())),
     };
 
     // verify and store each signature
@@ -261,7 +263,7 @@ pub async fn tka_init_finish(
         };
 
         // verify the signature
-        if let Err(e) = sig.verify(&tka_public) {
+        if let Err(e) = sig.verify(&parsed.public_key) {
             info!(node_id = %node_id, error = %e, "tka init finish: signature verification failed");
             return (
                 StatusCode::BAD_REQUEST,
@@ -283,17 +285,7 @@ pub async fn tka_init_finish(
         }
     }
 
-    // compute genesis hash for head
-    let genesis_hash = match genesis.hash() {
-        Ok(h) => h,
-        Err(e) => {
-            info!(error = %e, "tka init finish: failed to hash genesis");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaInitFinishResponse::default()),
-            );
-        }
-    };
+    let genesis_hash = &parsed.hash;
 
     // store genesis AUM in the chain
     if let Err(e) = state
@@ -809,37 +801,9 @@ pub async fn tka_sign(
         }
     };
 
-    let genesis = match railscale_tka::Aum::from_cbor(genesis_bytes) {
-        Ok(a) => a,
-        Err(e) => {
-            info!(error = %e, "tka sign: failed to parse genesis");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-    };
-
-    let tka_key = match &genesis.key {
-        Some(k) => k,
-        None => {
-            info!("tka sign: genesis has no key");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
-    };
-
-    let tka_public = match railscale_tka::NlPublicKey::try_from(tka_key.public.as_slice()) {
+    let parsed = match parse_genesis(genesis_bytes, "tka sign") {
         Ok(p) => p,
-        Err(e) => {
-            info!(error = %e, "tka sign: invalid tka public key");
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TkaSubmitSignatureResponse::default()),
-            );
-        }
+        Err(status) => return (status, Json(TkaSubmitSignatureResponse::default())),
     };
 
     // parse the signature
@@ -855,7 +819,7 @@ pub async fn tka_sign(
     };
 
     // verify the signature
-    if let Err(e) = sig.verify(&tka_public) {
+    if let Err(e) = sig.verify(&parsed.public_key) {
         info!(error = %e, "tka sign: signature verification failed");
         return (
             StatusCode::BAD_REQUEST,
