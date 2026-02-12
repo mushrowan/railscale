@@ -452,7 +452,7 @@ async fn build_map_response(
         });
     }
 
-    let (all_nodes, users) = state
+    let (all_nodes, users, user_map) = state
         .map_cache
         .get_snapshot(&state.db)
         .await
@@ -468,8 +468,8 @@ async fn build_map_response(
         .as_ref()
         .and_then(|oidc| oidc.group_prefix.clone());
 
-    let resolver = crate::resolver::MapUserResolver::with_groups(
-        (*users).clone(),
+    let resolver = crate::resolver::MapUserResolver::from_cached(
+        user_map,
         grants.policy().groups.clone(),
         oidc_group_prefix,
     );

@@ -1,6 +1,7 @@
 use railscale_grants::UserResolver;
 use railscale_types::{OidcGroupPrefix, User, UserId};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// resolves user identity and group membership for map responses.
 ///
@@ -9,7 +10,7 @@ use std::collections::HashMap;
 /// 1. policy file groups (email-based membership)
 /// 2. oidc groups (synced from identity provider claims)
 pub struct MapUserResolver {
-    users: HashMap<UserId, User>,
+    users: Arc<HashMap<UserId, User>>,
     /// maps group name (with "group:" prefix) to list of member emails.
     groups: HashMap<String, Vec<String>>,
     /// optional prefix to apply to oidc group names.
@@ -21,7 +22,7 @@ impl MapUserResolver {
     ///
     /// use `with_groups()` to also include policy-defined groups.
     pub fn new(users: Vec<User>) -> Self {
-        let users = users.into_iter().map(|u| (u.id, u)).collect();
+        let users = Arc::new(users.into_iter().map(|u| (u.id, u)).collect());
         Self {
             users,
             groups: HashMap::new(),
@@ -31,19 +32,30 @@ impl MapUserResolver {
 
     /// create a new resolver with users, policy groups, and oidc configuration.
     ///
-    /// groups should be a mapping from group name (e.g., "group:engineering")
-    /// to a list of member email addresses.
-    ///
-    /// the `oidc_group_prefix` is applied to oidc group names when resolving
-    /// group membership. For example, with prefix "oidc-", an OIDC group
-    /// "engineering" becomes "oidc-engineering" for matching against
-    /// `group:oidc-engineering` in grants.
+    /// builds the user map from the vec. prefer `from_cached()` if a
+    /// pre-built map is available (e.g. from MapCache).
     pub fn with_groups(
         users: Vec<User>,
         groups: HashMap<String, Vec<String>>,
         oidc_group_prefix: Option<OidcGroupPrefix>,
     ) -> Self {
-        let users = users.into_iter().map(|u| (u.id, u)).collect();
+        let users = Arc::new(users.into_iter().map(|u| (u.id, u)).collect());
+        Self {
+            users,
+            groups,
+            oidc_group_prefix,
+        }
+    }
+
+    /// create a resolver from a pre-built user map (from MapCache) and policy groups.
+    ///
+    /// avoids rebuilding the HashMap per request since the cache
+    /// already maintains one.
+    pub fn from_cached(
+        users: Arc<HashMap<UserId, User>>,
+        groups: HashMap<String, Vec<String>>,
+        oidc_group_prefix: Option<OidcGroupPrefix>,
+    ) -> Self {
         Self {
             users,
             groups,

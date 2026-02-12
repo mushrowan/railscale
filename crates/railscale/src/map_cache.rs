@@ -5,12 +5,13 @@
 //! invalidation via generation counters — the cache is only rebuilt
 //! from the database on the first read after a state change.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use railscale_db::{Database, RailscaleDb};
 use railscale_proto::DnsConfig;
-use railscale_types::{Node, User};
+use railscale_types::{Node, User, UserId};
 use tokio::sync::RwLock;
 use tracing::debug;
 
@@ -18,6 +19,8 @@ use tracing::debug;
 struct Snapshot {
     nodes: Arc<Vec<Node>>,
     users: Arc<Vec<User>>,
+    /// pre-built user map for MapUserResolver (avoids HashMap rebuild per request)
+    user_map: Arc<HashMap<UserId, User>>,
     generation: u64,
 }
 
@@ -65,14 +68,16 @@ impl MapCache {
         self.dns_config.clone()
     }
 
-    /// get a fresh snapshot of nodes and users
+    /// get a fresh snapshot of nodes, users, and pre-built user map
     ///
-    /// returns Arc-wrapped vecs so concurrent readers share the same
-    /// allocation instead of cloning on every map request.
+    /// returns Arc-wrapped data so concurrent readers share the same
+    /// allocation instead of cloning on every map request. the user map
+    /// is pre-built once per snapshot to avoid HashMap construction per request.
     pub async fn get_snapshot(
         &self,
         db: &RailscaleDb,
-    ) -> Result<(Arc<Vec<Node>>, Arc<Vec<User>>), railscale_db::Error> {
+    ) -> Result<(Arc<Vec<Node>>, Arc<Vec<User>>, Arc<HashMap<UserId, User>>), railscale_db::Error>
+    {
         let current_gen = self.generation.load(Ordering::Acquire);
         let cached_gen = self.cached_generation.load(Ordering::Acquire);
 
@@ -80,7 +85,11 @@ impl MapCache {
         if current_gen == cached_gen {
             let guard = self.snapshot.read().await;
             if let Some(ref snap) = *guard {
-                return Ok((Arc::clone(&snap.nodes), Arc::clone(&snap.users)));
+                return Ok((
+                    Arc::clone(&snap.nodes),
+                    Arc::clone(&snap.users),
+                    Arc::clone(&snap.user_map),
+                ));
             }
             // snapshot is None despite generations matching — fall through to rebuild
         }
@@ -93,24 +102,31 @@ impl MapCache {
         if let Some(ref snap) = *guard
             && snap.generation == current_gen
         {
-            return Ok((Arc::clone(&snap.nodes), Arc::clone(&snap.users)));
+            return Ok((
+                Arc::clone(&snap.nodes),
+                Arc::clone(&snap.users),
+                Arc::clone(&snap.user_map),
+            ));
         }
 
         // rebuild from database
         debug!("map cache: rebuilding snapshot from database");
+        let users_vec = db.list_users().await?;
+        let user_map = Arc::new(users_vec.iter().map(|u| (u.id, u.clone())).collect());
         let nodes = Arc::new(db.list_nodes().await?);
-        let users = Arc::new(db.list_users().await?);
+        let users = Arc::new(users_vec);
 
         let snapshot = Snapshot {
             nodes: Arc::clone(&nodes),
             users: Arc::clone(&users),
+            user_map: Arc::clone(&user_map),
             generation: current_gen,
         };
 
         *guard = Some(snapshot);
         self.cached_generation.store(current_gen, Ordering::Release);
 
-        Ok((nodes, users))
+        Ok((nodes, users, user_map))
     }
 }
 
@@ -134,10 +150,11 @@ mod tests {
         db.create_node(&node).await.unwrap();
 
         let cache = MapCache::new(None);
-        let (nodes, users) = cache.get_snapshot(&db).await.unwrap();
+        let (nodes, users, user_map) = cache.get_snapshot(&db).await.unwrap();
 
         assert_eq!(nodes.len(), 1);
         assert_eq!(users.len(), 1);
+        assert_eq!(user_map.len(), 1);
     }
 
     #[tokio::test]
@@ -151,7 +168,7 @@ mod tests {
         let cache = MapCache::new(None);
 
         // first read
-        let (_, users1) = cache.get_snapshot(&db).await.unwrap();
+        let (_, users1, _) = cache.get_snapshot(&db).await.unwrap();
         assert_eq!(users1.len(), 1);
 
         // add another user directly to DB (without invalidating cache)
@@ -159,7 +176,7 @@ mod tests {
         db.create_user(&user2).await.unwrap();
 
         // second read should return cached data (still 1 user)
-        let (_, users2) = cache.get_snapshot(&db).await.unwrap();
+        let (_, users2, _) = cache.get_snapshot(&db).await.unwrap();
         assert_eq!(
             users2.len(),
             1,
@@ -178,7 +195,7 @@ mod tests {
         let cache = MapCache::new(None);
 
         // first read
-        let (_, users1) = cache.get_snapshot(&db).await.unwrap();
+        let (_, users1, _) = cache.get_snapshot(&db).await.unwrap();
         assert_eq!(users1.len(), 1);
 
         // add another user and invalidate
@@ -187,7 +204,7 @@ mod tests {
         cache.invalidate();
 
         // should now see 2 users
-        let (_, users2) = cache.get_snapshot(&db).await.unwrap();
+        let (_, users2, _) = cache.get_snapshot(&db).await.unwrap();
         assert_eq!(users2.len(), 2, "cache should rebuild after invalidation");
     }
 
