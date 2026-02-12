@@ -306,16 +306,46 @@ pub async fn create_app_routers_with_policy_handle(
     keypair: Option<Keypair>,
     derp_map: Option<DerpMap>,
 ) -> (AppRouters, PolicyHandle) {
-    // generate keypair if not provided
+    let (state, handle) =
+        build_app_state(db, policy, config, oidc, notifier, keypair, derp_map).await;
+
+    let api_separate = state.config.api.enabled && state.config.api.listen_host.is_some();
+
+    let protocol_router = build_protocol_router(&state);
+    let api_router = if state.config.api.enabled {
+        Some(build_api_router(&state))
+    } else {
+        None
+    };
+
+    let routers = AppRouters {
+        protocol: protocol_router,
+        api: api_router,
+        api_separate,
+        derp_map: state.derp_map.clone(),
+    };
+
+    (routers, handle)
+}
+
+/// construct AppState and PolicyHandle from config, spawning background tasks
+async fn build_app_state(
+    db: RailscaleDb,
+    policy: Policy,
+    config: Config,
+    oidc: Option<oidc::AuthProviderOidc>,
+    notifier: StateNotifier,
+    keypair: Option<Keypair>,
+    derp_map: Option<DerpMap>,
+) -> (AppState, PolicyHandle) {
     let keypair = keypair.unwrap_or_else(|| {
         railscale_proto::generate_keypair().expect("failed to generate noise keypair")
     });
 
-    // initialize ip allocator with configured prefixes and strategy
+    // initialise ip allocator and load existing allocations
     let mut ip_allocator =
         IpAllocator::new(config.prefix_v4, config.prefix_v6, config.ip_allocation);
 
-    // load already-allocated ips from the database
     if let Ok(nodes) = db.list_nodes().await {
         let allocated_ips: Vec<std::net::IpAddr> = nodes
             .iter()
@@ -325,32 +355,23 @@ pub async fn create_app_routers_with_policy_handle(
         ip_allocator.load_allocated(allocated_ips);
     }
 
-    // create shared grants engine
     let grants = Arc::new(RwLock::new(GrantsEngine::new(policy)));
     let handle = PolicyHandle {
         engine: Arc::clone(&grants),
     };
 
-    // create pending registrations cache with 15 minute ttl and bounded size
-    // max 10,000 pending registrations to prevent memory exhaustion
     let pending_registrations = Cache::builder()
         .max_capacity(10_000)
         .time_to_live(Duration::from_secs(900))
         .build();
 
-    // initialize derp map (default to empty if not provided)
     let derp_map = Arc::new(RwLock::new(derp_map.unwrap_or_default()));
 
-    // create dns cache for /bootstrap-dns with 60 second ttl
     let dns_cache = Cache::builder()
         .max_capacity(1000)
         .time_to_live(Duration::from_secs(60))
         .build();
 
-    // determine if api should run on separate listener
-    let api_separate = config.api.enabled && config.api.listen_host.is_some();
-
-    // load geoip database if configured
     let geoip = config.geoip_database_path.as_ref().and_then(|path| {
         match railscale_grants::MaxmindDbResolver::from_path(path) {
             Some(resolver) => {
@@ -369,12 +390,11 @@ pub async fn create_app_routers_with_policy_handle(
 
     let ip_allocator = Arc::new(Mutex::new(ip_allocator));
 
-    // create ephemeral garbage collector with ip allocator for address release
+    // ephemeral node garbage collector
     let ephemeral_gc =
         EphemeralGarbageCollector::new(db.clone(), config.ephemeral_node_inactivity_timeout_secs)
             .with_ip_allocator(ip_allocator.clone());
 
-    // spawn garbage collector background task (runs every 30 seconds)
     if ephemeral_gc.is_enabled() {
         let gc = ephemeral_gc.clone();
         tokio::spawn(async move {
@@ -382,15 +402,12 @@ pub async fn create_app_routers_with_policy_handle(
         });
     }
 
-    // pre-compute dns config once (pure config transform, never changes at runtime)
+    // map response cache with pre-computed dns config
     let cached_dns_config = dns::generate_dns_config(&config);
     let map_cache = Arc::new(map_cache::MapCache::new(cached_dns_config));
-
-    // attach map cache to notifier so state changes automatically invalidate it
-    // (uses shared inner state, so all clones of the notifier see the cache)
     notifier.set_map_cache(Arc::clone(&map_cache));
 
-    // construct dns provider for ACME dns-01 challenges if configured
+    // dns provider for ACME dns-01 challenges
     let dns_provider_boxed: Option<Arc<dyn dns_provider::DnsProviderBoxed>> =
         config.dns_provider.as_ref().map(|provider_config| {
             tracing::info!(
@@ -403,12 +420,11 @@ pub async fn create_app_routers_with_policy_handle(
             ))
         });
 
-    // spawn dns challenge cleanup task (runs every 60 seconds, removes records older than 10 min)
     if let Some(ref provider) = dns_provider_boxed {
         let gc = dns_challenge_gc::DnsChallengeGarbageCollector::new(
             db.clone(),
             Arc::clone(provider),
-            600, // 10 minutes
+            600,
         );
         gc.spawn_collector(Duration::from_secs(60));
     }
@@ -433,24 +449,7 @@ pub async fn create_app_routers_with_policy_handle(
         tka_public_key: Arc::new(RwLock::new(None)),
     };
 
-    // build protocol router
-    let protocol_router = build_protocol_router(&state);
-
-    // build api router if enabled
-    let api_router = if state.config.api.enabled {
-        Some(build_api_router(&state))
-    } else {
-        None
-    };
-
-    let routers = AppRouters {
-        protocol: protocol_router,
-        api: api_router,
-        api_separate,
-        derp_map: state.derp_map.clone(),
-    };
-
-    (routers, handle)
+    (state, handle)
 }
 
 /// build the protocol router (tailscale client endpoints).
