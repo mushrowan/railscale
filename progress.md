@@ -1,5 +1,13 @@
 # progress
 
+## todo cleanup — complete
+- **high**: ephemeral.rs saturate to MAX_UTC, tka.rs ParsedGenesis helper extraction
+- **tests**: 8 StateNotifier tests, 7 MachineKeyContext extractor tests
+- **perf**: Arc-wrapped MapCache snapshots, pre-built user HashMap in cache, cached TKA public key in AppState
+- **refactor**: all 7 TKA handlers to Result<Json<T>, ApiError> (-317 lines), Forbidden variant on ApiError
+- **cleanup**: log swallowed TKA sig fetch errors, fix stale dns/resolver comments, deduplicate default_grants() into test_helpers.rs, propagate webhook serialisation error
+- **structure**: extract build_app_state() from create_app_routers_with_policy_handle, MapUserResolver::from_cached()
+
 ## unvendor snow — complete
 - removed vendored `vendor/snow` fork and `[patch.crates-io]` override
 - custom `TailscaleResolver` in `railscale-proto::noise` overrides ChaChaPoly with big-endian nonce encoding (tailscale compatibility)

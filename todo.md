@@ -7,7 +7,7 @@
 - [x] ts2021 tests: rename stub to create_invalid_initiation_message for clarity
 - [x] ephemeral.rs — saturate to MAX_UTC instead of panicking on large Duration::from_std
 - [x] tka.rs — extract ParsedGenesis + parse_genesis() helper, deduplicating ~40 lines
-- [x] notifier.rs — 8 unit tests for StateNotifier (subscribe, multi-sub, clone, cache invalidation)
+- [x] notifier.rs — 8 unit tests for StateNotifier (subscribe, notify, cache invalidation)
 - [x] machine_key_context.rs — 7 unit tests for extractors (from_bytes, extraction, optional)
 - [x] map_cache.rs — Arc-wrapped snapshots to avoid cloning per map request
 - [x] tka.rs — all 7 handlers refactored to Result<Json<T>, ApiError> with ? propagation (-317 lines)
@@ -16,10 +16,7 @@
 - [x] resolver.rs — fix comment to say "OIDC groups" not duplicate "policy groups"
 - [x] tests — deduplicate default_grants() into handlers/test_helpers.rs (was in 4 modules)
 - [x] webhook.rs — propagate serialisation error instead of expect()
-
-## low priority
-
-- [ ] tka.rs — cache parsed TKA public key in AppState instead of re-parsing genesis AUM from CBOR per request
-- [ ] resolver.rs — cache MapUserResolver in MapCache instead of rebuilding HashMap of all users per map request
-- [ ] lib.rs — extract build_app_state() from create_app_routers_with_policy_handle (~150 lines)
+- [x] tka.rs — cache parsed TKA public key in AppState (populated on init_finish, lazy on sign)
+- [x] resolver.rs — cache user map in MapCache, new from_cached() constructor
+- [x] lib.rs — extract build_app_state() from create_app_routers_with_policy_handle
 - [x] noise.rs:47 — chacha20poly1305 encrypt is infallible, unwrap is safe (no change needed)
