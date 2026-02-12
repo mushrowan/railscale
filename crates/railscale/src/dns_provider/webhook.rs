@@ -47,7 +47,8 @@ impl DnsProvider for WebhookProvider {
             "name": name,
             "value": value,
         });
-        let body = serde_json::to_vec(&payload).expect("json serialisation");
+        let body = serde_json::to_vec(&payload)
+            .map_err(|e| DnsProviderError::Provider(format!("json serialisation: {e}")))?;
 
         let mut req = self.client.post(&self.url).json(&payload);
         if let Some(sig) = self.sign(&body) {
@@ -74,7 +75,8 @@ impl DnsProvider for WebhookProvider {
             "action": "clear",
             "name": name,
         });
-        let body = serde_json::to_vec(&payload).expect("json serialisation");
+        let body = serde_json::to_vec(&payload)
+            .map_err(|e| DnsProviderError::Provider(format!("json serialisation: {e}")))?;
 
         let mut req = self.client.post(&self.url).json(&payload);
         if let Some(sig) = self.sign(&body) {
