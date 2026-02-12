@@ -228,6 +228,9 @@ pub async fn tka_init_finish(
         .await
         .map_err(|e| ApiError::internal(format!("failed to enable tka: {e}")))?;
 
+    // cache the parsed TKA public key for future sign requests
+    *state.tka_public_key.write().await = Some(parsed.public_key);
+
     info!(head = %parsed.hash, "tka enabled");
     Ok(Json(TkaInitFinishResponse::default()))
 }
@@ -492,6 +495,9 @@ pub async fn tka_disable(
         .await
         .map_err(|e| ApiError::internal(format!("failed to disable tka: {e}")))?;
 
+    // clear cached TKA public key
+    *state.tka_public_key.write().await = None;
+
     info!("tka disabled");
     Ok(Json(TkaDisableResponse::default()))
 }
@@ -513,17 +519,24 @@ pub async fn tka_sign(
         Err(e) => return Err(ApiError::internal(format!("tka sign: db error: {e}"))),
     };
 
-    let genesis_bytes = tka_state
-        .genesis_aum
-        .as_ref()
-        .ok_or_else(|| ApiError::internal("no genesis aum stored"))?;
-
-    let parsed = parse_genesis(genesis_bytes, "tka sign")?;
+    // use cached TKA public key, falling back to parsing genesis
+    let cached = state.tka_public_key.read().await.clone();
+    let tka_public_key = if let Some(key) = cached {
+        key
+    } else {
+        let genesis_bytes = tka_state
+            .genesis_aum
+            .as_ref()
+            .ok_or_else(|| ApiError::internal("no genesis aum stored"))?;
+        let parsed = parse_genesis(genesis_bytes, "tka sign")?;
+        *state.tka_public_key.write().await = Some(parsed.public_key.clone());
+        parsed.public_key
+    };
 
     let sig = railscale_tka::NodeKeySignature::from_cbor(req.signature.as_bytes())
         .map_err(|e| ApiError::bad_request(format!("invalid signature: {e}")))?;
 
-    sig.verify(&parsed.public_key).map_err(|e| {
+    sig.verify(&tka_public_key).map_err(|e| {
         info!(error = %e, "tka sign: signature verification failed");
         ApiError::bad_request("signature verification failed")
     })?;

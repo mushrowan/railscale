@@ -144,6 +144,8 @@ pub struct AppState {
     pub map_cache: Arc<map_cache::MapCache>,
     /// dns provider for ACME dns-01 challenges (None if not configured)
     pub dns_provider: Option<Arc<dyn dns_provider::DnsProviderBoxed>>,
+    /// cached TKA public key to avoid re-parsing genesis AUM on every request
+    pub tka_public_key: Arc<RwLock<Option<railscale_tka::NlPublicKey>>>,
 }
 
 /// routers for the application, potentially running on separate listeners.
@@ -428,6 +430,7 @@ pub async fn create_app_routers_with_policy_handle(
         ephemeral_gc,
         map_cache,
         dns_provider: dns_provider_boxed,
+        tka_public_key: Arc::new(RwLock::new(None)),
     };
 
     // build protocol router

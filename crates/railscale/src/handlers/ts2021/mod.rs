@@ -542,6 +542,7 @@ mod tests {
             ),
             map_cache: std::sync::Arc::new(crate::map_cache::MapCache::new(None)),
             dns_provider: None,
+            tka_public_key: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
