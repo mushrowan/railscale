@@ -67,7 +67,10 @@ impl EphemeralGarbageCollector {
             return;
         }
 
-        let delete_at = Utc::now() + chrono::Duration::from_std(self.timeout).unwrap();
+        let delete_at = match chrono::Duration::from_std(self.timeout) {
+            Ok(d) => Utc::now() + d,
+            Err(_) => DateTime::<Utc>::MAX_UTC,
+        };
         debug!(
             ?node_id,
             ?delete_at,
@@ -276,6 +279,19 @@ mod tests {
         assert_eq!(gc.collect().await, 1);
         assert_eq!(gc.scheduled_count().await, 0);
         assert!(db.get_node(node.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_schedule_deletion_with_large_timeout() {
+        let db = setup_test_db().await;
+        // u64::MAX seconds exceeds chrono's i64 millisecond range
+        let gc = EphemeralGarbageCollector::new(db, u64::MAX);
+
+        assert!(gc.is_enabled());
+
+        // should not panic — must saturate instead of unwrapping
+        gc.schedule_deletion(NodeId(1)).await;
+        assert_eq!(gc.scheduled_count().await, 1);
     }
 
     #[tokio::test]
