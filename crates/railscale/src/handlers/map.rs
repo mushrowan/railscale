@@ -270,6 +270,10 @@ async fn streaming_response(
         None
     };
 
+    // generate a unique session handle from node id + random bytes
+    let session_handle = format!("{}-{:016x}", node_id.0, rand::random::<u64>());
+    let session = crate::map_session::MapSession::new(session_handle);
+
     // create a stream that yields length-prefixed responses
     let inner_stream = stream::unfold(
         (
@@ -279,8 +283,17 @@ async fn streaming_response(
             true,
             keepalive_interval,
             compression,
+            session,
         ),
-        |(state, node_key, mut receiver, is_first, keepalive_interval, compression)| async move {
+        |(
+            state,
+            node_key,
+            mut receiver,
+            is_first,
+            keepalive_interval,
+            compression,
+            mut session,
+        )| async move {
             // determine what message to send
             let message_type = if is_first {
                 StreamMessage::FullUpdate
@@ -290,11 +303,20 @@ async fn streaming_response(
 
             match message_type {
                 StreamMessage::FullUpdate => {
-                    // streaming mode always sends full peer list
                     let response = match build_map_response(&state, &node_key, false).await {
                         Ok(r) => r,
                         Err(_) => return None,
                     };
+
+                    let response = if is_first {
+                        // first message: send full peer list, record session state
+                        session.apply_full(response)
+                    } else {
+                        // subsequent: extract peers for delta computation
+                        let peers = response.peers.clone();
+                        session.compute_delta(peers, response)
+                    };
+
                     let bytes = encode_length_prefixed(&response, &compression)?;
                     Some((
                         bytes,
@@ -305,6 +327,7 @@ async fn streaming_response(
                             false,
                             keepalive_interval,
                             compression,
+                            session,
                         ),
                     ))
                 }
@@ -320,6 +343,7 @@ async fn streaming_response(
                             false,
                             keepalive_interval,
                             compression,
+                            session,
                         ),
                     ))
                 }

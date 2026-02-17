@@ -320,10 +320,11 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     let (second_response, _) =
         read_length_prefixed_response(&second_chunk).expect("failed to parse second response");
 
-    // the second response should have the new node as a peer
+    // the second response uses delta encoding — new peer in peers_changed
+    let has_peers = !second_response.peers.is_empty() || !second_response.peers_changed.is_empty();
     assert!(
-        !second_response.peers.is_empty(),
-        "should have at least one peer after state change"
+        has_peers,
+        "should have at least one peer after state change (full or delta)"
     );
 
     // response with data must have keep_alive=false
