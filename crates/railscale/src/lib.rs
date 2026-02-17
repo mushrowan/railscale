@@ -25,6 +25,8 @@ mod ephemeral;
 pub mod handlers;
 /// shared map response cache for node/user snapshots
 pub mod map_cache;
+/// per-connection session state for delta map responses
+pub mod map_session;
 mod noise_stream;
 mod notifier;
 /// openid connect authentication provider.
