@@ -469,6 +469,7 @@ async fn build_map_response(
             control_time: Some(chrono::Utc::now().to_rfc3339()),
             tka_info,
             domain: state.config.base_domain.clone(),
+            debug: build_debug_settings(&state.config),
             ..Default::default()
         });
     }
@@ -601,6 +602,7 @@ async fn build_map_response(
         ssh_policy,
         tka_info,
         domain: state.config.base_domain.clone(),
+        debug: build_debug_settings(&state.config),
         ..Default::default()
     })
 }
@@ -709,6 +711,20 @@ fn node_to_map_response_node(
         cap: railscale_proto::CapabilityVersion::CURRENT.0,
         // cap_map is populated separately for self node based on config
         cap_map: None,
+    }
+}
+
+/// build debug settings from config, if any are enabled
+fn build_debug_settings(
+    config: &railscale_types::Config,
+) -> Option<railscale_proto::DebugSettings> {
+    if config.disable_log_tail {
+        Some(railscale_proto::DebugSettings {
+            disable_log_tail: true,
+            ..Default::default()
+        })
+    } else {
+        None
     }
 }
 

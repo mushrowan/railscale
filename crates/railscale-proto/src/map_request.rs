@@ -219,6 +219,11 @@ pub struct MapResponse {
     /// e.g. "example.com" or "user@gmail.com".
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub domain: String,
+
+    /// debug settings from control server.
+    /// used by headscale to disable logtail, or to throttle spinning clients.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugSettings>,
 }
 
 fn is_zero_i64(n: &i64) -> bool {
@@ -289,6 +294,38 @@ pub struct PeerChange {
     /// new TKA key signature.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key_signature: Option<MarshaledSignature>,
+}
+
+/// debug settings sent from control server to clients.
+///
+/// matches tailscale's `tailcfg.Debug`. used by headscale to disable
+/// logtail, or as a safety measure to throttle spinning clients.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct DebugSettings {
+    /// request that the client sleep for this many seconds.
+    /// the client can (and should) clamp the value (e.g. max 5 minutes).
+    /// exists as a safety measure to slow down spinning clients.
+    #[serde(default, skip_serializing_if = "is_zero_f64")]
+    pub sleep_seconds: f64,
+
+    /// disable the logtail package. once disabled it can't be re-enabled.
+    /// primarily used by headscale.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disable_log_tail: bool,
+
+    /// request that the client exit with this code.
+    /// safety measure in case a client is crash-looping or in an unsafe state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit: Option<i32>,
+}
+
+fn is_zero_f64(n: &f64) -> bool {
+    *n == 0.0
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// node information in a mapresponse.
@@ -1401,6 +1438,62 @@ mod delta_tests {
             "expected MapSessionHandle: {json}"
         );
         assert!(json.contains("\"Seq\":5"), "expected Seq: {json}");
+    }
+
+    #[test]
+    fn debug_settings_serialises_with_pascal_case() {
+        let debug = DebugSettings {
+            sleep_seconds: 5.0,
+            disable_log_tail: true,
+            exit: None,
+        };
+        let json = serde_json::to_string(&debug).unwrap();
+        assert!(
+            json.contains("\"SleepSeconds\":5"),
+            "expected SleepSeconds: {json}"
+        );
+        assert!(
+            json.contains("\"DisableLogTail\":true"),
+            "expected DisableLogTail: {json}"
+        );
+        assert!(
+            !json.contains("Exit"),
+            "Exit should be omitted when None: {json}"
+        );
+    }
+
+    #[test]
+    fn debug_settings_omits_default_fields() {
+        let debug = DebugSettings::default();
+        let json = serde_json::to_string(&debug).unwrap();
+        assert_eq!(json, "{}", "default debug should be empty: {json}");
+    }
+
+    #[test]
+    fn debug_settings_on_map_response() {
+        let resp = MapResponse {
+            debug: Some(DebugSettings {
+                disable_log_tail: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"Debug\""), "expected Debug field: {json}");
+        assert!(
+            json.contains("DisableLogTail"),
+            "expected DisableLogTail: {json}"
+        );
+    }
+
+    #[test]
+    fn debug_omitted_from_keepalive() {
+        let resp = MapResponse::keepalive();
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            !json.contains("Debug"),
+            "Debug should be omitted from keepalive: {json}"
+        );
     }
 
     #[test]

@@ -82,6 +82,11 @@ pub struct Config {
     #[serde(default)]
     pub hide_build_metadata: bool,
 
+    /// tell clients to disable logtail (log uploads to control server).
+    /// primarily used by self-hosted servers. sent via Debug in MapResponse.
+    #[serde(default)]
+    pub disable_log_tail: bool,
+
     /// allow registration without noise context (for testing only).
     ///
     /// when false (default), `/machine/register` requires a valid noise handshake
@@ -125,6 +130,7 @@ impl Default for Config {
             ip_allocation: AllocationStrategy::default(),
             ephemeral_node_inactivity_timeout_secs: 120,
             hide_build_metadata: false,
+            disable_log_tail: false,
             allow_non_noise_registration: false,
             policy_file_path: None,
         }
