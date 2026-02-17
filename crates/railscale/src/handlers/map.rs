@@ -520,15 +520,29 @@ async fn build_map_response(
         })
         .collect();
 
-    // generate packet filter rules from grants
-    let mut packet_filter = grants.generate_filter_rules(&node, &all_nodes, &resolver);
+    // generate packet filter rules from grants (split into named chunks)
+    let network_rules = grants.generate_filter_rules(&node, &all_nodes, &resolver);
+    let cap_grant_rules = grants.generate_cap_grant_rules(&node, &all_nodes, &resolver);
+    let taildrop_rules = if state.config.taildrop_enabled {
+        grants.generate_taildrop_rules(&node, &all_nodes, &resolver)
+    } else {
+        vec![]
+    };
 
-    // append application capability grant rules (e.g. from policy app caps)
-    packet_filter.extend(grants.generate_cap_grant_rules(&node, &all_nodes, &resolver));
+    // build both flat (legacy) and named (incremental) packet filters
+    let mut packet_filter = network_rules.clone();
+    packet_filter.extend(cap_grant_rules.clone());
+    packet_filter.extend(taildrop_rules.clone());
 
-    // append taildrop (file-sharing) capability grants for same-user peers
-    if state.config.taildrop_enabled {
-        packet_filter.extend(grants.generate_taildrop_rules(&node, &all_nodes, &resolver));
+    let mut packet_filters = std::collections::HashMap::new();
+    if !network_rules.is_empty() {
+        packet_filters.insert("network".to_string(), Some(network_rules));
+    }
+    if !cap_grant_rules.is_empty() {
+        packet_filters.insert("cap-grants".to_string(), Some(cap_grant_rules));
+    }
+    if !taildrop_rules.is_empty() {
+        packet_filters.insert("taildrop".to_string(), Some(taildrop_rules));
     }
 
     // compile ssh policy for this node
@@ -605,6 +619,7 @@ async fn build_map_response(
         domain: state.config.base_domain.clone(),
         debug: build_debug_settings(&state.config),
         health: build_health_warnings(&node),
+        packet_filters,
         ..Default::default()
     })
 }

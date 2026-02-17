@@ -225,6 +225,18 @@ pub struct MapResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<DebugSettings>,
 
+    /// named/incremental packet filter updates.
+    ///
+    /// map keys are server-assigned names, values are the filter rules for
+    /// that key (or null to delete). the client concatenates all rules sorted
+    /// by key to produce the final packet filter. the special key "*" with
+    /// null value clears all prior named filters.
+    ///
+    /// if both `packet_filter` and `packet_filters` are set, `packet_filter`
+    /// is applied first as the "base" key, then `packet_filters`.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub packet_filters: std::collections::HashMap<String, Option<Vec<FilterRule>>>,
+
     /// health warnings from control plane.
     ///
     /// nil means no change. non-nil zero-length slice restores health to good.
@@ -1499,6 +1511,75 @@ mod delta_tests {
         let debug = DebugSettings::default();
         let json = serde_json::to_string(&debug).unwrap();
         assert_eq!(json, "{}", "default debug should be empty: {json}");
+    }
+
+    #[test]
+    fn packet_filters_named_serialises() {
+        let mut filters = std::collections::HashMap::new();
+        filters.insert(
+            "grants".to_string(),
+            Some(vec![FilterRule {
+                src_ips: vec!["100.64.0.1/32".to_string()],
+                dst_ports: vec![NetPortRange {
+                    ip: "100.64.0.2/32".to_string(),
+                    ports: PortRange::single(443),
+                }],
+                ..Default::default()
+            }]),
+        );
+        filters.insert("old-rule".to_string(), None); // delete
+
+        let resp = MapResponse {
+            packet_filters: filters,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            json.contains("\"PacketFilters\""),
+            "expected PacketFilters: {json}"
+        );
+        assert!(json.contains("\"grants\""), "expected grants key: {json}");
+        assert!(
+            json.contains("\"old-rule\":null"),
+            "expected null for delete: {json}"
+        );
+    }
+
+    #[test]
+    fn packet_filters_omitted_when_empty() {
+        let resp = MapResponse::keepalive();
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            !json.contains("PacketFilters"),
+            "PacketFilters should be omitted: {json}"
+        );
+    }
+
+    #[test]
+    fn packet_filters_roundtrips() {
+        let mut filters = std::collections::HashMap::new();
+        filters.insert(
+            "ssh".to_string(),
+            Some(vec![FilterRule {
+                src_ips: vec!["*".to_string()],
+                dst_ports: vec![NetPortRange {
+                    ip: "*".to_string(),
+                    ports: PortRange::single(22),
+                }],
+                ..Default::default()
+            }]),
+        );
+        filters.insert("clear-all".to_string(), None);
+
+        let resp = MapResponse {
+            packet_filters: filters,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        let parsed: MapResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.packet_filters.len(), 2);
+        assert!(parsed.packet_filters["ssh"].is_some());
+        assert!(parsed.packet_filters["clear-all"].is_none());
     }
 
     #[test]
