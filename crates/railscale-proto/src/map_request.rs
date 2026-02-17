@@ -477,6 +477,31 @@ pub struct DnsConfig {
     pub cert_domains: Vec<String>,
 }
 
+/// client-side audit log entry sent to `/machine/audit-log`.
+///
+/// clients submit audit log events (e.g. SSH session started) to the
+/// control server for centralised logging and compliance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct AuditLogRequest {
+    /// client capability version.
+    pub version: CapabilityVersion,
+
+    /// node key identifying the requesting node.
+    pub node_key: NodeKey,
+
+    /// action being logged (e.g. "ssh-session-start").
+    pub action: String,
+
+    /// opaque details string specific to the action.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub details: String,
+
+    /// when the event occurred on the node (RFC3339).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<String>,
+}
+
 /// request from a node to update its posture attributes.
 ///
 /// sent by the tailscale client to `/machine/set-device-attr` as a PATCH
@@ -1534,6 +1559,48 @@ mod delta_tests {
         assert!(
             !json.contains("Debug"),
             "Debug should be omitted from keepalive: {json}"
+        );
+    }
+
+    #[test]
+    fn audit_log_request_roundtrips() {
+        let req = AuditLogRequest {
+            version: CapabilityVersion(106),
+            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            action: "ssh-session-start".to_string(),
+            details: "user=root src=100.64.0.2".to_string(),
+            timestamp: Some("2026-01-15T12:00:00Z".to_string()),
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"Action\""), "expected PascalCase: {json}");
+        assert!(
+            json.contains("ssh-session-start"),
+            "expected action: {json}"
+        );
+
+        let parsed: AuditLogRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.action, "ssh-session-start");
+        assert_eq!(parsed.details, "user=root src=100.64.0.2");
+        assert_eq!(parsed.timestamp.as_deref(), Some("2026-01-15T12:00:00Z"));
+    }
+
+    #[test]
+    fn audit_log_request_omits_empty_fields() {
+        let req = AuditLogRequest {
+            version: CapabilityVersion(106),
+            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            action: "test".to_string(),
+            details: String::new(),
+            timestamp: None,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(
+            !json.contains("Details"),
+            "Details should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("Timestamp"),
+            "Timestamp should be omitted: {json}"
         );
     }
 

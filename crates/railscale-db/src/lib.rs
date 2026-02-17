@@ -100,6 +100,23 @@ pub struct DnsChallengeRecord {
     pub created_at: DateTime<Utc>,
 }
 
+/// a client-submitted audit log entry
+#[derive(Clone, Debug)]
+pub struct AuditLog {
+    /// database id
+    pub id: u64,
+    /// the node that submitted this log
+    pub node_id: NodeId,
+    /// action type (e.g. "ssh-session-start")
+    pub action: String,
+    /// opaque details string
+    pub details: String,
+    /// when the event occurred on the client
+    pub client_timestamp: Option<DateTime<Utc>>,
+    /// when the record was created on the server
+    pub created_at: DateTime<Utc>,
+}
+
 /// result type for database operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -329,6 +346,11 @@ pub trait Database: Send + Sync {
 
     /// hard-delete a challenge record by id
     fn delete_dns_challenge_record(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+
+    // ─── Audit Log Operations ──────────────────────────────────────────────
+
+    /// create a new audit log entry
+    fn create_audit_log(&self, log: &AuditLog) -> impl Future<Output = Result<AuditLog>> + Send;
 }
 
 /// the main database implementation using sea-orm.
@@ -1015,6 +1037,17 @@ impl Database for RailscaleDb {
             .exec(&self.conn)
             .await?;
         Ok(())
+    }
+
+    async fn create_audit_log(&self, log: &AuditLog) -> Result<AuditLog> {
+        let active: entity::audit_log::ActiveModel = log.into();
+        let result = entity::audit_log::Entity::insert(active)
+            .exec(&self.conn)
+            .await?;
+        Ok(AuditLog {
+            id: result.last_insert_id as u64,
+            ..log.clone()
+        })
     }
 }
 

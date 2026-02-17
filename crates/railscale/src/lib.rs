@@ -472,6 +472,8 @@ fn build_protocol_router(state: &AppState) -> Router {
         .route("/machine/tka/sync/send", post(handlers::tka_sync_send))
         .route("/machine/tka/disable", post(handlers::tka_disable))
         .route("/machine/tka/sign", post(handlers::tka_sign))
+        // client audit log submission
+        .route("/machine/audit-log", post(handlers::audit_log))
         // posture attribute updates from client
         .route(
             "/machine/set-device-attr",

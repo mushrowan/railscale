@@ -2,6 +2,7 @@
 
 mod api_auth;
 pub mod api_v1;
+mod audit_log;
 mod bootstrap_dns;
 mod error;
 mod health;
@@ -22,6 +23,7 @@ mod version;
 pub(crate) mod test_helpers;
 
 pub use api_auth::{ApiAuthError, ApiKeyContext, AuthMethod};
+pub use audit_log::audit_log;
 pub use bootstrap_dns::bootstrap_dns;
 pub use error::{ApiError, OptionExt, ResultExt};
 pub use health::health;
