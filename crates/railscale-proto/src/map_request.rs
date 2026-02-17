@@ -224,6 +224,13 @@ pub struct MapResponse {
     /// used by headscale to disable logtail, or to throttle spinning clients.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<DebugSettings>,
+
+    /// health warnings from control plane.
+    ///
+    /// nil means no change. non-nil zero-length slice restores health to good.
+    /// non-zero length slice is the list of problems the control plane sees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health: Option<Vec<String>>,
 }
 
 fn is_zero_i64(n: &i64) -> bool {
@@ -1467,6 +1474,40 @@ mod delta_tests {
         let debug = DebugSettings::default();
         let json = serde_json::to_string(&debug).unwrap();
         assert_eq!(json, "{}", "default debug should be empty: {json}");
+    }
+
+    #[test]
+    fn health_on_map_response_present_when_set() {
+        let resp = MapResponse {
+            health: Some(vec!["your key expires soon".to_string()]),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"Health\""), "expected Health: {json}");
+        assert!(
+            json.contains("your key expires soon"),
+            "expected warning: {json}"
+        );
+    }
+
+    #[test]
+    fn health_omitted_when_none() {
+        let resp = MapResponse::keepalive();
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(!json.contains("Health"), "Health should be omitted: {json}");
+    }
+
+    #[test]
+    fn health_empty_vec_means_all_clear() {
+        let resp = MapResponse {
+            health: Some(vec![]),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            json.contains("\"Health\":[]"),
+            "expected empty Health array: {json}"
+        );
     }
 
     #[test]

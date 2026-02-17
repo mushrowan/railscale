@@ -470,6 +470,7 @@ async fn build_map_response(
             tka_info,
             domain: state.config.base_domain.clone(),
             debug: build_debug_settings(&state.config),
+            health: build_health_warnings(&node),
             ..Default::default()
         });
     }
@@ -603,6 +604,7 @@ async fn build_map_response(
         tka_info,
         domain: state.config.base_domain.clone(),
         debug: build_debug_settings(&state.config),
+        health: build_health_warnings(&node),
         ..Default::default()
     })
 }
@@ -711,6 +713,36 @@ fn node_to_map_response_node(
         cap: railscale_proto::CapabilityVersion::CURRENT.0,
         // cap_map is populated separately for self node based on config
         cap_map: None,
+    }
+}
+
+/// build health warnings for a node from its current state.
+/// returns None if there are no warnings (no change from prior state).
+fn build_health_warnings(node: &Node) -> Option<Vec<String>> {
+    let mut warnings = Vec::new();
+
+    if let Some(ref expiry) = node.expiry {
+        let now = chrono::Utc::now();
+        if *expiry <= now {
+            warnings.push("key has expired".to_string());
+        } else {
+            let remaining = *expiry - now;
+            if remaining <= chrono::Duration::days(7) {
+                let days = remaining.num_days();
+                let hours = remaining.num_hours() % 24;
+                if days > 0 {
+                    warnings.push(format!("key expires in {days}d {hours}h"));
+                } else {
+                    warnings.push(format!("key expires in {hours}h"));
+                }
+            }
+        }
+    }
+
+    if warnings.is_empty() {
+        None
+    } else {
+        Some(warnings)
     }
 }
 
@@ -1052,5 +1084,39 @@ mod tests {
             cap_map.is_none(),
             "non-matching peer should have no cap_map"
         );
+    }
+
+    #[test]
+    fn health_warnings_none_when_no_expiry() {
+        let node = TestNodeBuilder::new(1).build();
+        assert!(build_health_warnings(&node).is_none());
+    }
+
+    #[test]
+    fn health_warnings_none_when_expiry_far_away() {
+        let node = TestNodeBuilder::new(1)
+            .with_expiry(chrono::Utc::now() + chrono::Duration::days(30))
+            .build();
+        assert!(build_health_warnings(&node).is_none());
+    }
+
+    #[test]
+    fn health_warnings_when_expiry_soon() {
+        let node = TestNodeBuilder::new(1)
+            .with_expiry(chrono::Utc::now() + chrono::Duration::days(3))
+            .build();
+        let warnings = build_health_warnings(&node).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("expires in"), "got: {}", warnings[0]);
+    }
+
+    #[test]
+    fn health_warnings_when_expired() {
+        let node = TestNodeBuilder::new(1)
+            .with_expiry(chrono::Utc::now() - chrono::Duration::hours(1))
+            .build();
+        let warnings = build_health_warnings(&node).unwrap();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("expired"), "got: {}", warnings[0]);
     }
 }

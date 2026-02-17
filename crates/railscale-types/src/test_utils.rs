@@ -33,6 +33,7 @@ pub struct TestNodeBuilder {
     last_seen_country: Option<String>,
     ephemeral: bool,
     nl_public_key: Option<Vec<u8>>,
+    expiry: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl TestNodeBuilder {
@@ -52,6 +53,7 @@ impl TestNodeBuilder {
             last_seen_country: None,
             ephemeral: false,
             nl_public_key: None,
+            expiry: None,
         }
     }
 
@@ -130,6 +132,12 @@ impl TestNodeBuilder {
         self.with_ephemeral(true)
     }
 
+    /// set key expiry time.
+    pub fn with_expiry(mut self, expiry: chrono::DateTime<chrono::Utc>) -> Self {
+        self.expiry = Some(expiry);
+        self
+    }
+
     /// set network lock public key (raw ed25519 bytes).
     pub fn with_nl_public_key(mut self, key: Vec<u8>) -> Self {
         self.nl_public_key = Some(key);
@@ -166,7 +174,7 @@ impl TestNodeBuilder {
             tags: self.tags,
             auth_key_id: None,
             ephemeral: self.ephemeral,
-            expiry: None,
+            expiry: self.expiry,
             last_seen: Some(now),
             last_seen_country: self.last_seen_country,
             approved_routes: vec![],
