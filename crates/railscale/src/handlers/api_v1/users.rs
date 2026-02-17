@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use super::nodes::PaginationParams;
 
 use crate::AppState;
-use crate::handlers::{ApiError, ApiKeyContext};
+use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
 use railscale_db::Database;
 use railscale_types::{Email, User, UserId, Username};
 
@@ -129,7 +129,7 @@ const MAX_DISPLAY_NAME_LEN: usize = 255;
 async fn create_user(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
-    Json(req): Json<CreateUserRequest>,
+    JsonBody(req): JsonBody<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<CreateUserResponse>), ApiError> {
     // validate display name length if provided
     if let Some(ref display_name) = req.display_name

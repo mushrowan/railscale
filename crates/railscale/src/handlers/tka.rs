@@ -19,7 +19,7 @@ use railscale_proto::{
 };
 use tracing::{debug, info};
 
-use super::ApiError;
+use super::{ApiError, JsonBody};
 use crate::AppState;
 
 /// max size of a single AUM in bytes (32 KiB)
@@ -87,7 +87,7 @@ async fn verify_requesting_node(
 /// returns list of nodes that need signatures.
 pub async fn tka_init_begin(
     State(state): State<AppState>,
-    Json(req): Json<TkaInitBeginRequest>,
+    JsonBody(req): JsonBody<TkaInitBeginRequest>,
 ) -> Result<Json<TkaInitBeginResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
@@ -163,7 +163,7 @@ pub async fn tka_init_begin(
 /// complete tka initialisation with node-key signatures.
 pub async fn tka_init_finish(
     State(state): State<AppState>,
-    Json(req): Json<TkaInitFinishRequest>,
+    JsonBody(req): JsonBody<TkaInitFinishRequest>,
 ) -> Result<Json<TkaInitFinishResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
@@ -243,7 +243,7 @@ pub async fn tka_init_finish(
 /// or disablement secret if tka has been disabled.
 pub async fn tka_bootstrap(
     State(state): State<AppState>,
-    Json(req): Json<TkaBootstrapRequest>,
+    JsonBody(req): JsonBody<TkaBootstrapRequest>,
 ) -> Result<Json<TkaBootstrapResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
@@ -277,7 +277,7 @@ pub async fn tka_bootstrap(
 /// compares client's tka state with server's and returns any aums the client is missing.
 pub async fn tka_sync_offer(
     State(state): State<AppState>,
-    Json(req): Json<TkaSyncOfferRequest>,
+    JsonBody(req): JsonBody<TkaSyncOfferRequest>,
 ) -> Result<Json<TkaSyncOfferResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
@@ -355,7 +355,7 @@ pub async fn tka_sync_offer(
 /// receives aums from a client that the server is missing, validates and stores them.
 pub async fn tka_sync_send(
     State(state): State<AppState>,
-    Json(req): Json<TkaSyncSendRequest>,
+    JsonBody(req): JsonBody<TkaSyncSendRequest>,
 ) -> Result<Json<TkaSyncSendResponse>, ApiError> {
     debug!(
         node_key = ?req.node_key,
@@ -445,7 +445,7 @@ pub async fn tka_sync_send(
 /// disable tka with disablement secret.
 pub async fn tka_disable(
     State(state): State<AppState>,
-    Json(req): Json<TkaDisableRequest>,
+    JsonBody(req): JsonBody<TkaDisableRequest>,
 ) -> Result<Json<TkaDisableResponse>, ApiError> {
     debug!(node_key = ?req.node_key, head = %req.head, "tka disable request");
 
@@ -507,7 +507,7 @@ pub async fn tka_disable(
 /// submit a node-key signature.
 pub async fn tka_sign(
     State(state): State<AppState>,
-    Json(req): Json<TkaSubmitSignatureRequest>,
+    JsonBody(req): JsonBody<TkaSubmitSignatureRequest>,
 ) -> Result<Json<TkaSubmitSignatureResponse>, ApiError> {
     debug!(node_key = ?req.node_key, "tka sign request");
 

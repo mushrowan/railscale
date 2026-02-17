@@ -4,6 +4,7 @@
 //! - `GET /api/v1/policy` - get the current policy
 //! - `PUT /api/v1/policy` - set a new policy
 
+use crate::handlers::JsonBody;
 use axum::{Json, Router, extract::State, routing::get};
 use serde::{Deserialize, Serialize};
 
@@ -83,7 +84,7 @@ async fn get_policy(
 async fn set_policy(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
-    Json(req): Json<SetPolicyRequest>,
+    JsonBody(req): JsonBody<SetPolicyRequest>,
 ) -> Result<Json<SetPolicyResponse>, ApiError> {
     // parse and validate the new policy
     // NOTE: size already validated by policyjson deserialisation

@@ -22,7 +22,7 @@ use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::handlers::{ApiError, ApiKeyContext};
+use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
 use railscale_db::Database;
 use railscale_types::{Node, NodeId, NodeName};
 
@@ -281,7 +281,7 @@ async fn expire_node(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
     Path(id): Path<u64>,
-    Json(req): Json<ExpireNodeRequest>,
+    JsonBody(req): JsonBody<ExpireNodeRequest>,
 ) -> Result<Json<GetNodeResponse>, ApiError> {
     let node_id = NodeId(id);
 
@@ -363,7 +363,7 @@ async fn set_tags(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
     Path(id): Path<u64>,
-    Json(req): Json<SetTagsRequest>,
+    JsonBody(req): JsonBody<SetTagsRequest>,
 ) -> Result<Json<SetTagsResponse>, ApiError> {
     let node_id = NodeId(id);
 
@@ -406,7 +406,7 @@ async fn set_routes(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
     Path(id): Path<u64>,
-    Json(req): Json<SetRoutesRequest>,
+    JsonBody(req): JsonBody<SetRoutesRequest>,
 ) -> Result<Json<SetRoutesResponse>, ApiError> {
     let node_id = NodeId(id);
 
@@ -461,7 +461,7 @@ async fn set_posture_attributes(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
     Path(id): Path<u64>,
-    Json(req): Json<SetPostureAttributesRequest>,
+    JsonBody(req): JsonBody<SetPostureAttributesRequest>,
 ) -> Result<Json<SetPostureAttributesResponse>, ApiError> {
     let node_id = NodeId(id);
 

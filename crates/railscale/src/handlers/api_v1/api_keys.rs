@@ -16,7 +16,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::handlers::{ApiError, ApiKeyContext};
+use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
 use railscale_db::Database;
 use railscale_types::{ApiKey, ApiKeySecret, UserId};
 
@@ -134,7 +134,7 @@ async fn list_api_keys(
 async fn create_api_key(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
-    Json(req): Json<CreateApiKeyRequest>,
+    JsonBody(req): JsonBody<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<CreateApiKeyResponse>), ApiError> {
     // verify user exists
     let user_id = UserId(req.user);
@@ -189,7 +189,7 @@ async fn create_api_key(
 async fn expire_api_key(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
-    Json(req): Json<ExpireApiKeyRequest>,
+    JsonBody(req): JsonBody<ExpireApiKeyRequest>,
 ) -> Result<Json<ExpireApiKeyResponse>, ApiError> {
     let key_id = match (req.id, req.prefix) {
         (Some(id), _) => id,

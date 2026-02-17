@@ -25,7 +25,7 @@ pub(crate) mod test_helpers;
 pub use api_auth::{ApiAuthError, ApiKeyContext, AuthMethod};
 pub use audit_log::audit_log;
 pub use bootstrap_dns::bootstrap_dns;
-pub use error::{ApiError, OptionExt, ResultExt};
+pub use error::{ApiError, JsonBody, OptionExt, ResultExt};
 pub use health::health;
 pub use key::key;
 pub use machine_key_context::{MachineKeyContext, OptionalMachineKeyContext};

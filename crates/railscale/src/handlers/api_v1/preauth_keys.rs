@@ -17,7 +17,7 @@ use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::handlers::{ApiError, ApiKeyContext};
+use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
 use railscale_db::Database;
 use railscale_types::{PreAuthKey, PreAuthKeyToken, UserId};
 
@@ -165,7 +165,7 @@ async fn list_preauth_keys(
 async fn create_preauth_key(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
-    Json(req): Json<CreatePreAuthKeyRequest>,
+    JsonBody(req): JsonBody<CreatePreAuthKeyRequest>,
 ) -> Result<(StatusCode, Json<CreatePreAuthKeyResponse>), ApiError> {
     // verify user exists
     let user_id = UserId(req.user);
@@ -222,7 +222,7 @@ async fn create_preauth_key(
 async fn expire_preauth_key(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
-    Json(req): Json<ExpirePreAuthKeyRequest>,
+    JsonBody(req): JsonBody<ExpirePreAuthKeyRequest>,
 ) -> Result<Json<ExpirePreAuthKeyResponse>, ApiError> {
     state
         .db
@@ -242,7 +242,7 @@ async fn expire_preauth_key(
 async fn delete_preauth_key_json(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
-    Json(req): Json<DeletePreAuthKeyRequest>,
+    JsonBody(req): JsonBody<DeletePreAuthKeyRequest>,
 ) -> Result<Json<DeletePreAuthKeyResponse>, ApiError> {
     state
         .db
