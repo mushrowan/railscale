@@ -1,22 +1,32 @@
-- [x] unvendor the snow crate — custom CryptoResolver with BE nonces instead of patching upstream
-- [x] wildcard certs per node — *.node.base_domain in CertDomains via dns-subdomain-resolve nodeAttr + peer CapMap propagation
-- [x] admin api: enrich node API endpoints with live presence data (online, connected_at) from PresenceTracker
-- [x] version test: assert on dirty field to verify build metadata is complete
-- [x] ts2021: handle MSG_TYPE_ERROR (0x03) from clients during noise handshake
-- [x] verify: log VerifyRequest.source ip for DERP client audit trail
-- [x] ts2021 tests: rename stub to create_invalid_initiation_message for clarity
-- [x] ephemeral.rs — saturate to MAX_UTC instead of panicking on large Duration::from_std
-- [x] tka.rs — extract ParsedGenesis + parse_genesis() helper, deduplicating ~40 lines
-- [x] notifier.rs — 8 unit tests for StateNotifier (subscribe, notify, cache invalidation)
-- [x] machine_key_context.rs — 7 unit tests for extractors (from_bytes, extraction, optional)
-- [x] map_cache.rs — Arc-wrapped snapshots to avoid cloning per map request
-- [x] tka.rs — all 7 handlers refactored to Result<Json<T>, ApiError> with ? propagation (-317 lines)
-- [x] map.rs — log warnings for swallowed TKA signature fetch DB errors
-- [x] dns.rs — fix stale doc comment on MAGIC_DNS_RESOLVER, remove duplicate
-- [x] resolver.rs — fix comment to say "OIDC groups" not duplicate "policy groups"
-- [x] tests — deduplicate default_grants() into handlers/test_helpers.rs (was in 4 modules)
-- [x] webhook.rs — propagate serialisation error instead of expect()
-- [x] tka.rs — cache parsed TKA public key in AppState (populated on init_finish, lazy on sign)
-- [x] resolver.rs — cache user map in MapCache, new from_cached() constructor
-- [x] lib.rs — extract build_app_state() from create_app_routers_with_policy_handle
-- [x] noise.rs:47 — chacha20poly1305 encrypt is infallible, unwrap is safe (no change needed)
+# todo
+
+## 1. delta map responses
+- `PeersChanged` / `PeersRemoved` on MapResponse
+- `PeersChangedPatch` with `PeerChange` struct (online, DERP, endpoints, keys)
+- `OnlineChange` / `PeerSeenChange` lightweight maps
+- `MapSessionHandle` / `Seq` for session resumption
+- per-node generation tracking in MapCache
+
+## 2. `/machine/set-device-attr`
+- PATCH endpoint for client-driven posture attribute updates over noise
+- reuse existing `set_node_posture_attributes()` DB method
+- `SetDeviceAttributesRequest` type in proto
+
+## 3. `Debug` on MapResponse
+- `Debug` struct with `SleepSeconds`, `DisableLogTail`, `Exit`
+- add to MapResponse, wire from config or per-node overrides
+
+## 4. `Health` / `DisplayMessages` on MapResponse
+- `Health` field (Vec<String>) for simple warnings
+- `DisplayMessages` for richer structured messages
+- integrate with node expiry, version checks
+
+## 5. `/machine/audit-log`
+- POST endpoint for client audit log submission over noise
+- `AuditLogRequest` type: action, details, timestamp
+- new DB table + migration for audit log storage
+
+## 6. `PacketFilters` (named/incremental)
+- `packet_filters: HashMap<String, Vec<FilterRule>>` on MapResponse
+- incremental filter updates instead of full filter every time
+- pairs with delta map responses

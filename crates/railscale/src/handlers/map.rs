@@ -440,15 +440,12 @@ async fn build_map_response(
         return Ok(MapResponse {
             keep_alive: false,
             node: Some(self_node),
-            peers: vec![],
             dns_config,
             derp_map: Some(derp_map),
-            packet_filter: vec![],
-            user_profiles: vec![],
             control_time: Some(chrono::Utc::now().to_rfc3339()),
-            ssh_policy: None,
             tka_info,
             domain: state.config.base_domain.clone(),
+            ..Default::default()
         });
     }
 
@@ -580,6 +577,7 @@ async fn build_map_response(
         ssh_policy,
         tka_info,
         domain: state.config.base_domain.clone(),
+        ..Default::default()
     })
 }
 

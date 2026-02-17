@@ -134,17 +134,52 @@ impl MapRequest {
 /// a mapresponse sent to tailscale clients.
 ///
 /// contains the network map: list of peers, dns config, derp map, etc.
+/// supports both full and delta-encoded responses for streaming sessions.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 pub struct MapResponse {
+    /// opaque handle identifying this streaming session.
+    /// only sent on the first response in a stream. clients use this
+    /// in MapRequest.MapSessionHandle to resume after reconnect.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub map_session_handle: String,
+
+    /// sequence number within a named map session. used by clients
+    /// in MapRequest.MapSessionSeq to resume after a given message.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub seq: i64,
+
     /// whether to keep the connection alive for streaming updates.
     pub keep_alive: bool,
 
     /// the node's own information.
     pub node: Option<MapResponseNode>,
 
-    /// list of peer nodes.
+    /// complete list of peer nodes (full sync).
+    /// when non-empty, PeersChanged/PeersRemoved/PeersChangedPatch are ignored.
     pub peers: Vec<MapResponseNode>,
+
+    /// nodes that have changed or been added since the last update.
+    /// used for delta encoding when Peers is empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peers_changed: Vec<MapResponseNode>,
+
+    /// node IDs that are no longer in the peer list.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peers_removed: Vec<u64>,
+
+    /// lightweight peer mutations (online, derp, endpoints, keys).
+    /// applied after PeersChanged/PeersRemoved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub peers_changed_patch: Vec<PeerChange>,
+
+    /// online status changes. key is NodeID, value is new online state.
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub peer_seen_change: std::collections::HashMap<u64, bool>,
+
+    /// online status changes (lighter than PeersChangedPatch).
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub online_change: std::collections::HashMap<u64, bool>,
 
     /// dns configuration.
     #[serde(rename = "DNSConfig", default, skip_serializing_if = "Option::is_none")]
@@ -186,23 +221,74 @@ pub struct MapResponse {
     pub domain: String,
 }
 
+fn is_zero_i64(n: &i64) -> bool {
+    *n == 0
+}
+
 impl MapResponse {
     /// create an empty keepalive response.
     pub fn keepalive() -> Self {
         Self {
             keep_alive: true,
-            node: None,
-            peers: vec![],
-            dns_config: None,
-            derp_map: None,
-            packet_filter: vec![],
-            user_profiles: vec![],
-            control_time: None,
-            ssh_policy: None,
-            tka_info: None,
-            domain: String::new(),
+            ..Default::default()
         }
     }
+}
+
+/// lightweight peer mutation for delta map responses.
+///
+/// only fields that changed are set; absent (None/zero) fields mean no change.
+/// matches tailscale's `tailcfg.PeerChange`.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "PascalCase")]
+pub struct PeerChange {
+    /// node ID being mutated.
+    #[serde(rename = "NodeID")]
+    pub node_id: u64,
+
+    /// new home DERP region (0 means no change).
+    #[serde(
+        rename = "DERPRegion",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub derp_region: Option<i32>,
+
+    /// new capability version (0 means no change).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap: Option<u32>,
+
+    /// new capability map.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap_map: Option<std::collections::HashMap<String, Vec<serde_json::Value>>>,
+
+    /// new UDP endpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoints: Option<Vec<std::net::SocketAddr>>,
+
+    /// new wireguard public key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<NodeKey>,
+
+    /// new disco key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disco_key: Option<DiscoKey>,
+
+    /// new online status.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub online: Option<bool>,
+
+    /// new last-seen time (RFC3339).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen: Option<String>,
+
+    /// new key expiry (RFC3339).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_expiry: Option<String>,
+
+    /// new TKA key signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key_signature: Option<MarshaledSignature>,
 }
 
 /// node information in a mapresponse.
@@ -789,16 +875,8 @@ mod proptests {
         )
             .prop_map(|(keep_alive, packet_filter)| MapResponse {
                 keep_alive,
-                node: None,
-                peers: vec![],
-                dns_config: None,
-                derp_map: None,
                 packet_filter,
-                user_profiles: vec![],
-                control_time: None,
-                ssh_policy: None,
-                tka_info: None,
-                domain: String::new(),
+                ..Default::default()
             })
     }
 
@@ -1161,5 +1239,179 @@ mod proptests {
     fn test_dns_subdomain_resolve_capability_value() {
         // must match the tailscale NodeAttrDNSSubdomainResolve constant
         assert_eq!(super::CAP_DNS_SUBDOMAIN_RESOLVE, "dns-subdomain-resolve");
+    }
+}
+
+#[cfg(test)]
+mod delta_tests {
+    use super::*;
+
+    #[test]
+    fn peer_change_serialises_with_pascal_case() {
+        let pc = PeerChange {
+            node_id: 42,
+            derp_region: Some(1),
+            online: Some(true),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&pc).unwrap();
+        assert!(json.contains("\"NodeID\":42"), "expected NodeID: {json}");
+        assert!(
+            json.contains("\"DERPRegion\":1"),
+            "expected DERPRegion: {json}"
+        );
+        assert!(json.contains("\"Online\":true"), "expected Online: {json}");
+    }
+
+    #[test]
+    fn peer_change_omits_none_fields() {
+        let pc = PeerChange {
+            node_id: 1,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&pc).unwrap();
+        assert!(
+            !json.contains("DERPRegion"),
+            "DERPRegion should be omitted: {json}"
+        );
+        assert!(!json.contains("Online"), "Online should be omitted: {json}");
+        assert!(
+            !json.contains("Endpoints"),
+            "Endpoints should be omitted: {json}"
+        );
+        assert!(!json.contains("Key"), "Key should be omitted: {json}");
+        assert!(
+            !json.contains("DiscoKey"),
+            "DiscoKey should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("KeyExpiry"),
+            "KeyExpiry should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("KeySignature"),
+            "KeySignature should be omitted: {json}"
+        );
+        assert!(!json.contains("Cap\""), "Cap should be omitted: {json}");
+        assert!(!json.contains("CapMap"), "CapMap should be omitted: {json}");
+        assert!(
+            !json.contains("LastSeen"),
+            "LastSeen should be omitted: {json}"
+        );
+    }
+
+    #[test]
+    fn peer_change_roundtrips() {
+        let pc = PeerChange {
+            node_id: 99,
+            derp_region: Some(3),
+            cap: Some(106),
+            endpoints: Some(vec!["1.2.3.4:5678".parse().unwrap()]),
+            key: Some(NodeKey::from_bytes(vec![0xAA; 32])),
+            disco_key: Some(DiscoKey::from_bytes(vec![0xBB; 32])),
+            online: Some(false),
+            last_seen: Some("2026-01-01T00:00:00Z".to_string()),
+            key_expiry: Some("2027-01-01T00:00:00Z".to_string()),
+            key_signature: Some(MarshaledSignature::from(vec![0xCC; 8])),
+            cap_map: Some({
+                let mut m = std::collections::HashMap::new();
+                m.insert("test-cap".to_string(), vec![]);
+                m
+            }),
+        };
+        let json = serde_json::to_string(&pc).unwrap();
+        let parsed: PeerChange = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.node_id, 99);
+        assert_eq!(parsed.derp_region, Some(3));
+        assert_eq!(parsed.cap, Some(106));
+        assert_eq!(parsed.online, Some(false));
+    }
+
+    #[test]
+    fn map_response_delta_fields_serialise() {
+        let resp = MapResponse {
+            peers_changed: vec![MapResponseNode {
+                id: 10,
+                name: "changed-node".to_string(),
+                ..Default::default()
+            }],
+            peers_removed: vec![20, 30],
+            peers_changed_patch: vec![PeerChange {
+                node_id: 40,
+                online: Some(true),
+                ..Default::default()
+            }],
+            online_change: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(50, true);
+                m.insert(60, false);
+                m
+            },
+            peer_seen_change: {
+                let mut m = std::collections::HashMap::new();
+                m.insert(70, true);
+                m
+            },
+            map_session_handle: "session-abc".to_string(),
+            seq: 5,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            json.contains("PeersChanged"),
+            "expected PeersChanged: {json}"
+        );
+        assert!(
+            json.contains("PeersRemoved"),
+            "expected PeersRemoved: {json}"
+        );
+        assert!(
+            json.contains("PeersChangedPatch"),
+            "expected PeersChangedPatch: {json}"
+        );
+        assert!(
+            json.contains("OnlineChange"),
+            "expected OnlineChange: {json}"
+        );
+        assert!(
+            json.contains("PeerSeenChange"),
+            "expected PeerSeenChange: {json}"
+        );
+        assert!(
+            json.contains("MapSessionHandle"),
+            "expected MapSessionHandle: {json}"
+        );
+        assert!(json.contains("\"Seq\":5"), "expected Seq: {json}");
+    }
+
+    #[test]
+    fn map_response_delta_fields_omitted_when_empty() {
+        let resp = MapResponse::keepalive();
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(
+            !json.contains("PeersChanged"),
+            "PeersChanged should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("PeersRemoved"),
+            "PeersRemoved should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("PeersChangedPatch"),
+            "PeersChangedPatch should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("OnlineChange"),
+            "OnlineChange should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("PeerSeenChange"),
+            "PeerSeenChange should be omitted: {json}"
+        );
+        assert!(
+            !json.contains("MapSessionHandle"),
+            "MapSessionHandle should be omitted: {json}"
+        );
+        assert!(!json.contains("\"Seq\""), "Seq should be omitted: {json}");
     }
 }
