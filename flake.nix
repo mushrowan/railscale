@@ -13,6 +13,10 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    attest = {
+      url = "git+file:///home/rowan/dev/nixos-test-ng";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -154,6 +158,19 @@
             # Usage: nix build .#module-smoke-test -L
             module-smoke-test = import ./nix/tests/module-smoke.nix {
               inherit pkgs railscale;
+            };
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            # attest/firecracker versions of NixOS tests (~2x faster boot)
+            module-smoke-attest = import ./nix/tests/module-smoke-attest.nix {
+              inherit pkgs railscale;
+              attest = inputs.attest.packages.${pkgs.system}.default;
+              attestSrc = inputs.attest;
+            };
+            policy-reload-attest = import ./nix/tests/policy-reload-attest.nix {
+              inherit pkgs railscale;
+              attest = inputs.attest.packages.${pkgs.system}.default;
+              attestSrc = inputs.attest;
             };
           };
 
