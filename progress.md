@@ -122,3 +122,38 @@
 - **`/machine/set-dns` handler**: validates node auth + TXT type + name matches cert domain, delegates to provider, persists record
 - **cleanup task**: `DnsChallengeGarbageCollector` removes stale TXT records (>10 min) every 60s
 - 25+ unit + integration tests across providers, handler, and GC
+
+## delta map responses — complete
+- **PeerChange** struct in railscale-proto: derp_region, cap, cap_map, endpoints, key, disco_key, online, last_seen, key_expiry, key_signature
+- **MapResponse delta fields**: peers_changed, peers_removed, peers_changed_patch, online_change, peer_seen_change, map_session_handle, seq
+- **MapSession**: per-connection session state tracking last-sent peers, three-valued PatchResult (Identical/NeedsFull/Patch)
+- **compute_delta()**: classifies changes as online-only (OnlineChange map), lightweight patches (PeersChangedPatch), structural (PeersChanged full node), or removed (PeersRemoved)
+- **streaming handler**: first message sends full peers via apply_full(), subsequent messages use compute_delta() for incremental updates
+- unique session handle per stream (node ID + random u64)
+
+## /machine/set-device-attr — complete
+- **SetDeviceAttributesRequest** proto type with Update map (string/number/bool/null values)
+- **PATCH /machine/set-device-attr** handler: validates node auth, merges update into existing posture_attributes, null values delete
+- notifies streaming clients so grants can evaluate updated posture
+
+## Debug on MapResponse — complete
+- **DebugSettings** struct: sleep_seconds, disable_log_tail, exit
+- `config.disable_log_tail` wired into map handler, sent on every MapResponse when enabled
+- all fields skip_serializing_if zero/false/None for wire compat
+
+## Health on MapResponse — complete
+- **health** field (Option<Vec<String>>) on MapResponse
+- `build_health_warnings()`: warns when key expires within 7 days, or has expired
+- `with_expiry()` on TestNodeBuilder
+
+## /machine/audit-log — complete
+- **AuditLogRequest** proto type: action, details, timestamp
+- **DB migration 000014**: audit_logs table with node FK, action, details, client_timestamp, created_at
+- **AuditLog** entity with sea-orm model
+- **POST /machine/audit-log** handler: validates node auth, persists entry
+
+## PacketFilters (named/incremental) — complete
+- **packet_filters** field on MapResponse: HashMap<String, Option<Vec<FilterRule>>>
+- map handler splits rules into named chunks: "network", "cap-grants", "taildrop"
+- both flat PacketFilter (legacy) and named PacketFilters sent simultaneously
+- null value deletes a named filter, "*" key with null clears all
