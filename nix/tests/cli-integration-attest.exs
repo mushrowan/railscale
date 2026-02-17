@@ -112,7 +112,12 @@ defmodule H do
     Attest.succeed(server, cmd) |> try_json()
   end
 
-  defp try_json(output) do
+  def api_get_headers(server, path, api_key) do
+    cmd = "curl -s -D - -o /dev/null -H 'Authorization: Bearer #{api_key}' '#{@server_url}#{path}'"
+    Attest.succeed(server, cmd)
+  end
+
+  def try_json(output) do
     trimmed = String.trim(output)
     if trimmed == "" do
       %{}
@@ -161,10 +166,13 @@ defmodule H do
     {code, output} = Attest.Machine.execute(src, cmd)
     {code == 0 and String.contains?(output, "SUCCESS"), output}
   end
+
+  def to_int(v) when is_binary(v), do: String.to_integer(v)
+  def to_int(v) when is_integer(v), do: v
 end
 
 # ==========================================================================
-# PHASE 1: Server Startup
+# PHASE 1: Server Startup + STUN
 # ==========================================================================
 start_all.()
 
@@ -173,10 +181,40 @@ H.wait_for_server(server)
 H.wait_for_network(server, client1, client2)
 IO.puts("server started")
 
-# STUN test
+# STUN: netcheck
 IO.puts("--- STUN test ---")
 {_, netcheck} = Attest.Machine.execute(client1, "tailscale netcheck --format=json 2>&1 || true")
 IO.puts("netcheck: #{String.slice(netcheck, 0, 200)}")
+
+# STUN: raw binding request
+stun_test = ~S"""
+import socket, sys
+request = bytes([
+    0x00, 0x01, 0x00, 0x00,
+    0x21, 0x12, 0xa4, 0x42,
+    0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+    0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c
+])
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.settimeout(5)
+try:
+    sock.sendto(request, ("192.168.1.3", 3478))
+    response, addr = sock.recvfrom(1024)
+    if len(response) >= 20 and response[0:2] == bytes([0x01, 0x01]):
+        if response[4:8] == bytes([0x21, 0x12, 0xa4, 0x42]):
+            print("STUN response received: %d bytes from %s" % (len(response), addr))
+            sys.exit(0)
+    print("Invalid STUN response: " + response.hex())
+    sys.exit(1)
+except socket.timeout:
+    print("STUN request timed out")
+    sys.exit(1)
+finally:
+    sock.close()
+"""
+Attest.succeed(client1, "cat > /tmp/stun_test.py << 'EOFSTUN'\n#{stun_test}\nEOFSTUN")
+stun_output = Attest.succeed(client1, "python3 /tmp/stun_test.py")
+IO.puts("STUN: #{String.trim(stun_output)}")
 
 # ==========================================================================
 # PHASE 2: User Management
@@ -186,6 +224,9 @@ IO.puts("--- user management ---")
 output = H.railscale(server, "users create alice@example.com --display-name 'Alice Smith'")
 unless String.contains?(output, "Created user"), do: raise("create user failed: #{output}")
 
+output = H.railscale(server, "users list")
+unless String.contains?(output, "alice"), do: raise("list should show alice")
+
 users = H.railscale_json(server, "users list")
 unless length(users) == 1, do: raise("expected 1 user, got #{length(users)}")
 unless hd(users)["email"] == "alice@example.com", do: raise("wrong email")
@@ -193,6 +234,8 @@ unless hd(users)["email"] == "alice@example.com", do: raise("wrong email")
 H.railscale(server, "users create bob@example.com")
 users = H.railscale_json(server, "users list")
 unless length(users) == 2, do: raise("expected 2 users")
+emails = Enum.map(users, & &1["email"])
+unless "alice@example.com" in emails and "bob@example.com" in emails, do: raise("missing users")
 
 bob = Enum.find(users, fn u -> u["email"] == "bob@example.com" end)
 bob_id = bob["id"]
@@ -202,6 +245,7 @@ unless String.contains?(output, "Renamed"), do: raise("rename failed")
 users = H.railscale_json(server, "users list")
 emails = Enum.map(users, & &1["email"])
 unless "robert@example.com" in emails, do: raise("robert not found")
+if "bob@example.com" in emails, do: raise("bob should be gone")
 
 robert = Enum.find(users, fn u -> u["email"] == "robert@example.com" end)
 output = H.railscale(server, "users delete #{robert["id"]}")
@@ -209,6 +253,7 @@ unless String.contains?(output, "Deleted"), do: raise("delete failed")
 
 users = H.railscale_json(server, "users list")
 unless length(users) == 1, do: raise("expected 1 user after delete")
+unless hd(users)["email"] == "alice@example.com", do: raise("alice should remain")
 
 alice_id = hd(users)["id"]
 IO.puts("alice id: #{alice_id}")
@@ -220,6 +265,11 @@ IO.puts("--- preauth keys ---")
 
 output = H.railscale(server, "preauthkeys create -u #{alice_id} --expiration-days 1")
 unless String.contains?(output, "Created preauth key"), do: raise("create pak failed")
+unless String.contains?(output, "Key:"), do: raise("missing Key: in output")
+
+# list
+output = H.railscale(server, "preauthkeys list")
+unless String.contains?(output, "#{alice_id}"), do: raise("list should show alice's keys")
 
 output = H.railscale(server, "preauthkeys create -u #{alice_id} --reusable --expiration-days 1")
 unless String.contains?(output, "Reusable:  true"), do: raise("reusable flag missing")
@@ -227,10 +277,17 @@ unless String.contains?(output, "Reusable:  true"), do: raise("reusable flag mis
 output = H.railscale(server, "preauthkeys create -u #{alice_id} --tags server,web --expiration-days 1")
 unless String.contains?(output, "server"), do: raise("tags missing")
 
+# expire
 keys = H.railscale_json(server, "preauthkeys list")
 key_id = hd(keys)["id"]
 output = H.railscale(server, "preauthkeys expire #{key_id}")
 unless String.contains?(output, "Expired"), do: raise("expire failed")
+
+# delete
+keys = H.railscale_json(server, "preauthkeys list")
+del_key = Enum.find(keys, fn k -> !k["reusable"] end)
+output = H.railscale(server, "preauthkeys delete #{del_key["id"]}")
+unless String.contains?(output, "Deleted"), do: raise("delete pak failed")
 
 IO.puts("preauth keys ok")
 
@@ -239,16 +296,41 @@ IO.puts("preauth keys ok")
 # ==========================================================================
 IO.puts("--- api keys ---")
 
-output = H.railscale(server, "apikeys create -u #{alice_id} --name 'Test Key' --expiration-days 30")
+output = H.railscale(server, "apikeys create -u #{alice_id} --name 'My Test API Key' --expiration-days 30")
+unless String.contains?(output, "Created API key"), do: raise("create api key failed")
+unless String.contains?(output, "Key:"), do: raise("missing Key: in output")
 unless String.contains?(output, "rsapi_"), do: raise("api key missing prefix")
 
+# list
+output = H.railscale(server, "apikeys list")
+unless String.contains?(output, "My Test AP") or String.contains?(output, "My Test API Key"),
+  do: raise("list should show key name")
+
+# list json
+keys = H.railscale_json(server, "apikeys list")
+unless length(keys) >= 1, do: raise("expected at least 1 api key")
+unless Enum.any?(keys, fn k -> String.starts_with?(k["prefix"], "rsapi_") end),
+  do: raise("api key prefix missing in json")
+
+# no expiration
 output = H.railscale(server, "apikeys create -u #{alice_id} --name 'Perm Key' --expiration-days 0")
 unless String.contains?(String.downcase(output), "never"), do: raise("no-expiry missing")
 
+# expire
 keys = H.railscale_json(server, "apikeys list")
 key_id = hd(keys)["id"]
 output = H.railscale(server, "apikeys expire #{key_id}")
 unless String.contains?(output, "Expired"), do: raise("expire api key failed")
+
+# delete
+keys = H.railscale_json(server, "apikeys list")
+del_key = if length(keys) > 1, do: List.last(keys), else: hd(keys)
+output = H.railscale(server, "apikeys delete #{del_key["id"]}")
+unless String.contains?(output, "Deleted"), do: raise("delete api key failed")
+
+# filter by user
+output = H.railscale(server, "apikeys list -u #{alice_id}")
+IO.puts("apikeys for alice: #{String.slice(String.trim(output), 0, 100)}")
 
 IO.puts("api keys ok")
 
@@ -266,6 +348,8 @@ client1_ip = H.get_client_ip(client1)
 client2_ip = H.get_client_ip(client2)
 unless client1_ip, do: raise("client1 no IP")
 unless client2_ip, do: raise("client2 no IP")
+unless String.starts_with?(client1_ip, "100."), do: raise("client1 IP should be 100.x")
+unless String.starts_with?(client2_ip, "100."), do: raise("client2 IP should be 100.x")
 IO.puts("client1=#{client1_ip} client2=#{client2_ip}")
 
 # ping
@@ -274,39 +358,66 @@ Attest.succeed(client2, "timeout 15 ping -c 3 #{client1_ip}")
 IO.puts("clients can ping")
 
 # list nodes
+output = H.railscale(server, "nodes list")
+unless String.contains?(output, "client1") and String.contains?(output, "client2"),
+  do: raise("list should show both clients")
+
 nodes_list = H.railscale_json(server, "nodes list")
 unless length(nodes_list) == 2, do: raise("expected 2 nodes, got #{length(nodes_list)}")
 hostnames = Enum.map(nodes_list, & &1["given_name"])
 unless "client1" in hostnames and "client2" in hostnames, do: raise("missing hostnames")
 
-# node operations
+# show
 node1 = Enum.find(nodes_list, fn n -> n["given_name"] == "client1" end)
 node1_id = node1["id"]
-
 output = H.railscale(server, "nodes show #{node1_id}")
 unless String.contains?(output, "client1"), do: raise("show failed")
+unless String.contains?(output, "IPv4:"), do: raise("show should have IPv4")
 
+# rename
 output = H.railscale(server, "nodes rename #{node1_id} client1-renamed")
 unless String.contains?(output, "Renamed"), do: raise("rename failed")
+nodes_check = H.railscale_json(server, "nodes list")
+names = Enum.map(nodes_check, & &1["given_name"])
+unless "client1-renamed" in names, do: raise("rename not reflected")
 H.railscale(server, "nodes rename #{node1_id} client1")
 
+# tags
 output = H.railscale(server, "nodes tags add #{node1_id} server,web")
-unless String.contains?(output, "tag:server"), do: raise("add tags failed")
+unless String.contains?(output, "tag:server") and String.contains?(output, "tag:web"),
+  do: raise("add tags failed")
 
 output = H.railscale(server, "nodes tags remove #{node1_id} web")
 unless String.contains?(output, "tag:server"), do: raise("remove tag failed")
 
 output = H.railscale(server, "nodes tags set #{node1_id} production,critical")
-unless String.contains?(output, "tag:production"), do: raise("set tags failed")
+unless String.contains?(output, "tag:production") and String.contains?(output, "tag:critical"),
+  do: raise("set tags failed")
 
+# routes
 output = H.railscale(server, "nodes routes approve #{node1_id} 10.0.0.0/8,192.168.0.0/16")
-unless String.contains?(output, "10.0.0.0/8"), do: raise("approve routes failed")
+unless String.contains?(output, "10.0.0.0/8") and String.contains?(output, "192.168.0.0/16"),
+  do: raise("approve routes failed")
+
+output = H.railscale(server, "nodes routes list #{node1_id}")
+unless String.contains?(output, "10.0.0.0/8"), do: raise("routes list failed")
 
 output = H.railscale(server, "nodes routes unapprove #{node1_id} 192.168.0.0/16")
 unless String.contains?(output, "10.0.0.0/8"), do: raise("unapprove failed")
 
+# expire
 output = H.railscale(server, "nodes expire #{node1_id}")
 unless String.contains?(output, "Expired"), do: raise("expire node failed")
+output = H.railscale(server, "nodes show #{node1_id}")
+unless String.contains?(output, "Expiry:"), do: raise("expired node should show Expiry")
+
+# filter by user
+output = H.railscale(server, "nodes list -u #{alice_id}")
+IO.puts("nodes for alice: #{String.slice(String.trim(output), 0, 100)}")
+
+# filter preauthkeys by user
+output = H.railscale(server, "preauthkeys list -u #{alice_id}")
+IO.puts("preauthkeys for alice: #{String.slice(String.trim(output), 0, 100)}")
 
 # delete node
 node2 = Enum.find(nodes_list, fn n -> n["given_name"] == "client2" end)
@@ -316,6 +427,8 @@ unless String.contains?(output, "Deleted"), do: raise("delete node failed")
 nodes_list = H.railscale_json(server, "nodes list")
 ids = Enum.map(nodes_list, & &1["id"])
 if node2["id"] in ids, do: raise("deleted node still present")
+names = Enum.map(nodes_list, & &1["given_name"])
+unless "client1" in names, do: raise("client1 should still exist")
 
 IO.puts("nodes ok")
 
@@ -330,7 +443,17 @@ key1 = H.create_preauth_key(server, alice_id)
 key2 = H.create_preauth_key(server, alice_id)
 H.connect_client(client1, key1, "client1")
 H.connect_client(client2, key2, "client2")
+
+client1_ip = H.get_client_ip(client1)
+client2_ip = H.get_client_ip(client2)
+unless client1_ip && client2_ip, do: raise("taildrop clients not connected")
+
+# wait for DERP
 Process.sleep(5000)
+
+# verify peers can communicate
+{_, ping_out} = Attest.Machine.execute(client1, "tailscale ping --c 3 #{client2_ip} 2>&1")
+IO.puts("tailscale ping: #{String.slice(String.trim(ping_out), 0, 200)}")
 
 # file targets
 {c1, t1} = Attest.Machine.execute(client1, "tailscale file cp --targets 2>&1")
@@ -348,13 +471,49 @@ received = Attest.succeed(client2, "cat /tmp/recv/td.txt") |> String.trim()
 unless received == "hello from taildrop", do: raise("taildrop content mismatch: #{received}")
 
 # bidirectional
-Attest.succeed(client2, "echo 'reply' > /tmp/reply.txt")
+Attest.succeed(client2, "echo 'reply from client2' > /tmp/reply.txt")
 Attest.succeed(client2, "tailscale file cp /tmp/reply.txt client1: 2>&1")
 Process.sleep(2000)
 Attest.succeed(client1, "mkdir -p /tmp/recv")
 Attest.succeed(client1, "tailscale file get /tmp/recv/ 2>&1")
 reply = Attest.succeed(client1, "cat /tmp/recv/reply.txt") |> String.trim()
-unless reply == "reply", do: raise("bidirectional taildrop failed")
+unless reply == "reply from client2", do: raise("bidirectional taildrop failed")
+IO.puts("bidirectional transfer ok")
+
+# cross-user blocking
+IO.puts("testing cross-user taildrop blocking")
+bob_id = H.create_user_and_get_id(server, "bob@example.com", "Bob")
+H.reset_client(client2)
+bob_key = H.create_preauth_key(server, bob_id)
+H.connect_client(client2, bob_key, "client2-bob")
+Process.sleep(3000)
+
+client2_bob_ip = H.get_client_ip(client2)
+unless client2_bob_ip, do: raise("client2 as bob should have IP")
+
+# alice should NOT see bob's device as a file target
+{_, targets} = Attest.Machine.execute(client1, "tailscale file cp --targets 2>&1")
+if String.contains?(targets, "client2-bob"),
+  do: raise("alice should NOT see bob's device as file target: #{targets}")
+
+# try sending anyway
+Attest.succeed(client1, "echo 'secret' > /tmp/secret.txt")
+{send_code, _} = Attest.Machine.execute(client1, "tailscale file cp /tmp/secret.txt #{client2_bob_ip}: 2>&1")
+if send_code == 0 do
+  Process.sleep(2000)
+  Attest.Machine.execute(client2, "mkdir -p /tmp/bob-received")
+  Attest.Machine.execute(client2, "tailscale file get /tmp/bob-received/ 2>&1")
+  {_, files} = Attest.Machine.execute(client2, "ls /tmp/bob-received/ 2>&1")
+  if String.contains?(files, "secret.txt"),
+    do: raise("bob should NOT receive alice's file: #{files}")
+end
+IO.puts("cross-user taildrop blocked")
+
+# reconnect client2 as alice for remaining tests
+H.reset_client(client2)
+alice_key = H.create_preauth_key(server, alice_id)
+H.connect_client(client2, alice_key, "client2")
+Process.sleep(2000)
 
 IO.puts("taildrop ok")
 
@@ -362,6 +521,36 @@ IO.puts("taildrop ok")
 # PHASE 6: Key Usage Tests
 # ==========================================================================
 IO.puts("--- key usage ---")
+
+# verify reusable key marked correctly in json
+output = H.railscale(server, "preauthkeys create -u #{alice_id} --reusable --expiration-days 1")
+unless String.contains?(output, "Reusable:  true"), do: raise("reusable flag missing")
+reusable_check_key = H.extract_key(output)
+keys = H.railscale_json(server, "preauthkeys list")
+the_key = Enum.find(keys, fn k -> String.starts_with?(reusable_check_key, k["key"]) end)
+unless the_key, do: raise("key should be in list")
+unless the_key["reusable"] == true, do: raise("key should be marked reusable in json")
+IO.puts("reusable key verified in json")
+
+# verify ephemeral key creation
+output = H.railscale(server, "preauthkeys create -u #{alice_id} --ephemeral --expiration-days 1")
+unless String.contains?(output, "Ephemeral: true"), do: raise("ephemeral flag missing")
+ephemeral_check_key = H.extract_key(output)
+keys = H.railscale_json(server, "preauthkeys list")
+the_key = Enum.find(keys, fn k -> String.starts_with?(ephemeral_check_key, k["key"]) end)
+unless the_key, do: raise("ephemeral key should be in list")
+unless the_key["ephemeral"] == true, do: raise("key should be marked ephemeral in json")
+IO.puts("ephemeral key verified in json")
+
+# user with nodes cannot be deleted
+{exit_code, del_output} = Attest.Machine.execute(server, "railscale users delete #{alice_id} 2>&1")
+unless exit_code != 0 or String.contains?(String.downcase(del_output), "node"),
+  do: raise("deleting user with nodes should fail")
+IO.puts("user with nodes cannot be deleted")
+
+# client1 still connected after management
+unless H.get_client_ip(client1), do: raise("client1 should still be connected")
+IO.puts("client1 still connected")
 
 # non-reusable key used twice
 single_key = H.create_preauth_key(server, alice_id)
@@ -404,6 +593,22 @@ H.reset_client(client2)
 H.connect_client(client2, reconnect_key, "del-reconnect")
 new_node = H.get_node_by_name(server, "del-reconnect")
 if new_node["id"] == old_id, do: raise("new node should have different ID")
+IO.puts("deleted node gets new ID")
+
+# final connectivity - fresh clients can communicate
+final_key1 = H.create_preauth_key(server, alice_id)
+final_key2 = H.create_preauth_key(server, alice_id)
+H.reset_client(client1)
+H.reset_client(client2)
+H.connect_client(client1, final_key1, "final-client1")
+H.connect_client(client2, final_key2, "final-client2")
+client1_ip = H.get_client_ip(client1)
+client2_ip = H.get_client_ip(client2)
+unless client1_ip && client2_ip, do: raise("final clients not connected")
+Attest.succeed(client1, "timeout 15 ping -c 3 #{client2_ip}")
+Attest.succeed(client2, "timeout 15 ping -c 3 #{client1_ip}")
+IO.puts("final connectivity verified")
+
 IO.puts("key usage ok")
 
 # ==========================================================================
@@ -426,9 +631,16 @@ unless alice_ip && eve_ip, do: raise("group clients not connected")
 
 alice_node = H.get_node_by_name(server, "alice-node")
 H.railscale(server, "nodes tags set #{alice_node["id"]} server")
+IO.puts("tagged alice-node as server")
 
 Attest.succeed(client2, "timeout 10 ping -c 2 #{alice_ip}")
+IO.puts("eve can reach alice")
 Attest.succeed(client1, "timeout 10 ping -c 2 #{eve_ip}")
+IO.puts("alice can reach eve")
+
+# verify policy is loaded
+Attest.succeed(server, "journalctl -u railscale --no-pager | grep -i 'policy' || true")
+
 IO.puts("groups ok")
 
 # ==========================================================================
@@ -441,60 +653,90 @@ users = H.railscale_json(server, "users list")
 admin = Enum.find(users, fn u -> u["email"] == "admin@example.com" end)
 admin_id = admin["id"]
 api_key = H.create_api_key_for_user(server, admin_id)
+unless String.starts_with?(api_key, "rsapi_"), do: raise("api key should start with rsapi_")
 
 # auth check
 status = H.api_status(server, "/api/v1/user")
 unless status == 401, do: raise("expected 401, got #{status}")
+IO.puts("unauthenticated rejected with 401")
 
 # CRUD users
 result = H.api_get(server, "/api/v1/user", api_key)
 unless Map.has_key?(result, "users"), do: raise("missing users key")
+unless length(result["users"]) > 0, do: raise("should have at least 1 user")
 
 result = H.api_post(server, "/api/v1/user", api_key, %{"name" => "restuser"})
+unless result["user"]["name"] == "restuser", do: raise("create user failed")
 rest_user_id = result["user"]["id"]
+
 result = H.api_post(server, "/api/v1/user/#{rest_user_id}/rename/renameduser", api_key)
 unless result["user"]["name"] == "renameduser", do: raise("rename failed")
+
 H.api_delete(server, "/api/v1/user/#{rest_user_id}", api_key)
+IO.puts("REST user CRUD ok")
 
 # nodes
 result = H.api_get(server, "/api/v1/node", api_key)
 unless Map.has_key?(result, "nodes"), do: raise("missing nodes key")
 
+# get single node
+if length(result["nodes"]) > 0 do
+  node_id = hd(result["nodes"])["id"]
+  node_result = H.api_get(server, "/api/v1/node/#{node_id}", api_key)
+  unless Map.has_key?(node_result, "node"), do: raise("missing node key in single get")
+  IO.puts("REST get node #{node_id} ok")
+end
+
 # preauth keys
 result = H.api_get(server, "/api/v1/preauthkey", api_key)
 unless Map.has_key?(result, "preAuthKeys"), do: raise("missing preAuthKeys")
 
+admin_id_int = H.to_int(admin_id)
 result = H.api_post(server, "/api/v1/preauthkey", api_key,
-  %{"user" => if(is_binary(admin_id), do: String.to_integer(admin_id), else: admin_id),
-    "reusable" => false, "ephemeral" => false, "aclTags" => []})
+  %{"user" => admin_id_int, "reusable" => false, "ephemeral" => false, "aclTags" => []})
+unless Map.has_key?(result, "preAuthKey"), do: raise("missing preAuthKey in create response")
 new_pak_id = result["preAuthKey"]["id"]
-pak_id_int = if is_binary(new_pak_id), do: String.to_integer(new_pak_id), else: new_pak_id
+pak_id_int = H.to_int(new_pak_id)
 H.api_post(server, "/api/v1/preauthkey/expire", api_key, %{"id" => pak_id_int})
+IO.puts("REST preauth keys ok")
 
 # api keys
 result = H.api_get(server, "/api/v1/apikey", api_key)
 unless Map.has_key?(result, "apiKeys"), do: raise("missing apiKeys")
 
-admin_id_int = if is_binary(admin_id), do: String.to_integer(admin_id), else: admin_id
 result = H.api_post(server, "/api/v1/apikey", api_key, %{"user" => admin_id_int})
+unless Map.has_key?(result, "apiKey"), do: raise("missing apiKey in create response")
+unless Map.has_key?(result, "key"), do: raise("missing key in create response")
+new_api_key_full = result["apiKey"]
 new_api_key_prefix = result["key"]["prefix"]
+unless String.starts_with?(new_api_key_full, "rsapi_"), do: raise("new key should start with rsapi_")
 H.api_delete(server, "/api/v1/apikey/#{new_api_key_prefix}", api_key)
+IO.puts("REST api keys ok")
 
 # policy
 result = H.api_get(server, "/api/v1/policy", api_key)
 unless Map.has_key?(result, "policy"), do: raise("missing policy")
 original_policy = result["policy"]
+unless String.contains?(original_policy, "grants"), do: raise("policy should contain grants")
 
 new_policy = Jason.encode!(%{"groups" => %{"group:test" => ["test@example.com"]}, "grants" => [%{"src" => ["*"], "dst" => ["*"], "ip" => ["*"]}]})
-H.api_put(server, "/api/v1/policy", api_key, %{"policy" => new_policy})
+result = H.api_put(server, "/api/v1/policy", api_key, %{"policy" => new_policy})
+unless Map.has_key?(result, "policy"), do: raise("set policy should return policy")
 H.api_put(server, "/api/v1/policy", api_key, %{"policy" => original_policy})
+IO.puts("REST policy ok")
+
+# rate limit headers
+headers = H.api_get_headers(server, "/api/v1/user", api_key)
+has_ratelimit = String.contains?(String.downcase(headers), "ratelimit")
+IO.puts("rate limit headers present: #{has_ratelimit}")
 
 # rate limiting
-got_limited = Enum.reduce_while(1..100, false, fn i, _acc ->
+got_limited = Enum.reduce_while(1..100, false, fn _i, _acc ->
   status = H.api_status(server, "/api/v1/user", "GET", api_key)
   if status == 429, do: {:halt, true}, else: {:cont, false}
 end)
 unless got_limited, do: raise("rate limit not hit")
+IO.puts("rate limiting works")
 
 IO.puts("rest api ok")
 
@@ -518,8 +760,11 @@ H.reset_client(client2)
 H.connect_client(client1, key1a, "ssh-u1-c1", ssh: true)
 H.connect_client(client2, key1b, "ssh-u1-c2", ssh: true)
 
+u1c1_ip = H.get_client_ip(client1)
 u1c2_ip = H.get_client_ip(client2)
+unless u1c1_ip, do: raise("ssh client1 no IP")
 unless u1c2_ip, do: raise("ssh client2 no IP")
+IO.puts("ssh clients: u1c1=#{u1c1_ip} u1c2=#{u1c2_ip}")
 
 # same user, non-root -> should work
 {ok, _} = H.try_ssh(client1, u1c2_ip, "testuser")
@@ -579,6 +824,14 @@ unless length(secrets) == 2, do: raise("expected 2 disablement secrets, got #{le
 
 output = H.railscale(server, "lock status")
 unless String.contains?(String.downcase(output), "enabled"), do: raise("lock should be enabled")
+unless String.contains?(String.downcase(output), "head:"), do: raise("should show head hash")
+
+# lock status json
+lock_json = H.railscale_json(server, "lock status")
+unless lock_json["enabled"] == true, do: raise("json: expected enabled=true")
+unless lock_json["head"], do: raise("json: expected head hash")
+unless length(Map.get(lock_json, "keys", [])) == 1, do: raise("json: expected 1 key")
+IO.puts("lock status json ok")
 
 # sign a node
 nodes_list = H.railscale_json(server, "nodes list")
@@ -588,6 +841,7 @@ output = H.railscale(server, "lock sign #{sign_node_id} --key #{private_key}")
 unless String.contains?(String.downcase(output), "success") or
        String.contains?(String.downcase(output), "signed"),
   do: raise("lock sign failed: #{output}")
+IO.puts("node signed")
 
 # disable
 output = H.railscale(server, "lock disable #{hd(secrets)}")
