@@ -172,6 +172,11 @@
               attest = inputs.attest.packages.${pkgs.system}.default;
               attestSrc = inputs.attest;
             };
+            cli-integration-attest = import ./nix/tests/cli-integration-attest.nix {
+              inherit pkgs railscale;
+              attest = inputs.attest.packages.${pkgs.system}.default;
+              attestSrc = inputs.attest;
+            };
           };
 
           devShells.default = import ./nix/devshell.nix {
