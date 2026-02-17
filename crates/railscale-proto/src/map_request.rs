@@ -433,6 +433,25 @@ pub struct DnsConfig {
     pub cert_domains: Vec<String>,
 }
 
+/// request from a node to update its posture attributes.
+///
+/// sent by the tailscale client to `/machine/set-device-attr` as a PATCH
+/// over the noise transport. attributes not in the map are left unchanged.
+/// a null value deletes the attribute.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct SetDeviceAttributesRequest {
+    /// client capability version.
+    pub version: CapabilityVersion,
+
+    /// node key identifying the requesting node.
+    pub node_key: NodeKey,
+
+    /// map of posture attributes to update.
+    /// values can be string, number, bool, or null (to delete).
+    pub update: std::collections::HashMap<String, serde_json::Value>,
+}
+
 /// request from a node to set a dns record (used for ACME dns-01 challenges).
 ///
 /// sent by the tailscale client to `/machine/set-dns` over the noise transport.
@@ -1382,6 +1401,30 @@ mod delta_tests {
             "expected MapSessionHandle: {json}"
         );
         assert!(json.contains("\"Seq\":5"), "expected Seq: {json}");
+    }
+
+    #[test]
+    fn set_device_attributes_request_roundtrips() {
+        let mut update = std::collections::HashMap::new();
+        update.insert("node:os".to_string(), serde_json::json!("linux"));
+        update.insert("node:tsVersion".to_string(), serde_json::json!("1.80.0"));
+        update.insert("custom:diskEncrypted".to_string(), serde_json::json!(true));
+        update.insert("old:attr".to_string(), serde_json::Value::Null);
+
+        let req = SetDeviceAttributesRequest {
+            version: CapabilityVersion(106),
+            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            update,
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"Version\""), "expected PascalCase: {json}");
+        assert!(json.contains("\"Update\""), "expected Update: {json}");
+        assert!(json.contains("\"node:os\""), "expected attr key: {json}");
+
+        let parsed: SetDeviceAttributesRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.update.len(), 4);
+        assert_eq!(parsed.update["node:os"], serde_json::json!("linux"));
+        assert!(parsed.update["old:attr"].is_null());
     }
 
     #[test]

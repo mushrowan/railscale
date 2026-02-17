@@ -10,6 +10,7 @@ mod machine_key_context;
 mod map;
 pub mod oidc;
 mod register;
+mod set_device_attr;
 mod set_dns;
 mod templates;
 mod tka;
@@ -28,6 +29,7 @@ pub use key::key;
 pub use machine_key_context::{MachineKeyContext, OptionalMachineKeyContext};
 pub use map::map;
 pub use register::{RegisterResponse, register};
+pub use set_device_attr::set_device_attr;
 pub use set_dns::set_dns;
 pub use tka::{
     tka_bootstrap, tka_disable, tka_init_begin, tka_init_finish, tka_sign, tka_sync_offer,
