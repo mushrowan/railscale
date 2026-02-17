@@ -1,5 +1,11 @@
 # progress
 
+## JSON API error responses — complete
+- `ApiError::into_response` returns `{"error": "...", "message": "..."}` with `application/json` content-type
+- `JsonBody<T>` extractor converts axum deserialization rejections to JSON `ApiError::BadRequest`
+- migrated all api_v1 + tka handlers from `Json(req)` to `JsonBody(req)`
+- 7 unit tests covering all error variants + rejection handling
+
 ## todo cleanup — complete
 - **high**: ephemeral.rs saturate to MAX_UTC, tka.rs ParsedGenesis helper extraction
 - **tests**: 8 StateNotifier tests, 7 MachineKeyContext extractor tests
