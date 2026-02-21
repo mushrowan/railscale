@@ -53,6 +53,7 @@ warmup "module-smoke (python)" ".#module-smoke-test"
 warmup "module-smoke (attest)" ".#module-smoke-attest"
 warmup "policy-reload (python)" ".#checks.x86_64-linux.nixos-test-policy"
 warmup "policy-reload (attest)" ".#policy-reload-attest"
+warmup "policy-reload (snapshot)" ".#policy-reload-snapshot"
 warmup "cli-integration (python)" ".#checks.x86_64-linux.nixos-test"
 warmup "cli-integration (attest)" ".#cli-integration-attest"
 warmup "snapshot-bench (attest)" ".#snapshot-bench-attest"
@@ -66,6 +67,7 @@ echo ""
 echo -e "${BOLD}--- policy-reload (1 VM) ---${RESET}"
 time_test "python/QEMU" ".#checks.x86_64-linux.nixos-test-policy" policy_py
 time_test "elixir/firecracker" ".#policy-reload-attest" policy_ex
+time_test "elixir/FC+snapshot" ".#policy-reload-snapshot" policy_snap
 echo ""
 
 echo -e "${BOLD}--- cli-integration (3 VMs, full suite) ---${RESET}"
@@ -81,6 +83,7 @@ smoke_py=$(cat "$TMPDIR/smoke_py")
 smoke_ex=$(cat "$TMPDIR/smoke_ex")
 policy_py=$(cat "$TMPDIR/policy_py")
 policy_ex=$(cat "$TMPDIR/policy_ex")
+policy_snap=$(cat "$TMPDIR/policy_snap")
 cli_py=$(cat "$TMPDIR/cli_py")
 cli_ex=$(cat "$TMPDIR/cli_ex")
 snap_ex=$(cat "$TMPDIR/snap_ex")
@@ -109,6 +112,7 @@ printf "  %-25s %8s %8s %8s\n" "test" "python" "attest" "speedup"
 printf "  %-25s %8s %8s %8s\n" "-------------------------" "--------" "--------" "--------"
 printf "  %-25s %7ds %7ds   %b\n" "module-smoke" "$smoke_py" "$smoke_ex" "$(speedup "$smoke_py" "$smoke_ex")"
 printf "  %-25s %7ds %7ds   %b\n" "policy-reload" "$policy_py" "$policy_ex" "$(speedup "$policy_py" "$policy_ex")"
+printf "  %-25s %7ds %7ds   %b\n" "policy-reload (snapshot)" "$policy_py" "$policy_snap" "$(speedup "$policy_py" "$policy_snap")"
 printf "  %-25s %7ds %7ds   %b\n" "cli-integration" "$cli_py" "$cli_ex" "$(speedup "$cli_py" "$cli_ex")"
 
 total_py=$(( smoke_py + policy_py + cli_py ))
