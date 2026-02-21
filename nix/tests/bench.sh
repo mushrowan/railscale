@@ -55,6 +55,7 @@ warmup "policy-reload (python)" ".#checks.x86_64-linux.nixos-test-policy"
 warmup "policy-reload (attest)" ".#policy-reload-attest"
 warmup "cli-integration (python)" ".#checks.x86_64-linux.nixos-test"
 warmup "cli-integration (attest)" ".#cli-integration-attest"
+warmup "snapshot-bench (attest)" ".#snapshot-bench-attest"
 echo ""
 
 echo -e "${BOLD}--- module-smoke (4 VMs) ---${RESET}"
@@ -72,12 +73,17 @@ time_test "python/QEMU" ".#checks.x86_64-linux.nixos-test" cli_py
 time_test "elixir/firecracker" ".#cli-integration-attest" cli_ex
 echo ""
 
+echo -e "${BOLD}--- snapshot restore (1 VM, create+restore+verify) ---${RESET}"
+time_test "elixir/firecracker+snapshot" ".#snapshot-bench-attest" snap_ex
+echo ""
+
 smoke_py=$(cat "$TMPDIR/smoke_py")
 smoke_ex=$(cat "$TMPDIR/smoke_ex")
 policy_py=$(cat "$TMPDIR/policy_py")
 policy_ex=$(cat "$TMPDIR/policy_ex")
 cli_py=$(cat "$TMPDIR/cli_py")
 cli_ex=$(cat "$TMPDIR/cli_ex")
+snap_ex=$(cat "$TMPDIR/snap_ex")
 
 speedup() {
   local py="$1" ex="$2"
@@ -108,4 +114,6 @@ printf "  %-25s %7ds %7ds   %b\n" "cli-integration" "$cli_py" "$cli_ex" "$(speed
 total_py=$(( smoke_py + policy_py + cli_py ))
 total_ex=$(( smoke_ex + policy_ex + cli_ex ))
 printf "  ${BOLD}%-25s %7ds %7ds   %b${RESET}\n" "TOTAL" "$total_py" "$total_ex" "$(speedup "$total_py" "$total_ex")"
+echo ""
+printf "  %-25s %7ds %8s   %s\n" "snapshot (create+restore)" "$snap_ex" "-" "FC-only (kernel 6.1)"
 echo ""

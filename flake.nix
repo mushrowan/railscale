@@ -177,6 +177,11 @@
               attest = inputs.attest.packages.${pkgs.system}.default;
               attestSrc = inputs.attest;
             };
+            snapshot-bench-attest = import ./nix/tests/snapshot-bench-attest.nix {
+              inherit pkgs railscale;
+              attest = inputs.attest.packages.${pkgs.system}.default;
+              attestSrc = inputs.attest;
+            };
           };
 
           devShells.default = import ./nix/devshell.nix {

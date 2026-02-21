@@ -2,6 +2,7 @@
   "nodes": {
     "attest": {
       "inputs": {
+        "firecracker-src": "firecracker-src",
         "flake-parts": "flake-parts",
         "nixpkgs": [
           "nixpkgs"
@@ -9,11 +10,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1771508788,
-        "narHash": "sha256-cJHk2VX0sotvULh/Y71d8lsuo1slqlu62bpqC1+wgaU=",
+        "lastModified": 1771668077,
+        "narHash": "sha256-r3PUqq+72evbJprkF4fY3Jbb+yCwlX1SCb3mRoljH/w=",
         "ref": "refs/heads/main",
-        "rev": "a9c23fd8dcf59764b4d5b3708ca586448fff0aa7",
-        "revCount": 112,
+        "rev": "25d768f2fb1f88fb314dba73c5fc325595f7dd48",
+        "revCount": 118,
         "type": "git",
         "url": "file:///home/rowan/dev/nixos-test-ng"
       },
@@ -34,6 +35,23 @@
       "original": {
         "owner": "ipetkov",
         "repo": "crane",
+        "type": "github"
+      }
+    },
+    "firecracker-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1771664761,
+        "narHash": "sha256-CGeWBn+EqR5cSVUV9p9XC3nODRTyyrKBUcaNwPhSsLw=",
+        "owner": "mushrowan",
+        "repo": "firecracker",
+        "rev": "06c631a141b4711c4f178ffe48927f4449f258aa",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mushrowan",
+        "ref": "fix/vsock-snapshot-restore-panic",
+        "repo": "firecracker",
         "type": "github"
       }
     },

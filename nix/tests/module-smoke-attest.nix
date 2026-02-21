@@ -108,17 +108,17 @@ makeTest {
 
     start_all.()
 
-    IO.puts("--- basic server starts ---")
-    Check.server_healthy(basic, "basic")
+    machines = [
+      {basic, "basic", "basic server starts"},
+      {withapi, "withapi", "server with API enabled starts"},
+      {withderp, "withderp", "server with embedded DERP starts"},
+      {withdns, "withdns", "server with DNS extra_records starts"}
+    ]
 
-    IO.puts("--- server with API enabled starts ---")
-    Check.server_healthy(withapi, "withapi")
-
-    IO.puts("--- server with embedded DERP starts ---")
-    Check.server_healthy(withderp, "withderp")
-
-    IO.puts("--- server with DNS extra_records starts ---")
-    Check.server_healthy(withdns, "withdns")
+    Attest.wait_all(machines, fn {machine, name, label} ->
+      IO.puts("--- #{label} ---")
+      Check.server_healthy(machine, name)
+    end)
 
     IO.puts("all smoke tests passed!")
   '';
