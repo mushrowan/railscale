@@ -57,7 +57,8 @@ makeTest {
           port = 8080;
           settings = {
             server_url = "http://server:8080";
-          } // common.embeddedDerpSettings;
+          }
+          // common.embeddedDerpSettings;
           policyFile = policyPath;
         };
 

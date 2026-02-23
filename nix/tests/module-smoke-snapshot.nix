@@ -1,10 +1,10 @@
-# Module Smoke Test for railscale - attest/firecracker edition
+# Module Smoke Test - pre-built snapshot edition
 #
-# Same coverage as module-smoke.nix but runs on firecracker via attest
-# instead of QEMU via the python driver. ~2x faster boot times
+# Same as module-smoke-attest.nix but boots from cached snapshots.
+# the snapshot build is cached by nix, --rebuild only runs the test
 #
 # Usage:
-#   nix build .#module-smoke-attest -L
+#   nix build .#module-smoke-snapshot -L
 {
   pkgs,
   railscale,
@@ -26,6 +26,8 @@ let
     {
       imports = [ common.railscaleModule ];
 
+      boot.kernelPackages = pkgs.linuxPackages_6_1;
+
       services.railscale = {
         enable = true;
         package = railscale;
@@ -44,8 +46,9 @@ let
 in
 makeTest {
   inherit pkgs attest;
-  name = "railscale-smoke";
+  name = "railscale-smoke-snap";
   splitStore = true;
+  usePrebuiltSnapshots = true;
 
   nodes = {
     basic = mkServerNode "basic" {
