@@ -33,8 +33,27 @@ defmodule H do
       " --authkey=#{key} --hostname=#{hostname}#{ssh} 2>&1 || true"
     )
 
-    Process.sleep(2000)
-    if expect_success, do: Process.sleep(3000)
+    if expect_success do
+      wait_for_tailscale_ip(client)
+    else
+      Process.sleep(2000)
+    end
+  end
+
+  defp wait_for_tailscale_ip(client, attempts \\ 20) do
+    {code, output} = Attest.Machine.execute(client, "tailscale ip -4 2>&1")
+    ip = String.trim(output)
+
+    if code == 0 and String.starts_with?(ip, "100.") do
+      :ok
+    else
+      if attempts > 0 do
+        Process.sleep(500)
+        wait_for_tailscale_ip(client, attempts - 1)
+      else
+        :ok
+      end
+    end
   end
 
   def get_client_ip(client) do
@@ -45,7 +64,7 @@ defmodule H do
 
   def disconnect_client(client) do
     Attest.Machine.execute(client, "tailscale logout 2>&1 || true")
-    Process.sleep(2000)
+    Process.sleep(1000)
   end
 
   def reset_client(client) do
@@ -54,14 +73,12 @@ defmodule H do
     Attest.Machine.execute(client, "rm -rf /var/lib/tailscale/*")
     Attest.Machine.execute(client, "systemctl start tailscaled")
     Attest.wait_for_unit(client, "tailscaled.service")
-    Process.sleep(1000)
   end
 
   def wait_for_server(server) do
     Attest.wait_for_unit(server, "railscale.service")
     Attest.wait_for_open_port(server, 8080)
     Attest.wait_for_open_port(server, 3340)
-    Process.sleep(1000)
   end
 
   def wait_for_network(server, client1, client2) do
@@ -70,7 +87,7 @@ defmodule H do
     Attest.wait_for_unit(client2, "multi-user.target")
     Attest.wait_for_unit(client1, "tailscaled.service")
     Attest.wait_for_unit(client2, "tailscaled.service")
-    Process.sleep(3000)
+    Process.sleep(1000)
   end
 
   def create_user_and_get_id(server, email, display_name \\ nil) do
@@ -448,8 +465,10 @@ client1_ip = H.get_client_ip(client1)
 client2_ip = H.get_client_ip(client2)
 unless client1_ip && client2_ip, do: raise("taildrop clients not connected")
 
-# wait for DERP
-Process.sleep(5000)
+# wait for DERP connectivity (poll until ping output contains "pong")
+Attest.wait_until_succeeds(client1,
+  "tailscale ping --c 1 #{client2_ip} 2>&1 | grep -q pong",
+  timeout: 30_000)
 
 # verify peers can communicate
 {_, ping_out} = Attest.Machine.execute(client1, "tailscale ping --c 3 #{client2_ip} 2>&1")
@@ -464,7 +483,7 @@ unless c2 == 0 and String.contains?(t2, "client1"), do: raise("client2 can't see
 # send file
 Attest.succeed(client1, "echo 'hello from taildrop' > /tmp/td.txt")
 Attest.succeed(client1, "tailscale file cp /tmp/td.txt client2: 2>&1")
-Process.sleep(2000)
+Process.sleep(500)
 Attest.succeed(client2, "mkdir -p /tmp/recv")
 Attest.succeed(client2, "tailscale file get /tmp/recv/ 2>&1")
 received = Attest.succeed(client2, "cat /tmp/recv/td.txt") |> String.trim()
@@ -473,7 +492,7 @@ unless received == "hello from taildrop", do: raise("taildrop content mismatch: 
 # bidirectional
 Attest.succeed(client2, "echo 'reply from client2' > /tmp/reply.txt")
 Attest.succeed(client2, "tailscale file cp /tmp/reply.txt client1: 2>&1")
-Process.sleep(2000)
+Process.sleep(500)
 Attest.succeed(client1, "mkdir -p /tmp/recv")
 Attest.succeed(client1, "tailscale file get /tmp/recv/ 2>&1")
 reply = Attest.succeed(client1, "cat /tmp/recv/reply.txt") |> String.trim()
@@ -486,8 +505,6 @@ bob_id = H.create_user_and_get_id(server, "bob@example.com", "Bob")
 H.reset_client(client2)
 bob_key = H.create_preauth_key(server, bob_id)
 H.connect_client(client2, bob_key, "client2-bob")
-Process.sleep(3000)
-
 client2_bob_ip = H.get_client_ip(client2)
 unless client2_bob_ip, do: raise("client2 as bob should have IP")
 
@@ -500,7 +517,7 @@ if String.contains?(targets, "client2-bob"),
 Attest.succeed(client1, "echo 'secret' > /tmp/secret.txt")
 {send_code, _} = Attest.Machine.execute(client1, "tailscale file cp /tmp/secret.txt #{client2_bob_ip}: 2>&1")
 if send_code == 0 do
-  Process.sleep(2000)
+  Process.sleep(500)
   Attest.Machine.execute(client2, "mkdir -p /tmp/bob-received")
   Attest.Machine.execute(client2, "tailscale file get /tmp/bob-received/ 2>&1")
   {_, files} = Attest.Machine.execute(client2, "ls /tmp/bob-received/ 2>&1")
@@ -513,7 +530,6 @@ IO.puts("cross-user taildrop blocked")
 H.reset_client(client2)
 alice_key = H.create_preauth_key(server, alice_id)
 H.connect_client(client2, alice_key, "client2")
-Process.sleep(2000)
 
 IO.puts("taildrop ok")
 
@@ -765,6 +781,11 @@ u1c2_ip = H.get_client_ip(client2)
 unless u1c1_ip, do: raise("ssh client1 no IP")
 unless u1c2_ip, do: raise("ssh client2 no IP")
 IO.puts("ssh clients: u1c1=#{u1c1_ip} u1c2=#{u1c2_ip}")
+
+# wait for DERP connectivity between SSH clients
+Attest.wait_until_succeeds(client1,
+  "tailscale ping --c 1 #{u1c2_ip} 2>&1 | grep -q pong",
+  timeout: 30_000)
 
 # same user, non-root -> should work
 {ok, _} = H.try_ssh(client1, u1c2_ip, "testuser")
