@@ -10,11 +10,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1771811253,
-        "narHash": "sha256-8UbKueeFxQm9wylDWsUwL/3stjPyIVf9qqaJ+rSyUhk=",
+        "lastModified": 1771815227,
+        "narHash": "sha256-aPoLifbDRMDR9L8nytg7RTEn0aNn3Pr6fmF0moSn4GU=",
         "ref": "refs/heads/main",
-        "rev": "9a3ed15af8d9ed789ab5a0b027be2902a00fab0f",
-        "revCount": 127,
+        "rev": "29dfaf984bc60978c1e5622e18f96c56ecc57e05",
+        "revCount": 129,
         "type": "git",
         "url": "file:///home/rowan/dev/nixos-test-ng"
       },
