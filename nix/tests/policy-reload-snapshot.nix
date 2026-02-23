@@ -84,7 +84,7 @@ makeTest {
     # wait for server
     Attest.wait_for_unit(server, "railscale.service")
     Attest.wait_for_open_port(server, 8080)
-    Process.sleep(1000)
+    Attest.wait_until_succeeds(server, "curl -sf http://localhost:8080/health")
 
     # -- initial policy check --
     IO.puts("--- get initial policy ---")
@@ -112,7 +112,9 @@ makeTest {
 
     Attest.succeed(server, "echo '#{new_policy}' > /var/lib/railscale/policy.json")
     Attest.succeed(server, "systemctl reload railscale")
-    Process.sleep(1000)
+
+    Attest.wait_until_succeeds(server,
+      "railscale policy get | grep -q group:ops")
 
     output = Attest.succeed(server, "railscale policy get")
     policy = Jason.decode!(output)

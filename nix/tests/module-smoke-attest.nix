@@ -87,7 +87,7 @@ makeTest {
     defmodule Check do
       def server_healthy(machine, name) do
         Attest.wait_for_unit(machine, "railscale.service")
-        Process.sleep(3000)
+        Attest.wait_for_open_port(machine, 8080)
 
         status = Attest.succeed(machine, "systemctl is-active railscale.service")
 
@@ -102,7 +102,7 @@ makeTest {
           IO.puts("#{name}: found errors in logs: #{output}")
         end
 
-        IO.puts("#{name}: server healthy after 3 seconds")
+        IO.puts("#{name}: server healthy")
       end
     end
 
