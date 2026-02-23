@@ -14,7 +14,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     attest = {
-      url = "git+file:///home/rowan/dev/nixos-test-ng";
+      url = "github:mushrowan/attest";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
@@ -110,12 +110,16 @@
               cargoTest = craneLib.cargoTest (commonArgs // { inherit cargoArtifacts; });
             }
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-              # NixOS integration tests (Linux only)
-              nixos-test = import ./nix/tests/cli-integration.nix {
+              # NixOS integration tests via attest/firecracker
+              nixos-test = import ./nix/tests/cli-integration-attest.nix {
                 inherit pkgs railscale;
+                attest = inputs.attest.packages.${pkgs.system}.default;
+                attestSrc = inputs.attest;
               };
-              nixos-test-policy = import ./nix/tests/policy-reload.nix {
+              nixos-test-policy = import ./nix/tests/policy-reload-attest.nix {
                 inherit pkgs railscale;
+                attest = inputs.attest.packages.${pkgs.system}.default;
+                attestSrc = inputs.attest;
               };
             };
 
@@ -154,25 +158,26 @@
               };
             };
 
-            # Smoke test for NixOS module options (not in checks, run manually)
-            # Usage: nix build .#module-smoke-test -L
-            module-smoke-test = import ./nix/tests/module-smoke.nix {
-              inherit pkgs railscale;
-            };
           }
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-            # attest/firecracker versions of NixOS tests (~2x faster boot)
-            module-smoke-attest = import ./nix/tests/module-smoke-attest.nix {
+            # attest/firecracker NixOS tests (run manually, not in checks)
+            module-smoke = import ./nix/tests/module-smoke-attest.nix {
               inherit pkgs railscale;
               attest = inputs.attest.packages.${pkgs.system}.default;
               attestSrc = inputs.attest;
             };
-            policy-reload-attest = import ./nix/tests/policy-reload-attest.nix {
+            # snapshot-backed variants (faster, requires kernel 6.1)
+            module-smoke-snapshot = import ./nix/tests/module-smoke-snapshot.nix {
               inherit pkgs railscale;
               attest = inputs.attest.packages.${pkgs.system}.default;
               attestSrc = inputs.attest;
             };
-            cli-integration-attest = import ./nix/tests/cli-integration-attest.nix {
+            cli-integration-snapshot = import ./nix/tests/cli-integration-snapshot.nix {
+              inherit pkgs railscale;
+              attest = inputs.attest.packages.${pkgs.system}.default;
+              attestSrc = inputs.attest;
+            };
+            policy-reload-snapshot = import ./nix/tests/policy-reload-snapshot.nix {
               inherit pkgs railscale;
               attest = inputs.attest.packages.${pkgs.system}.default;
               attestSrc = inputs.attest;

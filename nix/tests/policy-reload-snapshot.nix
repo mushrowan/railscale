@@ -1,10 +1,11 @@
-# Policy Hot-Reload Test - attest/firecracker edition
+# Policy Hot-Reload Test - pre-built snapshot edition
 #
-# Same coverage as policy-reload.nix: SIGHUP reload, CLI reload, policy set
-# Single VM, runs on firecracker
+# Same as policy-reload-attest.nix but boots from a cached snapshot.
+# the snapshot build (~10s) is cached by nix, so --rebuild only runs
+# the test script from a ~128ms restore
 #
 # Usage:
-#   nix build .#policy-reload-attest -L
+#   nix build .#policy-reload-snapshot -L
 {
   pkgs,
   railscale,
@@ -39,14 +40,18 @@ let
 in
 makeTest {
   inherit pkgs attest;
-  name = "railscale-policy-reload";
+  name = "railscale-policy-reload-snap";
   splitStore = true;
+  usePrebuiltSnapshots = true;
 
   nodes = {
     server =
       { config, pkgs, ... }:
       {
         imports = [ common.railscaleModule ];
+
+        # FC snapshot/restore requires kernel 6.1
+        boot.kernelPackages = pkgs.linuxPackages_6_1;
 
         environment.systemPackages = [ pkgs.jq ];
 
@@ -80,7 +85,6 @@ makeTest {
     # wait for server
     Attest.wait_for_unit(server, "railscale.service")
     Attest.wait_for_open_port(server, 8080)
-    # verify server responds before testing
     Attest.wait_until_succeeds(server, "curl -sf http://localhost:8080/health")
 
     # -- initial policy check --
@@ -110,7 +114,6 @@ makeTest {
     Attest.succeed(server, "echo '#{new_policy}' > /var/lib/railscale/policy.json")
     Attest.succeed(server, "systemctl reload railscale")
 
-    # poll until new policy is visible
     Attest.wait_until_succeeds(server,
       "railscale policy get | grep -q group:ops")
 
