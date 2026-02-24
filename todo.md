@@ -26,5 +26,37 @@ check at minimum:
 - `DERPMap` / `DERPRegion` / `DERPNode`
 - `SSHPolicy` / `SSHRule` / `SSHAction`
 
+## audit logging for secrets
+
+debug/trace logging must never emit secrets. currently NodeKey raw bytes are
+logged via `?` (Debug). need custom Debug impls or wrapper types that redact:
+- `NodeKey`, `MachineKey`, `DiscoKey` - show prefix only (e.g. `nodekey:d53d06...`)
+- preauth key tokens
+- OIDC tokens/secrets
+- noise session keys
+
+also review `body = %String::from_utf8_lossy(&body)` in error paths - could
+contain auth keys in the JSON
+
+## structured logging pass
+
+go through all handlers and core logic, add proper tracing instrumentation:
+- `#[instrument]` on handler functions
+- `debug!` for request parsing, routing decisions, intermediate state
+- `info!` for successful registrations, logins, map responses, policy changes
+- `warn!` for recoverable errors, unexpected client behaviour, timeouts
+- `trace!` for wire-level detail (full request/response bodies, noise frames)
+- consistent span fields: `node_key`, `machine_key`, `user`, `node_id`
+
+areas needing coverage:
+- register handler (started, needs more)
+- map handler (poll vs update, which fields changed)
+- oidc flow (redirect, callback, token exchange)
+- tka handlers
+- derp server connections
+- ephemeral gc
+- policy reload
+
 ## rename test names
+
 alice→alicja, bob→ro, others→esme/valerie/reese across entire repo

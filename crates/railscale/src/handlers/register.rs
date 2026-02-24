@@ -195,7 +195,15 @@ pub async fn register(
     // route to appropriate registration flow
     let resp = if !req.followup.is_empty() {
         debug!(followup = %req.followup, "routing to followup flow");
-        handle_followup_registration(state, &req.followup).await
+        let followup_result = handle_followup_registration(state.clone(), &req.followup).await;
+        match followup_result {
+            Ok(r) => Ok(r),
+            Err(_) => {
+                // stale followup (e.g. server restarted) - start fresh
+                debug!("followup registration not found, starting fresh interactive flow");
+                handle_interactive_registration(state, req, machine_key).await
+            }
+        }
     } else if !auth_key_str.is_empty() {
         debug!("routing to preauth key flow");
         handle_preauth_registration(state, req, machine_key, &auth_key_str).await
