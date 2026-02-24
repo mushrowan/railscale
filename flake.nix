@@ -49,7 +49,7 @@
             ];
           };
 
-          craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+          craneLib = (crane.mkLib pkgs).overrideToolchain (_: rustToolchain);
 
           # Import package build
           packageSet = import ./nix/package.nix { inherit pkgs craneLib; };
@@ -60,7 +60,7 @@
             targets = [ "x86_64-unknown-linux-musl" ];
           };
           pkgsMusl = pkgs.pkgsCross.musl64;
-          craneMusl = (crane.mkLib pkgsMusl).overrideToolchain muslRustToolchain;
+          craneMusl = (crane.mkLib pkgsMusl).overrideToolchain (_: muslRustToolchain);
           muslPackageSet = import ./nix/package.nix {
             pkgs = pkgsMusl;
             craneLib = craneMusl;
@@ -113,12 +113,12 @@
               # NixOS integration tests via attest/firecracker
               nixos-test = import ./nix/tests/cli-integration-attest.nix {
                 inherit pkgs railscale;
-                attest = inputs.attest.packages.${pkgs.system}.default;
+                attest = inputs.attest.packages.${system}.default;
                 attestSrc = inputs.attest;
               };
               nixos-test-policy = import ./nix/tests/policy-reload-attest.nix {
                 inherit pkgs railscale;
-                attest = inputs.attest.packages.${pkgs.system}.default;
+                attest = inputs.attest.packages.${system}.default;
                 attestSrc = inputs.attest;
               };
             };
@@ -163,23 +163,23 @@
             # attest/firecracker NixOS tests (run manually, not in checks)
             module-smoke = import ./nix/tests/module-smoke-attest.nix {
               inherit pkgs railscale;
-              attest = inputs.attest.packages.${pkgs.system}.default;
+              attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
             # snapshot-backed variants (faster, requires kernel 6.1)
             module-smoke-snapshot = import ./nix/tests/module-smoke-snapshot.nix {
               inherit pkgs railscale;
-              attest = inputs.attest.packages.${pkgs.system}.default;
+              attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
             cli-integration-snapshot = import ./nix/tests/cli-integration-snapshot.nix {
               inherit pkgs railscale;
-              attest = inputs.attest.packages.${pkgs.system}.default;
+              attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
             policy-reload-snapshot = import ./nix/tests/policy-reload-snapshot.nix {
               inherit pkgs railscale;
-              attest = inputs.attest.packages.${pkgs.system}.default;
+              attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
           };
