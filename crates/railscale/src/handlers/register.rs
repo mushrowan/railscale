@@ -442,8 +442,9 @@ async fn handle_interactive_registration(
     ));
     state.pending_registrations.insert(registration_id, pending);
 
-    // build auth_url - this is where the user will be redirected to authenticate
-    let auth_url = format!("/register/{}", registration_id);
+    // build auth_url as a full URL - the client opens this in a browser
+    let server_url = state.config.server_url.trim_end_matches('/');
+    let auth_url = format!("{}/register/{}", server_url, registration_id);
 
     Ok(Json(RegisterResponse {
         user: TailcfgUser::default(),
@@ -462,15 +463,21 @@ async fn handle_interactive_registration(
 /// completion via the PendingRegistration.
 async fn handle_followup_registration(
     state: AppState,
-    followup: &str,
+    followup_raw: &str,
 ) -> Result<Json<RegisterResponse>, ApiError> {
     use railscale_types::RegistrationId;
     use std::time::Duration;
 
-    // parse registration id from followup url (e.g., "/register/abc123")
-    let reg_id_str = followup
-        .strip_prefix("/register/")
+    // parse registration id from followup url
+    // client may send full URL (https://server/register/abc) or relative (/register/abc)
+    let reg_id_str = followup_raw
+        .rsplit_once("/register/")
+        .map(|(_, id)| id)
         .ok_or_else(|| ApiError::bad_request("invalid followup URL format"))?;
+
+    // always use full URLs in responses
+    let server_url = state.config.server_url.trim_end_matches('/');
+    let followup = format!("{}/register/{}", server_url, reg_id_str);
 
     let registration_id = RegistrationId::from_string(reg_id_str)
         .map_err(|e| ApiError::bad_request(format!("invalid registration ID: {}", e)))?;
