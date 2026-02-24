@@ -23,6 +23,13 @@ let
 
   configFile = settingsFormat.generate "config.toml" (filterSettings cfg.settings);
 
+  # render declarative policy to a nix store path
+  policyJsonFile =
+    if cfg.policy != null then pkgs.writeText "policy.json" (builtins.toJSON cfg.policy) else null;
+
+  # resolved policy file path: declarative policy takes precedence
+  resolvedPolicyFile = if policyJsonFile != null then policyJsonFile else cfg.policyFile;
+
   # Get the API port: from listen_port if listen_host is set, otherwise main server port
   apiPort =
     if (cfg.settings.api.listen_host or null) != null then
@@ -109,6 +116,31 @@ in
       description = ''
         Path to grants-based policy file (JSON format).
         See the railscale documentation for policy syntax.
+
+        For a nix-managed immutable policy, use {option}`policy` instead.
+        For a mutable policy editable at runtime, use {option}`policyFile`
+        with a path under `/var/lib/railscale/`.
+      '';
+    };
+
+    policy = lib.mkOption {
+      type = lib.types.nullOr (lib.types.attrsOf lib.types.anything);
+      default = null;
+      example = lib.literalExpression ''
+        {
+          grants = [
+            { src = ["autogroup:member"]; dst = ["autogroup:member"]; ip = ["*"]; }
+          ];
+        }
+      '';
+      description = ''
+        Declarative grants-based policy as a Nix attribute set.
+        Rendered to the Nix store and passed as an immutable policy file.
+        `railscale policy set` will update the in-memory policy but changes
+        will not persist across restarts.
+
+        Mutually exclusive with {option}`policyFile`.
+        For a runtime-mutable policy, use {option}`policyFile` instead.
       '';
     };
 
@@ -817,6 +849,10 @@ in
   config = lib.mkIf cfg.enable {
     assertions = [
       {
+        assertion = !(cfg.policy != null && cfg.policyFile != null);
+        message = "services.railscale.policy and services.railscale.policyFile are mutually exclusive";
+      }
+      {
         assertion = cfg.settings.dns.magic_dns -> cfg.settings.base_domain != "";
         message = "services.railscale.settings.base_domain must be set when magic_dns is enabled";
       }
@@ -858,7 +894,7 @@ in
         exec ${lib.getExe cfg.package} serve \
           --config ${configFile} \
           --admin-socket ${cfg.adminSocket.path} \
-          ${lib.optionalString (cfg.policyFile != null) "--policy-file ${cfg.policyFile}"}
+          ${lib.optionalString (resolvedPolicyFile != null) "--policy-file ${resolvedPolicyFile}"}
       '';
 
       serviceConfig =

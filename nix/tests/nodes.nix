@@ -21,42 +21,39 @@ in
         pkgs.curl # For REST API tests
       ];
 
-      # Policy with groups for testing access control
-      environment.etc."railscale/policy.json".text = builtins.toJSON {
-        groups = {
-          "group:engineering" = [ "alice@example.com" ];
-          "group:admins" = [ "admin@example.com" ];
-        };
-        grants = [
-          # All registered members can reach each other
-          {
-            src = [ "autogroup:member" ];
-            dst = [ "autogroup:member" ];
-            ip = [ "*" ];
-          }
-          # Engineering group can access tagged servers
-          {
-            src = [ "group:engineering" ];
-            dst = [ "tag:server" ];
-            ip = [ "*" ];
-          }
-        ];
-        # SSH policy: same-user devices can SSH to each other (except root)
-        ssh = [
-          {
-            action = "accept";
-            src = [ "autogroup:member" ];
-            dst = [ "autogroup:self" ];
-            users = [ "autogroup:nonroot" ];
-          }
-        ];
-      };
-
       services.railscale = {
         enable = true;
         package = railscale;
         address = "0.0.0.0";
         port = 8080;
+
+        # declarative policy (immutable, nix-managed)
+        policy = {
+          groups = {
+            "group:engineering" = [ "alice@example.com" ];
+            "group:admins" = [ "admin@example.com" ];
+          };
+          grants = [
+            {
+              src = [ "autogroup:member" ];
+              dst = [ "autogroup:member" ];
+              ip = [ "*" ];
+            }
+            {
+              src = [ "group:engineering" ];
+              dst = [ "tag:server" ];
+              ip = [ "*" ];
+            }
+          ];
+          ssh = [
+            {
+              action = "accept";
+              src = [ "autogroup:member" ];
+              dst = [ "autogroup:self" ];
+              users = [ "autogroup:nonroot" ];
+            }
+          ];
+        };
 
         settings = {
           server_url = "http://server:8080";
@@ -69,8 +66,6 @@ in
           };
         }
         // common.embeddedDerpSettings;
-
-        policyFile = "/etc/railscale/policy.json";
       };
 
       environment.variables.RAILSCALE_DATABASE_URL = "sqlite:///var/lib/railscale/db.sqlite";
