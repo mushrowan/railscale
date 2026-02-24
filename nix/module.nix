@@ -890,6 +890,9 @@ in
       after = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
 
+      restartTriggers = [ configFile ];
+      reloadTriggers = lib.optional (policyJsonFile != null) policyJsonFile;
+
       script = ''
         exec ${lib.getExe cfg.package} serve \
           --config ${configFile} \
