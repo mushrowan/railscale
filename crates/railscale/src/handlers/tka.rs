@@ -545,55 +545,60 @@ mod tests {
     use super::*;
     use crate::handlers::test_helpers::default_grants;
     use axum::{body::Body, http::Request, http::StatusCode};
-    use railscale_db::RailscaleDb;
+    use railscale_db::{Database, RailscaleDb, TkaState};
     use railscale_proto::CapabilityVersion;
-    use railscale_types::NodeKey;
+    use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
+    use railscale_types::{NodeKey, User, UserId, test_utils::TestNodeBuilder};
     use tower::ServiceExt;
 
-    #[tokio::test]
-    async fn tka_init_begin_returns_nodes_needing_signatures() {
-        use railscale_db::Database;
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+    /// create a test app with default grants from a database
+    async fn test_app(db: &RailscaleDb) -> axum::Router {
+        crate::create_app(
+            db.clone(),
+            default_grants(),
+            railscale_types::Config::default(),
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await
+    }
 
+    /// create a migrated in-memory db with a user and node, returning (db, node_key, node)
+    async fn setup_db_with_node(
+        key_byte: u8,
+    ) -> (RailscaleDb, NodeKey, railscale_types::Node) {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
-
-        // create a user and node
         let user = User::new(UserId(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
-
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
+        let node_key = NodeKey::from_bytes(vec![key_byte; 32]);
+        let node = TestNodeBuilder::new(0)
+            .with_user_id(user.id)
+            .with_node_key(node_key.clone())
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
         let node = db.create_node(&node).await.unwrap();
+        (db, node_key, node)
+    }
 
-        // create a valid genesis AUM
+    /// create a migrated in-memory db (no nodes)
+    async fn setup_db() -> RailscaleDb {
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+        db
+    }
+
+    /// generated tka key material and signed genesis AUM
+    struct TkaGenesis {
+        nl_private: NlPrivateKey,
+        key_id: railscale_tka::TkaKeyId,
+        genesis_hash: railscale_tka::AumHash,
+        genesis_bytes: Vec<u8>,
+    }
+
+    /// generate a signed genesis AUM with a fresh tka keypair
+    fn make_genesis() -> TkaGenesis {
         let nl_private = NlPrivateKey::generate();
         let nl_public = nl_private.public_key();
         let key = Key {
@@ -603,7 +608,6 @@ mod tests {
             meta: None,
         };
         let key_id = key.id().unwrap();
-
         let genesis = Aum {
             message_kind: AumKind::AddKey,
             prev_aum_hash: None,
@@ -616,351 +620,163 @@ mod tests {
         };
         let hash = genesis.hash().unwrap();
         let sig = nl_private.sign(hash.as_bytes());
-        let signed_genesis = Aum {
+        let signed = Aum {
             signatures: vec![AumSignature {
                 key_id: key_id.as_bytes().to_vec(),
                 signature: sig.to_vec(),
             }],
             ..genesis
         };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
+        TkaGenesis {
+            nl_private,
+            key_id,
+            genesis_hash: hash,
+            genesis_bytes: signed.to_cbor().unwrap(),
+        }
+    }
 
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
+    /// enable tka in the database with a genesis AUM
+    async fn enable_tka(db: &RailscaleDb, g: &TkaGenesis) {
+        enable_tka_with(db, g, None).await;
+    }
 
-        let req = TkaInitBeginRequest {
-            version: CapabilityVersion(106),
-            node_key: node_key.clone(),
-            genesis_aum: genesis_bytes.into(),
+    /// enable tka with optional disablement secrets
+    async fn enable_tka_with(
+        db: &RailscaleDb,
+        g: &TkaGenesis,
+        disablement_secrets: Option<Vec<u8>>,
+    ) {
+        let now = chrono::Utc::now();
+        let state = TkaState {
+            id: 0,
+            enabled: true,
+            head: Some(g.genesis_hash.to_string()),
+            state_checkpoint: None,
+            disablement_secrets,
+            genesis_aum: Some(g.genesis_bytes.clone()),
+            created_at: now,
+            updated_at: now,
         };
+        db.upsert_tka_state(&state).await.unwrap();
+    }
 
+    /// POST json to a uri and return (status, body bytes)
+    async fn post_json(
+        app: axum::Router,
+        uri: &str,
+        body: &impl serde::Serialize,
+    ) -> (StatusCode, bytes::Bytes) {
         let response = app
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri("/machine/tka/init/begin")
+                    .uri(uri)
                     .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
+                    .body(Body::from(serde_json::to_string(body).unwrap()))
                     .unwrap(),
             )
             .await
             .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
+        let status = response.status();
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
             .unwrap();
-        let resp: TkaInitBeginResponse = serde_json::from_slice(&body).unwrap();
+        (status, body)
+    }
 
-        // should return the node needing a signature
+    #[tokio::test]
+    async fn tka_init_begin_returns_nodes_needing_signatures() {
+        let (db, node_key, node) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        let app = test_app(&db).await;
+
+        let req = TkaInitBeginRequest {
+            version: CapabilityVersion(106),
+            node_key: node_key.clone(),
+            genesis_aum: g.genesis_bytes.into(),
+        };
+        let (status, body) = post_json(app, "/machine/tka/init/begin", &req).await;
+        assert_eq!(status, StatusCode::OK);
+
+        let resp: TkaInitBeginResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(resp.need_signatures.len(), 1);
         assert_eq!(resp.need_signatures[0].node_id, node.id);
         assert_eq!(resp.need_signatures[0].node_public, node_key);
     }
 
+
     #[tokio::test]
     async fn tka_bootstrap_returns_empty_when_tka_not_enabled() {
-        use railscale_db::Database;
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
-
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a node so auth passes
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![0u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
+        let (db, node_key, _) = setup_db_with_node(0).await;
+        let app = test_app(&db).await;
 
         let req = TkaBootstrapRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
             head: String::new(),
         };
+        let (status, body) = post_json(app, "/machine/tka/bootstrap", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/bootstrap")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
         let resp: TkaBootstrapResponse = serde_json::from_slice(&body).unwrap();
-
-        // when tka not enabled, both fields should be empty/none
         assert!(resp.genesis_aum.is_none());
         assert!(resp.disablement_secret.is_empty());
     }
 
     #[tokio::test]
     async fn tka_init_finish_enables_tka_with_valid_signatures() {
-        use railscale_db::Database;
-        use railscale_tka::{
-            Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey, NodeKeySignature,
-        };
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        use railscale_tka::NodeKeySignature;
         use std::collections::HashMap;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
+        let (db, node_key, node) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        let app = test_app(&db).await;
 
-        // create a user and node
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        let node = db.create_node(&node).await.unwrap();
-
-        // create TKA key and genesis AUM
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // step 1: call init_begin to store genesis
+        // step 1: init_begin
         let begin_req = TkaInitBeginRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            genesis_aum: genesis_bytes.clone().into(),
+            genesis_aum: g.genesis_bytes.clone().into(),
         };
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/init/begin")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&begin_req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        let (status, _) = post_json(app.clone(), "/machine/tka/init/begin", &begin_req).await;
+        assert_eq!(status, StatusCode::OK);
 
         // step 2: create node-key signature
-        // the node pubkey needs to be in the format tailscale expects (with "np" prefix)
-        let node_pubkey_bytes = node_key.as_bytes().to_vec();
-        let node_sig =
-            NodeKeySignature::sign_direct(&node_pubkey_bytes, &tka_key_id, &nl_private).unwrap();
+        let node_sig = NodeKeySignature::sign_direct(
+            &node_key.as_bytes().to_vec(),
+            &g.key_id,
+            &g.nl_private,
+        )
+        .unwrap();
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 
         let mut signatures = HashMap::new();
         signatures.insert(node.id.0, node_sig_bytes.clone().into());
 
-        // step 3: call init_finish
+        // step 3: init_finish (recreate app to clear cached tka key)
+        let app = test_app(&db).await;
         let finish_req = TkaInitFinishRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
             signatures,
             support_disablement: vec![],
         };
+        let (status, _) = post_json(app, "/machine/tka/init/finish", &finish_req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        // recreate app for second request
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            railscale_types::Config::default(),
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/init/finish")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&finish_req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // verify TKA is now enabled
         let tka_state = db.get_tka_state().await.unwrap().expect("tka state");
         assert!(tka_state.enabled);
-        assert!(tka_state.head.is_some());
-        // head should be the hex-encoded genesis hash
-        assert_eq!(tka_state.head.unwrap(), genesis_hash.to_string());
+        assert_eq!(tka_state.head.unwrap(), g.genesis_hash.to_string());
 
-        // verify signature was stored for the node
-        let stored_sig = db
-            .get_node_key_signature(node.id)
-            .await
-            .unwrap()
-            .expect("signature stored");
+        let stored_sig = db.get_node_key_signature(node.id).await.unwrap().expect("signature stored");
         assert_eq!(stored_sig, node_sig_bytes);
     }
 
     #[tokio::test]
     async fn tka_bootstrap_returns_genesis_when_tka_enabled() {
-        use railscale_db::{Database, TkaState};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
-
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a node so auth passes
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![0u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        // enable tka with a genesis aum
+        let (db, node_key, _) = setup_db_with_node(0).await;
         let genesis_bytes = vec![0xca, 0xfe, 0xba, 0xbe];
+        let now = chrono::Utc::now();
         let tka_state = TkaState {
             id: 0,
             enabled: true,
@@ -973,650 +789,146 @@ mod tests {
         };
         db.upsert_tka_state(&tka_state).await.unwrap();
 
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
+        let app = test_app(&db).await;
         let req = TkaBootstrapRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            head: String::new(), // client has no head, needs bootstrap
+            head: String::new(),
         };
+        let (status, body) = post_json(app, "/machine/tka/bootstrap", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/bootstrap")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
         let resp: TkaBootstrapResponse = serde_json::from_slice(&body).unwrap();
-
-        // when tka enabled with genesis, should return genesis_aum
         assert!(resp.genesis_aum.is_some());
         assert_eq!(resp.genesis_aum.unwrap().as_bytes(), genesis_bytes);
     }
 
     #[tokio::test]
     async fn tka_sign_stores_signature_for_node() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{
-            Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey, NodeKeySignature,
-        };
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        use railscale_tka::NodeKeySignature;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
+        let (db, node_key, node) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
 
-        // create TKA key
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        // create and store genesis AUM
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        // enable TKA in database
-        let now = chrono::Utc::now();
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some(genesis_hash.to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(genesis_bytes),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        // create a user and node (without signature)
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        let node = db.create_node(&node).await.unwrap();
-
-        // verify no signature stored yet
         assert!(db.get_node_key_signature(node.id).await.unwrap().is_none());
 
-        // create a valid node-key signature
-        let node_pubkey_bytes = node_key.as_bytes().to_vec();
-        let node_sig =
-            NodeKeySignature::sign_direct(&node_pubkey_bytes, &tka_key_id, &nl_private).unwrap();
+        let node_sig = NodeKeySignature::sign_direct(
+            &node_key.as_bytes().to_vec(),
+            &g.key_id,
+            &g.nl_private,
+        )
+        .unwrap();
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // submit the signature
+        let app = test_app(&db).await;
         let req = TkaSubmitSignatureRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
             signature: node_sig_bytes.clone().into(),
         };
+        let (status, _) = post_json(app, "/machine/tka/sign", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sign")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // verify signature was stored
-        let stored_sig = db
-            .get_node_key_signature(node.id)
-            .await
-            .unwrap()
-            .expect("signature stored");
+        let stored_sig = db.get_node_key_signature(node.id).await.unwrap().expect("signature stored");
         assert_eq!(stored_sig, node_sig_bytes);
     }
 
     #[tokio::test]
     async fn tka_disable_with_valid_secret() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{
-            Aum, AumKind, AumSignature, DisablementSecret, Key, KeyKind, NlPrivateKey,
-        };
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        use railscale_tka::DisablementSecret;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
 
-        // create a user and node (needed for request authentication)
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        // create TKA key and genesis
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        // create a disablement secret and store its hash
         let secret_bytes: [u8; 32] = [0xab; 32];
         let secret = DisablementSecret::from(secret_bytes);
-        let secret_hash = secret.hash();
+        enable_tka_with(&db, &g, Some(secret.hash().to_vec())).await;
 
-        // store hashes as simple vec of 32-byte hashes concatenated
-        let disablement_secrets = secret_hash.to_vec();
-
-        // enable TKA with disablement secret
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some(genesis_hash.to_string()),
-            state_checkpoint: None,
-            disablement_secrets: Some(disablement_secrets),
-            genesis_aum: Some(genesis_bytes),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        // verify TKA is enabled
         let state = db.get_tka_state().await.unwrap().unwrap();
         assert!(state.enabled);
 
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // disable TKA with the secret
+        let app = test_app(&db).await;
         let req = TkaDisableRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            head: genesis_hash.to_string(),
+            head: g.genesis_hash.to_string(),
             disablement_secret: secret_bytes.to_vec(),
         };
+        let (status, _) = post_json(app, "/machine/tka/disable", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/disable")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        // verify TKA is now disabled
         let state = db.get_tka_state().await.unwrap().unwrap();
         assert!(!state.enabled);
     }
 
     #[tokio::test]
     async fn tka_sync_offer_returns_genesis_when_client_has_no_head() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a user and node
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        // create TKA key and genesis
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        // store genesis in AUM chain
-        db.store_aum(&genesis_hash.to_string(), None, &genesis_bytes)
+        db.store_aum(&g.genesis_hash.to_string(), None, &g.genesis_bytes)
             .await
             .unwrap();
+        enable_tka(&db, &g).await;
 
-        // enable TKA
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some(genesis_hash.to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(genesis_bytes.clone()),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // client with no head requests sync
+        let app = test_app(&db).await;
         let req = TkaSyncOfferRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            head: String::new(), // client has no TKA state
+            head: String::new(),
             ancestors: vec![],
         };
+        let (status, body) = post_json(app, "/machine/tka/sync/offer", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/offer")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
         let resp: TkaSyncOfferResponse = serde_json::from_slice(&body).unwrap();
-
-        // server should return its head and the genesis AUM
-        assert_eq!(resp.head, genesis_hash.to_string());
+        assert_eq!(resp.head, g.genesis_hash.to_string());
         assert_eq!(resp.missing_aums.len(), 1);
-        assert_eq!(resp.missing_aums[0].as_bytes(), genesis_bytes);
+        assert_eq!(resp.missing_aums[0].as_bytes(), g.genesis_bytes);
     }
 
     #[tokio::test]
     async fn tka_sync_offer_returns_empty_when_heads_match() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a user and node
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        // create TKA key and genesis
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        // enable TKA
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some(genesis_hash.to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(genesis_bytes),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // client with same head as server
+        let app = test_app(&db).await;
         let req = TkaSyncOfferRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            head: genesis_hash.to_string(), // same as server
+            head: g.genesis_hash.to_string(),
             ancestors: vec![],
         };
+        let (status, body) = post_json(app, "/machine/tka/sync/offer", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/offer")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
         let resp: TkaSyncOfferResponse = serde_json::from_slice(&body).unwrap();
-
-        // heads match, no sync needed
-        assert_eq!(resp.head, genesis_hash.to_string());
+        assert_eq!(resp.head, g.genesis_hash.to_string());
         assert!(resp.missing_aums.is_empty());
     }
 
-    // --- 1-4: unauthenticated endpoints must reject unknown node_key ---
+    // --- unauthenticated endpoints must reject unknown node_key ---
 
     #[tokio::test]
     async fn tka_bootstrap_rejects_unknown_node_key() {
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
+        let db = setup_db().await;
+        let app = test_app(&db).await;
 
         let req = TkaBootstrapRequest {
             version: CapabilityVersion(106),
             node_key: NodeKey::from_bytes(vec![0xdeu8; 32]),
             head: String::new(),
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/bootstrap")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let (status, _) = post_json(app, "/machine/tka/bootstrap", &req).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn tka_sync_offer_rejects_unknown_node_key() {
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
+        let db = setup_db().await;
+        let app = test_app(&db).await;
 
         let req = TkaSyncOfferRequest {
             version: CapabilityVersion(106),
@@ -1624,52 +936,14 @@ mod tests {
             head: String::new(),
             ancestors: vec![],
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/offer")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let (status, _) = post_json(app, "/machine/tka/sync/offer", &req).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn tka_sync_send_rejects_unknown_node_key() {
-        use railscale_db::{Database, TkaState};
-
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // enable TKA so we get past the enabled check
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some("abc".to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(vec![0xca, 0xfe]),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
+        let db = setup_db().await;
+        let app = test_app(&db).await;
 
         let req = TkaSyncSendRequest {
             version: CapabilityVersion(106),
@@ -1678,52 +952,16 @@ mod tests {
             missing_aums: vec![],
             interactive: false,
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/send")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let (status, _) = post_json(app, "/machine/tka/sync/send", &req).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn tka_disable_rejects_unknown_node_key() {
-        use railscale_db::{Database, TkaState};
-
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // enable TKA with a disablement secret so we get past enabled check
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some("abc".to_string()),
-            state_checkpoint: None,
-            disablement_secrets: Some(vec![0xab; 32]),
-            genesis_aum: Some(vec![0xca, 0xfe]),
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
+        let db = setup_db().await;
+        let g = make_genesis();
+        enable_tka_with(&db, &g, Some(vec![0xab; 32])).await;
+        let app = test_app(&db).await;
 
         let req = TkaDisableRequest {
             version: CapabilityVersion(106),
@@ -1731,324 +969,64 @@ mod tests {
             head: "abc".to_string(),
             disablement_secret: vec![0xab; 32],
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/disable")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let (status, _) = post_json(app, "/machine/tka/disable", &req).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn tka_sign_rejects_unknown_requesting_node_key() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
+        let db = setup_db().await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
+        let app = test_app(&db).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create TKA key and genesis
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        let now = chrono::Utc::now();
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some(genesis_hash.to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(genesis_bytes),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // request with node_key that doesn't exist in db
         let req = TkaSubmitSignatureRequest {
             version: CapabilityVersion(106),
             node_key: NodeKey::from_bytes(vec![0xdeu8; 32]),
             signature: vec![0u8; 10].into(),
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sign")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let (status, _) = post_json(app, "/machine/tka/sign", &req).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
-    // --- 1-6: init_begin must reject when TKA already enabled ---
+    // --- init_begin must reject when TKA already enabled ---
 
     #[tokio::test]
     async fn tka_init_begin_rejects_when_tka_already_enabled() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a node so auth passes
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        // pre-enable TKA
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some("existing_head".to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(vec![0xca, 0xfe]),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        // create a genesis AUM for the request
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
+        let new_genesis = make_genesis();
+        let app = test_app(&db).await;
         let req = TkaInitBeginRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            genesis_aum: genesis_bytes.into(),
+            genesis_aum: new_genesis.genesis_bytes.into(),
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/init/begin")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // should reject — cannot overwrite existing TKA
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let (status, _) = post_json(app, "/machine/tka/init/begin", &req).await;
+        assert_eq!(status, StatusCode::CONFLICT);
     }
 
-    // --- 1-5: sync_send must reject AUM with broken prev_hash chain ---
+    // --- sync_send must reject AUM with broken prev_hash chain ---
 
     #[tokio::test]
     async fn tka_sync_send_rejects_aum_with_broken_chain() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a node so auth passes
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        // create TKA key and genesis
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
+        // create an AUM with a prev_hash that doesn't match current head
+        let bad_key = Key {
             kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
+            public: g.nl_private.public_key().as_bytes().to_vec(),
             votes: 1,
             meta: None,
         };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key.clone()),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        // enable TKA
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some(genesis_hash.to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(genesis_bytes),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        // create an AUM with a prev_hash that doesn't match current head
         let bad_aum = Aum {
             message_kind: AumKind::AddKey,
-            prev_aum_hash: Some(vec![0xffu8; 32]), // bogus prev hash
-            key: Some(tka_key),
+            prev_aum_hash: Some(vec![0xffu8; 32]),
+            key: Some(bad_key),
             key_id: None,
             state: None,
             votes: None,
@@ -2056,321 +1034,73 @@ mod tests {
             signatures: vec![],
         };
         let bad_hash = bad_aum.hash().unwrap();
-        let bad_sig = nl_private.sign(bad_hash.as_bytes());
+        let bad_sig = g.nl_private.sign(bad_hash.as_bytes());
         let signed_bad = Aum {
             signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
+                key_id: g.key_id.as_bytes().to_vec(),
                 signature: bad_sig.to_vec(),
             }],
             ..bad_aum
         };
         let bad_bytes = signed_bad.to_cbor().unwrap();
 
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
+        let app = test_app(&db).await;
         let req = TkaSyncSendRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            head: genesis_hash.to_string(),
+            head: g.genesis_hash.to_string(),
             missing_aums: vec![bad_bytes.into()],
             interactive: false,
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/send")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // should reject — prev_hash doesn't chain to current head
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let (status, _) = post_json(app, "/machine/tka/sync/send", &req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn tka_sync_send_returns_current_head() {
-        use railscale_db::{Database, TkaState};
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        // create a user and node
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        // create TKA key and genesis
-        let nl_private = NlPrivateKey::generate();
-        let nl_public = nl_private.public_key();
-        let tka_key = Key {
-            kind: KeyKind::Ed25519,
-            public: nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let tka_key_id = tka_key.id().unwrap();
-
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(tka_key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let genesis_hash = genesis.hash().unwrap();
-        let sig = nl_private.sign(genesis_hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: tka_key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        // enable TKA
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some(genesis_hash.to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(genesis_bytes),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // send empty AUMs (just testing the endpoint works)
+        let app = test_app(&db).await;
         let req = TkaSyncSendRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            head: genesis_hash.to_string(),
+            head: g.genesis_hash.to_string(),
             missing_aums: vec![],
             interactive: false,
         };
+        let (status, body) = post_json(app, "/machine/tka/sync/send", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/send")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
         let resp: TkaSyncSendResponse = serde_json::from_slice(&body).unwrap();
-
-        // should return current head
-        assert_eq!(resp.head, genesis_hash.to_string());
+        assert_eq!(resp.head, g.genesis_hash.to_string());
     }
 
-    // --- 1-7: aum size limits ---
+    // --- aum size limits ---
 
     #[tokio::test]
     async fn tka_init_begin_rejects_oversized_genesis_aum() {
-        use railscale_db::Database;
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let app = test_app(&db).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // genesis AUM larger than MAX_AUM_SIZE
         let oversized = vec![0xffu8; super::MAX_AUM_SIZE + 1];
         let req = TkaInitBeginRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
             genesis_aum: oversized.into(),
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/init/begin")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let (status, _) = post_json(app, "/machine/tka/init/begin", &req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn tka_sync_send_rejects_oversized_aum() {
-        use railscale_db::{Database, TkaState};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some("abc".to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(vec![0xca, 0xfe]),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
+        let app = test_app(&db).await;
         let oversized_aum: Vec<u8> = vec![0xffu8; super::MAX_AUM_SIZE + 1];
         let req = TkaSyncSendRequest {
             version: CapabilityVersion(106),
@@ -2379,90 +1109,20 @@ mod tests {
             missing_aums: vec![oversized_aum.into()],
             interactive: false,
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/send")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let (status, _) = post_json(app, "/machine/tka/sync/send", &req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn tka_sync_send_rejects_too_many_aums() {
-        use railscale_db::{Database, TkaState};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+        let (db, node_key, _) = setup_db_with_node(1).await;
+        let g = make_genesis();
+        enable_tka(&db, &g).await;
 
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
-        let user = User::new(UserId(1), "test-user".to_string());
-        let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
-        db.create_node(&node).await.unwrap();
-
-        let tka_state = TkaState {
-            id: 0,
-            enabled: true,
-            head: Some("abc".to_string()),
-            state_checkpoint: None,
-            disablement_secrets: None,
-            genesis_aum: Some(vec![0xca, 0xfe]),
-            created_at: now,
-            updated_at: now,
-        };
-        db.upsert_tka_state(&tka_state).await.unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
-        // more AUMs than MAX_AUMS_PER_REQUEST
+        let app = test_app(&db).await;
         let too_many: Vec<_> = (0..super::MAX_AUMS_PER_REQUEST + 1)
             .map(|_| vec![0u8; 10].into())
             .collect();
-
         let req = TkaSyncSendRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
@@ -2470,139 +1130,41 @@ mod tests {
             missing_aums: too_many,
             interactive: false,
         };
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/sync/send")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let (status, _) = post_json(app, "/machine/tka/sync/send", &req).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn tka_init_begin_returns_rotation_pubkey_from_nl_key() {
-        use railscale_db::Database;
-        use railscale_tka::{Aum, AumKind, AumSignature, Key, KeyKind, NlPrivateKey};
-        use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
-
-        let db = RailscaleDb::new_in_memory().await.unwrap();
-        db.migrate().await.unwrap();
-
+        let db = setup_db().await;
         let user = User::new(UserId(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        // generate an NL key for the node (this is what the client sends as NLKey)
         let node_nl_private = NlPrivateKey::generate();
-        let node_nl_public = node_nl_private.public_key();
-        let nl_public_bytes = node_nl_public.as_bytes().to_vec();
+        let nl_public_bytes = node_nl_private.public_key().as_bytes().to_vec();
 
         let node_key = NodeKey::from_bytes(vec![1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: Some(nl_public_bytes.clone()),
-            last_seen_country: None,
-            ephemeral: false,
-        };
+        let node = TestNodeBuilder::new(0)
+            .with_user_id(user.id)
+            .with_node_key(node_key.clone())
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .with_nl_public_key(nl_public_bytes.clone())
+            .build();
         let node = db.create_node(&node).await.unwrap();
 
-        // create genesis AUM
-        let tka_nl_private = NlPrivateKey::generate();
-        let tka_nl_public = tka_nl_private.public_key();
-        let key = Key {
-            kind: KeyKind::Ed25519,
-            public: tka_nl_public.as_bytes().to_vec(),
-            votes: 1,
-            meta: None,
-        };
-        let key_id = key.id().unwrap();
-        let genesis = Aum {
-            message_kind: AumKind::AddKey,
-            prev_aum_hash: None,
-            key: Some(key),
-            key_id: None,
-            state: None,
-            votes: None,
-            meta: None,
-            signatures: vec![],
-        };
-        let hash = genesis.hash().unwrap();
-        let sig = tka_nl_private.sign(hash.as_bytes());
-        let signed_genesis = Aum {
-            signatures: vec![AumSignature {
-                key_id: key_id.as_bytes().to_vec(),
-                signature: sig.to_vec(),
-            }],
-            ..genesis
-        };
-        let genesis_bytes = signed_genesis.to_cbor().unwrap();
-
-        let config = railscale_types::Config::default();
-        let app = crate::create_app(
-            db.clone(),
-            default_grants(),
-            config,
-            None,
-            crate::StateNotifier::default(),
-            None,
-        )
-        .await;
-
+        let g = make_genesis();
+        let app = test_app(&db).await;
         let req = TkaInitBeginRequest {
             version: CapabilityVersion(106),
             node_key: node_key.clone(),
-            genesis_aum: genesis_bytes.into(),
+            genesis_aum: g.genesis_bytes.into(),
         };
+        let (status, body) = post_json(app, "/machine/tka/init/begin", &req).await;
+        assert_eq!(status, StatusCode::OK);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/machine/tka/init/begin")
-                    .header("content-type", "application/json")
-                    .body(Body::from(serde_json::to_string(&req).unwrap()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
         let resp: TkaInitBeginResponse = serde_json::from_slice(&body).unwrap();
-
         assert_eq!(resp.need_signatures.len(), 1);
         assert_eq!(resp.need_signatures[0].node_id, node.id);
-        // the key assertion: rotation_pubkey should be the node's NL public key
         assert_eq!(
             resp.need_signatures[0].rotation_pubkey, nl_public_bytes,
             "rotation_pubkey should be populated from node's nl_public_key"
