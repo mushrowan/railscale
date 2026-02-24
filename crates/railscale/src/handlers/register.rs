@@ -741,10 +741,10 @@ mod tests {
         // should not be authorized yet
         assert!(!resp.machine_authorized);
 
-        // should have an auth_url for web registration
+        // should have a full auth_url for web registration
         assert!(
-            resp.auth_url.starts_with("/register/"),
-            "auth_url should start with /register/, got: {}",
+            resp.auth_url.contains("/register/"),
+            "auth_url should contain /register/, got: {}",
             resp.auth_url
         );
     }
@@ -798,7 +798,7 @@ mod tests {
         let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
         assert!(!resp.machine_authorized);
         let auth_url = resp.auth_url;
-        assert!(auth_url.starts_with("/register/"));
+        assert!(auth_url.contains("/register/"));
 
         // step 2: send followup request - since nothing completed it,
         // it should timeout and return auth_url again

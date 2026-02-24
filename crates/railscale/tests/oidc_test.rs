@@ -514,12 +514,12 @@ async fn test_full_interactive_login_flow() {
     assert!(!register_resp.machine_authorized);
     // should have auth_url
     assert!(
-        register_resp.auth_url.starts_with("/register/"),
-        "auth_url should start with /register/"
+        register_resp.auth_url.contains("/register/"),
+        "auth_url should contain /register/"
     );
 
     let auth_url = register_resp.auth_url;
-    let _reg_id = auth_url.strip_prefix("/register/").unwrap();
+    let _reg_id = auth_url.rsplit_once("/register/").unwrap().1;
 
     // step 2: follow the auth_url - this redirects to oidc
     let redirect_response = app
