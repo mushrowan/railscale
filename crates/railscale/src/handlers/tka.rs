@@ -81,6 +81,20 @@ async fn verify_requesting_node(
     }
 }
 
+/// verify the requesting node exists and tka is enabled, returning the state
+async fn require_tka_enabled(
+    db: &impl Database,
+    node_key: &railscale_types::NodeKey,
+    endpoint: &str,
+) -> Result<railscale_db::TkaState, ApiError> {
+    verify_requesting_node(db, node_key, endpoint).await?;
+    db.get_tka_state()
+        .await
+        .map_internal()?
+        .filter(|s| s.enabled)
+        .ok_or_else(|| ApiError::bad_request("tka not enabled"))
+}
+
 /// POST /machine/tka/init/begin
 ///
 /// start tka initialisation by submitting genesis aum.
@@ -352,7 +366,7 @@ pub async fn tka_sync_send(
         "tka sync send request"
     );
 
-    verify_requesting_node(&state.db, &req.node_key, "tka sync send").await?;
+    let tka_state = require_tka_enabled(&state.db, &req.node_key, "tka sync send").await?;
 
     if req.missing_aums.len() > MAX_AUMS_PER_REQUEST {
         return Err(ApiError::bad_request("too many aums"));
@@ -364,12 +378,6 @@ pub async fn tka_sync_send(
             return Err(ApiError::bad_request("aum too large"));
         }
     }
-
-    let tka_state = match state.db.get_tka_state().await {
-        Ok(Some(s)) if s.enabled => s,
-        Ok(_) => return Err(ApiError::bad_request("tka not enabled")),
-        Err(e) => return Err(ApiError::internal(format!("tka sync send: db error: {e}"))),
-    };
 
     let mut current_head = tka_state.head.unwrap_or_default();
 
@@ -433,13 +441,7 @@ pub async fn tka_disable(
 ) -> Result<Json<TkaDisableResponse>, ApiError> {
     debug!(node_key = ?req.node_key, head = %req.head, "tka disable request");
 
-    verify_requesting_node(&state.db, &req.node_key, "tka disable").await?;
-
-    let tka_state = match state.db.get_tka_state().await {
-        Ok(Some(s)) if s.enabled => s,
-        Ok(_) => return Err(ApiError::bad_request("tka not enabled")),
-        Err(e) => return Err(ApiError::internal(format!("tka disable: db error: {e}"))),
-    };
+    let tka_state = require_tka_enabled(&state.db, &req.node_key, "tka disable").await?;
 
     let stored_hashes = tka_state
         .disablement_secrets
@@ -491,13 +493,7 @@ pub async fn tka_sign(
 ) -> Result<Json<TkaSubmitSignatureResponse>, ApiError> {
     debug!(node_key = ?req.node_key, "tka sign request");
 
-    verify_requesting_node(&state.db, &req.node_key, "tka sign").await?;
-
-    let tka_state = match state.db.get_tka_state().await {
-        Ok(Some(s)) if s.enabled => s,
-        Ok(_) => return Err(ApiError::bad_request("tka not enabled")),
-        Err(e) => return Err(ApiError::internal(format!("tka sign: db error: {e}"))),
-    };
+    let tka_state = require_tka_enabled(&state.db, &req.node_key, "tka sign").await?;
 
     // use cached TKA public key, falling back to parsing genesis
     let cached = state.tka_public_key.read().await.clone();
