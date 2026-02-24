@@ -167,6 +167,15 @@ impl Node {
         self.tags.iter().any(|t| t == tag)
     }
 
+    /// the dns-safe display name: given_name if set, otherwise hostname.
+    pub fn display_hostname(&self) -> &str {
+        if self.given_name.is_empty() {
+            &self.hostname
+        } else {
+            &self.given_name
+        }
+    }
+
     /// returns all ip addresses assigned to this node.
     pub fn ips(&self) -> Vec<IpAddr> {
         let mut ips = Vec::with_capacity(2);

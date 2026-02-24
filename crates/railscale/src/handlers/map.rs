@@ -448,14 +448,9 @@ async fn build_map_response(
         self_node.cap_map = build_self_cap_map_simple(&state.config);
 
         // add per-node cert_domains when dns_provider is configured
-        let hostname = if node.given_name.is_empty() {
-            &node.hostname
-        } else {
-            &node.given_name
-        };
         let dns_config = crate::dns::with_cert_domains(
             state.map_cache.dns_config(),
-            hostname,
+            node.display_hostname(),
             &state.config.base_domain,
             state.dns_provider.is_some(),
             false,
@@ -572,15 +567,10 @@ async fn build_map_response(
 
     // add per-node cert_domains when dns_provider is configured
     // wildcard certs enabled when node has dns-subdomain-resolve capability
-    let hostname = if node.given_name.is_empty() {
-        &node.hostname
-    } else {
-        &node.given_name
-    };
     let wildcard_certs = has_wildcard_certs(&self_node.cap_map);
     let dns_config = crate::dns::with_cert_domains(
         state.map_cache.dns_config(),
-        hostname,
+        node.display_hostname(),
         &state.config.base_domain,
         state.dns_provider.is_some(),
         wildcard_certs,
@@ -692,11 +682,7 @@ fn node_to_map_response_node(
         id: node.id.0,
         stable_id: node.id.stable_id(),
         name: {
-            let hostname = if node.given_name.is_empty() {
-                &node.hostname
-            } else {
-                &node.given_name
-            };
+            let hostname = node.display_hostname();
             if base_domain.is_empty() {
                 format!("{}.", hostname)
             } else {

@@ -45,12 +45,11 @@ pub async fn set_dns(
         .ok_or_else(|| ApiError::bad_request("dns provider not configured"))?;
 
     // validate the requested name is the ACME challenge for this node's cert domain
-    let hostname = if node.given_name.is_empty() {
-        &node.hostname
-    } else {
-        &node.given_name
-    };
-    let expected_name = format!("_acme-challenge.{}.{}", hostname, state.config.base_domain);
+    let expected_name = format!(
+        "_acme-challenge.{}.{}",
+        node.display_hostname(),
+        state.config.base_domain
+    );
     if req.name != expected_name {
         info!(
             node_id = node.id.0,
@@ -271,16 +270,10 @@ mod tests {
             .build();
         let node = db.create_node(&node).await.unwrap();
 
-        let hostname = if node.given_name.is_empty() {
-            &node.hostname
-        } else {
-            &node.given_name
-        };
-
         let req = serde_json::json!({
             "Version": 68,
             "NodeKey": node_key_json(&node.node_key),
-            "Name": format!("_acme-challenge.{}.example.com", hostname),
+            "Name": format!("_acme-challenge.{}.example.com", node.display_hostname()),
             "Type": "TXT",
             "Value": "test-value"
         });
@@ -338,16 +331,10 @@ mod tests {
             .build();
         let node = db.create_node(&node).await.unwrap();
 
-        let hostname = if node.given_name.is_empty() {
-            &node.hostname
-        } else {
-            &node.given_name
-        };
-
         let req = serde_json::json!({
             "Version": 68,
             "NodeKey": node_key_json(&node.node_key),
-            "Name": format!("_acme-challenge.{}.example.com", hostname),
+            "Name": format!("_acme-challenge.{}.example.com", node.display_hostname()),
             "Type": "TXT",
             "Value": "acme-challenge-value-xyz"
         });
