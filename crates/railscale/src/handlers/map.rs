@@ -1,5 +1,6 @@
 //! handler for /machine/map endpoint.
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -529,7 +530,7 @@ async fn build_map_response(
     packet_filter.extend(cap_grant_rules.clone());
     packet_filter.extend(taildrop_rules.clone());
 
-    let mut packet_filters = std::collections::HashMap::new();
+    let mut packet_filters = HashMap::new();
     if !network_rules.is_empty() {
         packet_filters.insert("network".to_string(), Some(network_rules));
     }
@@ -553,10 +554,10 @@ async fn build_map_response(
             .await
             .unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to fetch tka signatures batch");
-                std::collections::HashMap::new()
+                HashMap::new()
             })
     } else {
-        std::collections::HashMap::new()
+        HashMap::new()
     };
 
     // build self node with capabilities (self is always online if we're making this request)
@@ -766,8 +767,8 @@ fn build_debug_settings(
 /// used in the omit_peers early-return path where grants aren't loaded.
 fn build_self_cap_map_simple(
     config: &railscale_types::Config,
-) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
-    let mut cap_map = std::collections::HashMap::new();
+) -> Option<HashMap<String, Vec<serde_json::Value>>> {
+    let mut cap_map = HashMap::new();
 
     cap_map.insert(railscale_proto::CAP_SSH_ENV_VARS.to_string(), vec![]);
 
@@ -787,7 +788,7 @@ fn build_self_cap_map<R: railscale_grants::UserResolver>(
     grants: &railscale_grants::GrantsEngine,
     node: &railscale_types::Node,
     resolver: &R,
-) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
+) -> Option<HashMap<String, Vec<serde_json::Value>>> {
     let mut cap_map = build_self_cap_map_simple(config)?;
 
     // merge nodeAttrs from policy (app connectors, store-appc-routes, etc)
@@ -802,7 +803,7 @@ fn build_self_cap_map<R: railscale_grants::UserResolver>(
 /// check if a cap_map contains dns-subdomain-resolve, indicating
 /// the node should get wildcard cert domains
 fn has_wildcard_certs(
-    cap_map: &Option<std::collections::HashMap<String, Vec<serde_json::Value>>>,
+    cap_map: &Option<HashMap<String, Vec<serde_json::Value>>>,
 ) -> bool {
     cap_map
         .as_ref()
@@ -817,7 +818,7 @@ fn build_peer_cap_map<R: railscale_grants::UserResolver>(
     grants: &railscale_grants::GrantsEngine,
     node: &railscale_types::Node,
     resolver: &R,
-) -> Option<std::collections::HashMap<String, Vec<serde_json::Value>>> {
+) -> Option<HashMap<String, Vec<serde_json::Value>>> {
     let attrs = grants.resolve_node_cap_attrs(node, resolver);
     if attrs.is_empty() { None } else { Some(attrs) }
 }
@@ -897,7 +898,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Tag("connector".to_string())],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     railscale_proto::CAP_APP_CONNECTORS.to_string(),
                     vec![serde_json::json!([{"name": "test", "domains": ["test.com"]}])],
@@ -1022,7 +1023,7 @@ mod tests {
 
     #[test]
     fn test_has_wildcard_certs_true_when_cap_present() {
-        let mut cap_map = std::collections::HashMap::new();
+        let mut cap_map = HashMap::new();
         cap_map.insert(
             railscale_proto::CAP_DNS_SUBDOMAIN_RESOLVE.to_string(),
             vec![],
@@ -1032,7 +1033,7 @@ mod tests {
 
     #[test]
     fn test_has_wildcard_certs_false_when_cap_absent() {
-        let cap_map = std::collections::HashMap::new();
+        let cap_map = HashMap::new();
         assert!(!has_wildcard_certs(&Some(cap_map)));
     }
 
@@ -1053,7 +1054,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Tag("webserver".to_string())],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     railscale_proto::CAP_DNS_SUBDOMAIN_RESOLVE.to_string(),
                     vec![],

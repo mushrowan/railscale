@@ -1,5 +1,6 @@
 //! the main grants evaluation engine.
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -318,7 +319,7 @@ impl GrantsEngine {
             }
 
             // build cap_map from app capabilities
-            let mut cap_map = std::collections::HashMap::new();
+            let mut cap_map = HashMap::new();
             for app_cap in &app_caps {
                 cap_map.insert(app_cap.name.clone(), app_cap.params.clone());
             }
@@ -400,7 +401,7 @@ impl GrantsEngine {
             return vec![];
         }
 
-        let mut cap_map = std::collections::HashMap::new();
+        let mut cap_map = HashMap::new();
         cap_map.insert(
             railscale_proto::PEER_CAP_FILE_SHARING_TARGET.to_string(),
             vec![],
@@ -424,9 +425,9 @@ impl GrantsEngine {
         &self,
         node: &Node,
         resolver: &R,
-    ) -> std::collections::HashMap<String, Vec<serde_json::Value>> {
-        let mut result: std::collections::HashMap<String, Vec<serde_json::Value>> =
-            std::collections::HashMap::new();
+    ) -> HashMap<String, Vec<serde_json::Value>> {
+        let mut result: HashMap<String, Vec<serde_json::Value>> =
+            HashMap::new();
 
         for attr in &self.policy.node_attrs {
             if self.node_matches_selectors(node, &attr.target, resolver, None) {
@@ -811,8 +812,6 @@ mod tests {
     use crate::capability::Protocol;
     use crate::grant::Grant;
     use railscale_types::{UserId, test_utils::TestNodeBuilder};
-    use std::collections::HashMap;
-
     struct MockResolver {
         users: HashMap<UserId, String>,
         groups: HashMap<UserId, Vec<String>>,
@@ -1480,7 +1479,7 @@ mod tests {
 
     fn test_node_with_custom_attrs(
         id: u64,
-        attrs: std::collections::HashMap<String, serde_json::Value>,
+        attrs: HashMap<String, serde_json::Value>,
     ) -> Node {
         let mut node = TestNodeBuilder::new(id).build();
         node.posture_attributes = attrs;
@@ -1506,10 +1505,10 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let mut prod_attrs = std::collections::HashMap::new();
+        let mut prod_attrs = HashMap::new();
         prod_attrs.insert("tier".to_string(), serde_json::json!("prod"));
 
-        let mut dev_attrs = std::collections::HashMap::new();
+        let mut dev_attrs = HashMap::new();
         dev_attrs.insert("tier".to_string(), serde_json::json!("dev"));
 
         let prod_node = test_node_with_custom_attrs(1, prod_attrs);
@@ -1541,7 +1540,7 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let mut managed_attrs = std::collections::HashMap::new();
+        let mut managed_attrs = HashMap::new();
         managed_attrs.insert("mdm_managed".to_string(), serde_json::json!(true));
 
         let managed_node = test_node_with_custom_attrs(1, managed_attrs);
@@ -1571,10 +1570,10 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let mut compliant_attrs = std::collections::HashMap::new();
+        let mut compliant_attrs = HashMap::new();
         compliant_attrs.insert("compliant".to_string(), serde_json::json!(true));
 
-        let mut non_compliant_attrs = std::collections::HashMap::new();
+        let mut non_compliant_attrs = HashMap::new();
         non_compliant_attrs.insert("compliant".to_string(), serde_json::json!(false));
 
         let compliant_node = test_node_with_custom_attrs(1, compliant_attrs);
@@ -1589,12 +1588,12 @@ mod tests {
     use crate::geoip::GeoIpResolver;
 
     struct MockGeoIpResolver {
-        mappings: std::collections::HashMap<std::net::IpAddr, String>,
+        mappings: HashMap<std::net::IpAddr, String>,
     }
 
     impl MockGeoIpResolver {
         fn with_mapping(ip: &str, country: &str) -> Self {
-            let mut mappings = std::collections::HashMap::new();
+            let mut mappings = HashMap::new();
             mappings.insert(ip.parse().unwrap(), country.to_string());
             Self { mappings }
         }
@@ -1938,7 +1937,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Tag("connector".to_string())],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     "tailscale.com/app-connectors".to_string(),
                     vec![serde_json::json!([{
@@ -1979,7 +1978,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Wildcard],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     "tailscale.com/app-connectors".to_string(),
                     vec![serde_json::json!({"name": "all", "domains": ["example.com"]})],
@@ -2006,7 +2005,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Tag("connector".to_string())],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     "tailscale.com/app-connectors".to_string(),
                     vec![serde_json::json!({"name": "app1", "domains": ["app1.com"]})],
@@ -2017,7 +2016,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Tag("connector".to_string())],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     "tailscale.com/app-connectors".to_string(),
                     vec![serde_json::json!({"name": "app2", "domains": ["app2.com"]})],
@@ -2186,7 +2185,7 @@ mod tests {
         let mut policy = Policy::empty();
         policy.auto_approvers = AutoApproverPolicy {
             routes: {
-                let mut m = std::collections::HashMap::new();
+                let mut m = HashMap::new();
                 m.insert(
                     "10.0.0.0/8".to_string(),
                     vec![Selector::Tag("infra".to_string())],
@@ -2229,7 +2228,7 @@ mod tests {
         let mut policy = Policy::empty();
         policy.auto_approvers = AutoApproverPolicy {
             routes: {
-                let mut m = std::collections::HashMap::new();
+                let mut m = HashMap::new();
                 m.insert(
                     "10.0.0.0/8".to_string(),
                     vec![Selector::Tag("infra".to_string())],
@@ -2259,7 +2258,7 @@ mod tests {
 
         let mut policy = Policy::empty();
         policy.auto_approvers = AutoApproverPolicy {
-            routes: std::collections::HashMap::new(),
+            routes: HashMap::new(),
             exit_node: vec![Selector::Tag("exit".to_string())],
         };
 
@@ -2286,7 +2285,7 @@ mod tests {
         let mut policy = Policy::empty();
         policy.auto_approvers = AutoApproverPolicy {
             routes: {
-                let mut m = std::collections::HashMap::new();
+                let mut m = HashMap::new();
                 m.insert(
                     "10.0.0.0/8".to_string(),
                     vec![Selector::Tag("infra".to_string())],
@@ -2336,7 +2335,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Wildcard],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     "tailscale.com/app-connectors".to_string(),
                     vec![serde_json::json!({
@@ -2380,7 +2379,7 @@ mod tests {
         policy.node_attrs.push(NodeAttr {
             target: vec![Selector::Wildcard],
             app: {
-                let mut app = std::collections::HashMap::new();
+                let mut app = HashMap::new();
                 app.insert(
                     "tailscale.com/app-connectors".to_string(),
                     vec![serde_json::json!({
