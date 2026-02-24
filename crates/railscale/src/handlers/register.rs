@@ -185,7 +185,7 @@ pub async fn register(
         .unwrap_or_default();
 
     debug!(
-        node_key = %req.node_key,
+        node_key = ?req.node_key,
         followup = %req.followup,
         has_auth_key = !auth_key_str.is_empty(),
         version = req.version,
