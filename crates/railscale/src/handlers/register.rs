@@ -81,7 +81,7 @@ pub struct RegisterResponse {
     pub machine_authorized: bool,
 
     /// if non-empty, user must visit this url to complete auth.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty", rename = "AuthURL")]
     pub auth_url: String,
 
     /// error message if registration failed.
