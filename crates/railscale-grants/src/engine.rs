@@ -426,8 +426,7 @@ impl GrantsEngine {
         node: &Node,
         resolver: &R,
     ) -> HashMap<String, Vec<serde_json::Value>> {
-        let mut result: HashMap<String, Vec<serde_json::Value>> =
-            HashMap::new();
+        let mut result: HashMap<String, Vec<serde_json::Value>> = HashMap::new();
 
         for attr in &self.policy.node_attrs {
             if self.node_matches_selectors(node, &attr.target, resolver, None) {
@@ -1477,10 +1476,7 @@ mod tests {
 
     // custom posture attribute tests
 
-    fn test_node_with_custom_attrs(
-        id: u64,
-        attrs: HashMap<String, serde_json::Value>,
-    ) -> Node {
+    fn test_node_with_custom_attrs(id: u64, attrs: HashMap<String, serde_json::Value>) -> Node {
         let mut node = TestNodeBuilder::new(id).build();
         node.posture_attributes = attrs;
         node

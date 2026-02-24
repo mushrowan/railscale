@@ -802,9 +802,7 @@ fn build_self_cap_map<R: railscale_grants::UserResolver>(
 
 /// check if a cap_map contains dns-subdomain-resolve, indicating
 /// the node should get wildcard cert domains
-fn has_wildcard_certs(
-    cap_map: &Option<HashMap<String, Vec<serde_json::Value>>>,
-) -> bool {
+fn has_wildcard_certs(cap_map: &Option<HashMap<String, Vec<serde_json::Value>>>) -> bool {
     cap_map
         .as_ref()
         .is_some_and(|m| m.contains_key(railscale_proto::CAP_DNS_SUBDOMAIN_RESOLVE))

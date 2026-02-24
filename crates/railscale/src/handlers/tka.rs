@@ -228,7 +228,11 @@ pub async fn tka_init_finish(
         ..tka_state
     };
 
-    state.db.upsert_tka_state(&updated_state).await.map_internal()?;
+    state
+        .db
+        .upsert_tka_state(&updated_state)
+        .await
+        .map_internal()?;
 
     // cache the parsed TKA public key for future sign requests
     *state.tka_public_key.write().await = Some(parsed.public_key);
@@ -425,7 +429,11 @@ pub async fn tka_sync_send(
             ..tka_state
         };
 
-        state.db.upsert_tka_state(&updated_state).await.map_internal()?;
+        state
+            .db
+            .upsert_tka_state(&updated_state)
+            .await
+            .map_internal()?;
     }
 
     info!(head = %current_head, aums = req.missing_aums.len(), "tka sync send: processed");
@@ -475,7 +483,11 @@ pub async fn tka_disable(
         ..tka_state
     };
 
-    state.db.upsert_tka_state(&updated_state).await.map_internal()?;
+    state
+        .db
+        .upsert_tka_state(&updated_state)
+        .await
+        .map_internal()?;
 
     // clear cached TKA public key
     *state.tka_public_key.write().await = None;
@@ -565,9 +577,7 @@ mod tests {
     }
 
     /// create a migrated in-memory db with a user and node, returning (db, node_key, node)
-    async fn setup_db_with_node(
-        key_byte: u8,
-    ) -> (RailscaleDb, NodeKey, railscale_types::Node) {
+    async fn setup_db_with_node(key_byte: u8) -> (RailscaleDb, NodeKey, railscale_types::Node) {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
         let user = User::new(UserId(1), "test-user".to_string());
@@ -704,7 +714,6 @@ mod tests {
         assert_eq!(resp.need_signatures[0].node_public, node_key);
     }
 
-
     #[tokio::test]
     async fn tka_bootstrap_returns_empty_when_tka_not_enabled() {
         let (db, node_key, _) = setup_db_with_node(0).await;
@@ -742,12 +751,9 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
 
         // step 2: create node-key signature
-        let node_sig = NodeKeySignature::sign_direct(
-            &node_key.as_bytes().to_vec(),
-            &g.key_id,
-            &g.nl_private,
-        )
-        .unwrap();
+        let node_sig =
+            NodeKeySignature::sign_direct(&node_key.as_bytes().to_vec(), &g.key_id, &g.nl_private)
+                .unwrap();
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 
         let mut signatures = HashMap::new();
@@ -768,7 +774,11 @@ mod tests {
         assert!(tka_state.enabled);
         assert_eq!(tka_state.head.unwrap(), g.genesis_hash.to_string());
 
-        let stored_sig = db.get_node_key_signature(node.id).await.unwrap().expect("signature stored");
+        let stored_sig = db
+            .get_node_key_signature(node.id)
+            .await
+            .unwrap()
+            .expect("signature stored");
         assert_eq!(stored_sig, node_sig_bytes);
     }
 
@@ -813,12 +823,9 @@ mod tests {
 
         assert!(db.get_node_key_signature(node.id).await.unwrap().is_none());
 
-        let node_sig = NodeKeySignature::sign_direct(
-            &node_key.as_bytes().to_vec(),
-            &g.key_id,
-            &g.nl_private,
-        )
-        .unwrap();
+        let node_sig =
+            NodeKeySignature::sign_direct(&node_key.as_bytes().to_vec(), &g.key_id, &g.nl_private)
+                .unwrap();
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 
         let app = test_app(&db).await;
@@ -830,7 +837,11 @@ mod tests {
         let (status, _) = post_json(app, "/machine/tka/sign", &req).await;
         assert_eq!(status, StatusCode::OK);
 
-        let stored_sig = db.get_node_key_signature(node.id).await.unwrap().expect("signature stored");
+        let stored_sig = db
+            .get_node_key_signature(node.id)
+            .await
+            .unwrap()
+            .expect("signature stored");
         assert_eq!(stored_sig, node_sig_bytes);
     }
 
