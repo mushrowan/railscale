@@ -19,7 +19,7 @@ use railscale_proto::{
 };
 use tracing::{debug, info};
 
-use super::{ApiError, JsonBody};
+use super::{ApiError, JsonBody, OptionExt, ResultExt};
 use crate::AppState;
 
 /// max size of a single AUM in bytes (32 KiB)
@@ -130,17 +130,9 @@ pub async fn tka_init_begin(
         updated_at: now,
     };
 
-    state
-        .db
-        .upsert_tka_state(&tka_state)
-        .await
-        .map_err(|e| ApiError::internal(format!("failed to store genesis: {e}")))?;
+    state.db.upsert_tka_state(&tka_state).await.map_internal()?;
 
-    let nodes = state
-        .db
-        .list_nodes()
-        .await
-        .map_err(|e| ApiError::internal(format!("failed to list nodes: {e}")))?;
+    let nodes = state.db.list_nodes().await.map_internal()?;
 
     let need_signatures: Vec<TkaSignInfo> = nodes
         .into_iter()
@@ -177,7 +169,7 @@ pub async fn tka_init_finish(
         .db
         .get_tka_state()
         .await
-        .map_err(|e| ApiError::internal(format!("tka init finish: db error: {e}")))?
+        .map_internal()?
         .ok_or_else(|| ApiError::bad_request("no tka state (init_begin not called?)"))?;
 
     let genesis_bytes = tka_state
@@ -205,14 +197,14 @@ pub async fn tka_init_finish(
             .db
             .set_node_key_signature(node_id, sig_bytes.as_bytes())
             .await
-            .map_err(|e| ApiError::internal(format!("failed to store signature: {e}")))?;
+            .map_internal()?;
     }
 
     state
         .db
         .store_aum(&parsed.hash.to_string(), None, genesis_bytes)
         .await
-        .map_err(|e| ApiError::internal(format!("failed to store genesis aum: {e}")))?;
+        .map_internal()?;
 
     let now = chrono::Utc::now();
     let updated_state = railscale_db::TkaState {
@@ -222,11 +214,7 @@ pub async fn tka_init_finish(
         ..tka_state
     };
 
-    state
-        .db
-        .upsert_tka_state(&updated_state)
-        .await
-        .map_err(|e| ApiError::internal(format!("failed to enable tka: {e}")))?;
+    state.db.upsert_tka_state(&updated_state).await.map_internal()?;
 
     // cache the parsed TKA public key for future sign requests
     *state.tka_public_key.write().await = Some(parsed.public_key);
@@ -415,7 +403,7 @@ pub async fn tka_sync_send(
             .db
             .store_aum(&aum_hash, prev_hash.as_deref(), aum_bytes.as_bytes())
             .await
-            .map_err(|e| ApiError::internal(format!("failed to store aum: {e}")))?;
+            .map_internal()?;
 
         debug!(hash = %aum_hash, "tka sync send: stored aum");
         current_head = aum_hash;
@@ -429,11 +417,7 @@ pub async fn tka_sync_send(
             ..tka_state
         };
 
-        state
-            .db
-            .upsert_tka_state(&updated_state)
-            .await
-            .map_err(|e| ApiError::internal(format!("failed to update head: {e}")))?;
+        state.db.upsert_tka_state(&updated_state).await.map_internal()?;
     }
 
     info!(head = %current_head, aums = req.missing_aums.len(), "tka sync send: processed");
@@ -489,11 +473,7 @@ pub async fn tka_disable(
         ..tka_state
     };
 
-    state
-        .db
-        .upsert_tka_state(&updated_state)
-        .await
-        .map_err(|e| ApiError::internal(format!("failed to disable tka: {e}")))?;
+    state.db.upsert_tka_state(&updated_state).await.map_internal()?;
 
     // clear cached TKA public key
     *state.tka_public_key.write().await = None;
@@ -551,14 +531,14 @@ pub async fn tka_sign(
         .db
         .get_node_by_node_key(&signed_node_key)
         .await
-        .map_err(|e| ApiError::internal(format!("tka sign: db error: {e}")))?
-        .ok_or_else(|| ApiError::not_found("signed node not found"))?;
+        .map_internal()?
+        .or_not_found("signed node not found")?;
 
     state
         .db
         .set_node_key_signature(node.id, req.signature.as_bytes())
         .await
-        .map_err(|e| ApiError::internal(format!("failed to store signature: {e}")))?;
+        .map_internal()?;
 
     info!(node_id = %node.id, "tka sign: signature stored");
     Ok(Json(TkaSubmitSignatureResponse::default()))
