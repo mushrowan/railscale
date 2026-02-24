@@ -8,6 +8,7 @@ use bytes::Bytes;
 use railscale_db::Database;
 use railscale_types::{HostInfo, MachineKey, Node, NodeId, NodeKey};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use super::{ApiError, OptionExt, OptionalMachineKeyContext, ResultExt};
 use crate::AppState;
@@ -149,8 +150,14 @@ pub async fn register(
     body: Bytes,
 ) -> Result<Json<RegisterResponse>, ApiError> {
     // parse json manually since tailscale client doesn't send content-type header
-    let req: RegisterRequest = serde_json::from_slice(&body)
-        .map_err(|_| ApiError::bad_request("invalid JSON request body"))?;
+    debug!(body_len = body.len(), "register request received");
+    let req: RegisterRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            debug!(?e, body = %String::from_utf8_lossy(&body), "failed to parse register request");
+            return Err(ApiError::bad_request("invalid JSON request body"));
+        }
+    };
 
     // machine key must come from noise context for ts2021
     let machine_key = match machine_key_ctx {
@@ -177,17 +184,41 @@ pub async fn register(
         .map(|a| a.auth_key.clone())
         .unwrap_or_default();
 
+    debug!(
+        node_key = %req.node_key,
+        followup = %req.followup,
+        has_auth_key = !auth_key_str.is_empty(),
+        version = req.version,
+        "register request parsed"
+    );
+
     // route to appropriate registration flow
-    if !req.followup.is_empty() {
-        // followup request - wait for oidc completion
-        return handle_followup_registration(state, &req.followup).await;
+    let resp = if !req.followup.is_empty() {
+        debug!(followup = %req.followup, "routing to followup flow");
+        handle_followup_registration(state, &req.followup).await
     } else if !auth_key_str.is_empty() {
-        // preauth key registration - existing flow
-        return handle_preauth_registration(state, req, machine_key, &auth_key_str).await;
+        debug!("routing to preauth key flow");
+        handle_preauth_registration(state, req, machine_key, &auth_key_str).await
     } else {
-        // interactive registration - return auth_url
+        debug!("routing to interactive registration flow");
         handle_interactive_registration(state, req, machine_key).await
+    };
+
+    match &resp {
+        Ok(r) => {
+            let json = serde_json::to_string(&r.0).unwrap_or_default();
+            debug!(
+                auth_url = %r.0.auth_url,
+                machine_authorized = r.0.machine_authorized,
+                error = %r.0.error,
+                response_json = %json,
+                "register response"
+            );
+        }
+        Err(e) => debug!(?e, "register error"),
     }
+
+    resp
 }
 
 /// handle registration with a preauth key.
