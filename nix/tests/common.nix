@@ -44,6 +44,12 @@ in
 
       environment.systemPackages = [ pkgs.tailscale ] ++ extraPackages;
 
+      # many tailscale up/logout cycles exhaust small VM defaults
+      boot.kernel.sysctl = {
+        "net.netfilter.nf_conntrack_max" = 16384;
+        "net.ipv4.tcp_max_orphans" = 4096;
+      };
+
       # enable openssh for tailscale ssh tests
       services.openssh = {
         enable = true;

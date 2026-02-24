@@ -10,11 +10,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1771963831,
-        "narHash": "sha256-LByO3MUqx42Kk2nRCak+5CLgSWC/iFpLH7QJQk0vxpg=",
+        "lastModified": 1771966765,
+        "narHash": "sha256-9ZuOXoYrHbbNQWeZcX8+raj4Xgfqy3i6QmiYlI9CuJ4=",
         "owner": "mushrowan",
         "repo": "attest",
-        "rev": "5f7fc947c738111e487617ea931e4486c0c91642",
+        "rev": "51193ee8f0b9357b4150d3cc0ec0d4d95d21a6f9",
         "type": "github"
       },
       "original": {
