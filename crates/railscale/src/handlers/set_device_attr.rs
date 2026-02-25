@@ -19,18 +19,20 @@ use crate::AppState;
 /// the update map are left unchanged. null values delete the attribute.
 pub async fn set_device_attr(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
     let req: SetDeviceAttributesRequest = serde_json::from_slice(&body)
         .map_err(|_| ApiError::bad_request("invalid JSON request body"))?;
 
-    // auth: look up node by node_key
+    // auth: look up node by node_key and verify machine key
     let node = state
         .db
         .get_node_by_node_key(&req.node_key)
         .await
         .map_internal()?
         .or_unauthorized("node not found")?;
+    super::validate_machine_key(&machine_key_ctx, &node)?;
 
     if req.update.is_empty() {
         return Ok(StatusCode::OK);

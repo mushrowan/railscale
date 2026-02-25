@@ -60,14 +60,18 @@ fn parse_genesis(genesis_bytes: &[u8], endpoint: &str) -> Result<ParsedGenesis, 
     Ok(ParsedGenesis { public_key, hash })
 }
 
-/// verify the requesting node exists in the database
+/// verify the requesting node exists and machine key matches
 async fn verify_requesting_node(
     db: &impl Database,
     node_key: &railscale_types::NodeKey,
+    machine_key_ctx: &Option<super::MachineKeyContext>,
     endpoint: &str,
 ) -> Result<(), ApiError> {
     match db.get_node_by_node_key(node_key).await {
-        Ok(Some(_)) => Ok(()),
+        Ok(Some(node)) => {
+            super::validate_machine_key(machine_key_ctx, &node)?;
+            Ok(())
+        }
         Ok(None) => {
             info!(node_key = ?node_key, "{endpoint}: node not found");
             Err(ApiError::unauthorized(format!(
@@ -85,9 +89,10 @@ async fn verify_requesting_node(
 async fn require_tka_enabled(
     db: &impl Database,
     node_key: &railscale_types::NodeKey,
+    machine_key_ctx: &Option<super::MachineKeyContext>,
     endpoint: &str,
 ) -> Result<railscale_db::TkaState, ApiError> {
-    verify_requesting_node(db, node_key, endpoint).await?;
+    verify_requesting_node(db, node_key, machine_key_ctx, endpoint).await?;
     db.get_tka_state()
         .await
         .map_internal()?
@@ -101,6 +106,7 @@ async fn require_tka_enabled(
 /// returns list of nodes that need signatures.
 pub async fn tka_init_begin(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     JsonBody(req): JsonBody<TkaInitBeginRequest>,
 ) -> Result<Json<TkaInitBeginResponse>, ApiError> {
     debug!(
@@ -109,7 +115,7 @@ pub async fn tka_init_begin(
         "tka init begin request"
     );
 
-    verify_requesting_node(&state.db, &req.node_key, "tka init begin").await?;
+    verify_requesting_node(&state.db, &req.node_key, &machine_key_ctx, "tka init begin").await?;
 
     if req.genesis_aum.as_bytes().len() > MAX_AUM_SIZE {
         info!(
@@ -169,6 +175,7 @@ pub async fn tka_init_begin(
 /// complete tka initialisation with node-key signatures.
 pub async fn tka_init_finish(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     JsonBody(req): JsonBody<TkaInitFinishRequest>,
 ) -> Result<Json<TkaInitFinishResponse>, ApiError> {
     debug!(
@@ -177,7 +184,13 @@ pub async fn tka_init_finish(
         "tka init finish request"
     );
 
-    verify_requesting_node(&state.db, &req.node_key, "tka init finish").await?;
+    verify_requesting_node(
+        &state.db,
+        &req.node_key,
+        &machine_key_ctx,
+        "tka init finish",
+    )
+    .await?;
 
     let tka_state = state
         .db
@@ -249,6 +262,7 @@ pub async fn tka_init_finish(
 /// or disablement secret if tka has been disabled.
 pub async fn tka_bootstrap(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     JsonBody(req): JsonBody<TkaBootstrapRequest>,
 ) -> Result<Json<TkaBootstrapResponse>, ApiError> {
     debug!(
@@ -257,7 +271,7 @@ pub async fn tka_bootstrap(
         "tka bootstrap request"
     );
 
-    verify_requesting_node(&state.db, &req.node_key, "tka bootstrap").await?;
+    verify_requesting_node(&state.db, &req.node_key, &machine_key_ctx, "tka bootstrap").await?;
 
     let tka_state = match state.db.get_tka_state().await {
         Ok(Some(s)) if s.enabled => s,
@@ -283,6 +297,7 @@ pub async fn tka_bootstrap(
 /// compares client's tka state with server's and returns any aums the client is missing.
 pub async fn tka_sync_offer(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     JsonBody(req): JsonBody<TkaSyncOfferRequest>,
 ) -> Result<Json<TkaSyncOfferResponse>, ApiError> {
     debug!(
@@ -292,7 +307,7 @@ pub async fn tka_sync_offer(
         "tka sync offer request"
     );
 
-    verify_requesting_node(&state.db, &req.node_key, "tka sync offer").await?;
+    verify_requesting_node(&state.db, &req.node_key, &machine_key_ctx, "tka sync offer").await?;
 
     let tka_state = match state.db.get_tka_state().await {
         Ok(Some(s)) if s.enabled => s,
@@ -361,6 +376,7 @@ pub async fn tka_sync_offer(
 /// receives aums from a client that the server is missing, validates and stores them.
 pub async fn tka_sync_send(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     JsonBody(req): JsonBody<TkaSyncSendRequest>,
 ) -> Result<Json<TkaSyncSendResponse>, ApiError> {
     debug!(
@@ -370,7 +386,8 @@ pub async fn tka_sync_send(
         "tka sync send request"
     );
 
-    let tka_state = require_tka_enabled(&state.db, &req.node_key, "tka sync send").await?;
+    let tka_state =
+        require_tka_enabled(&state.db, &req.node_key, &machine_key_ctx, "tka sync send").await?;
 
     if req.missing_aums.len() > MAX_AUMS_PER_REQUEST {
         return Err(ApiError::bad_request("too many aums"));
@@ -445,11 +462,13 @@ pub async fn tka_sync_send(
 /// disable tka with disablement secret.
 pub async fn tka_disable(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     JsonBody(req): JsonBody<TkaDisableRequest>,
 ) -> Result<Json<TkaDisableResponse>, ApiError> {
     debug!(node_key = ?req.node_key, head = %req.head, "tka disable request");
 
-    let tka_state = require_tka_enabled(&state.db, &req.node_key, "tka disable").await?;
+    let tka_state =
+        require_tka_enabled(&state.db, &req.node_key, &machine_key_ctx, "tka disable").await?;
 
     let stored_hashes = tka_state
         .disablement_secrets
@@ -501,11 +520,13 @@ pub async fn tka_disable(
 /// submit a node-key signature.
 pub async fn tka_sign(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     JsonBody(req): JsonBody<TkaSubmitSignatureRequest>,
 ) -> Result<Json<TkaSubmitSignatureResponse>, ApiError> {
     debug!(node_key = ?req.node_key, "tka sign request");
 
-    let tka_state = require_tka_enabled(&state.db, &req.node_key, "tka sign").await?;
+    let tka_state =
+        require_tka_enabled(&state.db, &req.node_key, &machine_key_ctx, "tka sign").await?;
 
     // use cached TKA public key, falling back to parsing genesis
     let cached = state.tka_public_key.read().await.clone();

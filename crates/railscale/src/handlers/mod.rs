@@ -23,6 +23,20 @@ mod version;
 pub(crate) mod test_helpers;
 
 pub use api_auth::{ApiAuthError, ApiKeyContext, AuthMethod};
+
+/// validate that the machine key from the Noise session matches the node.
+/// prevents a compromised client from spoofing requests for other nodes
+pub(crate) fn validate_machine_key(
+    machine_key_ctx: &Option<MachineKeyContext>,
+    node: &railscale_types::Node,
+) -> Result<(), ApiError> {
+    if let Some(ctx) = machine_key_ctx {
+        if ctx.machine_key().as_bytes() != node.machine_key.as_bytes() {
+            return Err(ApiError::unauthorized("machine key does not match node"));
+        }
+    }
+    Ok(())
+}
 pub use audit_log::audit_log;
 pub use bootstrap_dns::bootstrap_dns;
 pub use error::{ApiError, JsonBody, OptionExt, ResultExt};

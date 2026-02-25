@@ -374,7 +374,10 @@ mod tests {
     fn test_sanitise_leading_trailing() {
         // leading/trailing invalid chars trimmed
         assert_eq!(Username::sanitise("@alicja@").unwrap().as_str(), "alicja");
-        assert_eq!(Username::sanitise("---alicja---").unwrap().as_str(), "alicja");
+        assert_eq!(
+            Username::sanitise("---alicja---").unwrap().as_str(),
+            "alicja"
+        );
     }
 
     #[test]

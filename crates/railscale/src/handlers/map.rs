@@ -77,6 +77,7 @@ impl From<Option<&String>> for Compression {
 /// tailscale client does not send a content-type header over ts2021/http/2.
 pub async fn map(
     State(state): State<AppState>,
+    super::OptionalMachineKeyContext(machine_key_ctx): super::OptionalMachineKeyContext,
     OptionalClientAddr(client_addr): OptionalClientAddr,
     body: Bytes,
 ) -> Result<impl IntoResponse, super::ApiError> {
@@ -90,6 +91,9 @@ pub async fn map(
         .await
         .map_internal()?
         .or_unauthorized("node not found")?;
+
+    // verify the Noise session machine key matches this node
+    super::validate_machine_key(&machine_key_ctx, &node)?;
 
     // update node with disco_key and hostinfo from request if provided
     let mut needs_update = false;
