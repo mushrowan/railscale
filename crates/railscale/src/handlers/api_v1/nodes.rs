@@ -106,7 +106,7 @@ impl From<Node> for NodeResponse {
             ipv4: node.ipv4.map(|ip| ip.to_string()),
             ipv6: node.ipv6.map(|ip| ip.to_string()),
             hostname: node.hostname,
-            given_name: node.given_name,
+            given_name: node.given_name.to_string(),
             user_id: node.user_id.map(|id| id.0.to_string()),
             register_method: format!("{:?}", node.register_method).to_lowercase(),
             tags: node.tags.iter().map(|t| t.to_string()).collect(),
@@ -337,7 +337,7 @@ async fn rename_node(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    node.given_name = new_name.into_inner();
+    node.given_name = new_name;
     let node = state
         .db
         .update_node(&node)

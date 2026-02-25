@@ -280,8 +280,7 @@ async fn handle_preauth_registration(
         .unwrap_or_default();
 
     let hostname = railscale_types::NodeName::sanitise(&raw_hostname)
-        .map(|n| n.into_inner())
-        .unwrap_or_else(|| "node".to_string());
+        .unwrap_or_else(|| "node".parse().unwrap());
 
     // parse NL public key from "nlpub:<hex>" format if provided
     let nl_public_key = parse_nl_public_key(&req.nl_key);
@@ -306,8 +305,8 @@ async fn handle_preauth_registration(
         );
         existing.node_key = req.node_key;
         existing.hostinfo = req.hostinfo;
-        existing.hostname = hostname.clone();
-        if existing.given_name.is_empty() {
+        existing.hostname = hostname.to_string();
+        if existing.given_name.as_str().is_empty() {
             existing.given_name = hostname;
         }
         existing.nl_public_key = nl_public_key;
@@ -345,7 +344,7 @@ async fn handle_preauth_registration(
             ipv6,
             endpoints: vec![],
             hostinfo: req.hostinfo,
-            hostname: hostname.clone(),
+            hostname: hostname.to_string(),
             given_name: hostname,
             user_id: if preauth_key.creates_tagged_nodes() {
                 None

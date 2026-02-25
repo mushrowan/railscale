@@ -172,9 +172,7 @@ pub async fn oidc_callback(
             .unwrap_or_default();
 
         // sanitise hostname for dns compatibility, falling back to "node"
-        let hostname = NodeName::sanitise(&raw_hostname)
-            .map(|n| n.into_inner())
-            .unwrap_or_else(|| "node".to_string());
+        let hostname = NodeName::sanitise(&raw_hostname).unwrap_or_else(|| "node".parse().unwrap());
 
         let now = chrono::Utc::now();
         let node = railscale_types::Node {
@@ -186,7 +184,7 @@ pub async fn oidc_callback(
             ipv6,
             endpoints: vec![],
             hostinfo: pending.hostinfo.clone(),
-            hostname: hostname.clone(),
+            hostname: hostname.to_string(),
             given_name: hostname,
             user_id: Some(user.id),
             register_method: railscale_types::RegisterMethod::Oidc,

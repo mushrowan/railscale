@@ -412,7 +412,7 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
             .ok_or_else(|| Status::not_found("Node not found"))?;
 
-        node.given_name = validated_name.into_inner();
+        node.given_name = validated_name;
 
         let updated = self
             .db
@@ -989,7 +989,7 @@ fn node_to_pb(node: &railscale_types::Node) -> pb::Node {
         machine_key: hex::encode(node.machine_key.as_bytes()),
         node_key: hex::encode(node.node_key.as_bytes()),
         hostname: node.hostname.clone(),
-        given_name: node.given_name.clone(),
+        given_name: node.given_name.to_string(),
         ipv4: node.ipv4.map(|ip| ip.to_string()),
         ipv6: node.ipv6.map(|ip| ip.to_string()),
         user_id: node.user_id.map(|id| id.0),

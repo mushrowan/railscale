@@ -966,7 +966,7 @@ mod tests {
             .with_hostname("original")
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
-        node.given_name = "renamed".to_string();
+        node.given_name = "renamed".parse().unwrap();
 
         let result = node_to_map_response_node(&node, Some(true), None, "example.com");
         assert_eq!(result.name, "renamed.example.com.");

@@ -187,7 +187,8 @@ impl From<Model> for Node {
             ipv4,
             ipv6,
             hostname: model.hostname,
-            given_name: model.given_name,
+            given_name: railscale_types::NodeName::sanitise(&model.given_name)
+                .unwrap_or_else(|| "node".parse().unwrap()),
             user_id: model.user_id.map(|id| UserId(id as u64)),
             register_method,
             tags,
@@ -243,7 +244,7 @@ impl From<&Node> for ActiveModel {
             ipv4: Set(node.ipv4.map(|ip| ip.to_string())),
             ipv6: Set(node.ipv6.map(|ip| ip.to_string())),
             hostname: Set(node.hostname.clone()),
-            given_name: Set(node.given_name.clone()),
+            given_name: Set(node.given_name.to_string()),
             user_id: Set(node.user_id.map(|id| id.0 as i64)),
             register_method: Set(register_method.to_string()),
             tags: Set(tags_json),

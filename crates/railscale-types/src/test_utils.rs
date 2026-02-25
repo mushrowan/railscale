@@ -146,7 +146,9 @@ impl TestNodeBuilder {
 
     /// build the [`node`].
     pub fn build(self) -> Node {
-        let hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
+        let raw_hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
+        let hostname =
+            crate::NodeName::sanitise(&raw_hostname).unwrap_or_else(|| "node".parse().unwrap());
 
         // for tagged nodes, user_id should be none
         // for user-owned nodes, default to userid(self.id) if not specified
@@ -167,7 +169,7 @@ impl TestNodeBuilder {
             hostinfo: self.hostinfo,
             ipv4: self.ipv4.or_else(|| Some("100.64.0.1".parse().unwrap())),
             ipv6: self.ipv6,
-            hostname: hostname.clone(),
+            hostname: hostname.to_string(),
             given_name: hostname,
             user_id,
             register_method: RegisterMethod::AuthKey,

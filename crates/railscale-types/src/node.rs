@@ -11,6 +11,7 @@ use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
 
 use crate::keys::{DiscoKey, MachineKey, NodeKey};
+use crate::node_name::NodeName;
 use crate::tag::Tag;
 use crate::user::UserId;
 
@@ -76,7 +77,8 @@ pub struct Node {
 
     /// dns-safe name for the node.
     /// either auto-generated from hostname or manually set.
-    pub given_name: String,
+    /// always a valid dns label (enforced by `NodeName` newtype)
+    pub given_name: NodeName,
 
     /// user id for tracking "created by".
     ///
@@ -169,11 +171,7 @@ impl Node {
 
     /// the dns-safe display name: given_name if set, otherwise hostname.
     pub fn display_hostname(&self) -> &str {
-        if self.given_name.is_empty() {
-            &self.hostname
-        } else {
-            &self.given_name
-        }
+        self.given_name.as_str()
     }
 
     /// returns all ip addresses assigned to this node.

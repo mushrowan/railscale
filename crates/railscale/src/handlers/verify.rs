@@ -148,7 +148,7 @@ mod tests {
             endpoints: vec![],
             hostinfo: None,
             hostname: "test-node".to_string(),
-            given_name: "test-node".to_string(),
+            given_name: "test-node".parse().unwrap(),
             user_id: Some(user.id),
             register_method: RegisterMethod::AuthKey,
             tags: vec![],

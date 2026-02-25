@@ -54,7 +54,7 @@ async fn test_verify_allows_registered_node() {
         ipv4: Some("100.64.0.1".parse().unwrap()),
         ipv6: None,
         hostname: "test-node".to_string(),
-        given_name: "test-node".to_string(),
+        given_name: "test-node".parse().unwrap(),
         user_id: Some(user.id),
         register_method: RegisterMethod::AuthKey,
         tags: vec![],
