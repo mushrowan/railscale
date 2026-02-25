@@ -154,7 +154,11 @@ pub async fn register(
     let req: RegisterRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => {
-            debug!(?e, body = %String::from_utf8_lossy(&body), "failed to parse register request");
+            debug!(
+                ?e,
+                body_len = body.len(),
+                "failed to parse register request"
+            );
             return Err(ApiError::bad_request("invalid JSON request body"));
         }
     };

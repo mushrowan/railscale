@@ -57,8 +57,14 @@ macro_rules! impl_key_serde {
 /// this key is stable across node key rotations and is used
 /// for machine-level authentication.
 /// serializes as `"mkey:<64 hex chars>"`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct MachineKey(Vec<u8>);
+
+impl std::fmt::Debug for MachineKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "MachineKey({})", self.short_string())
+    }
+}
 
 impl_key_serde!(MachineKey, "mkey");
 
@@ -87,8 +93,14 @@ impl MachineKey {
 ///
 /// this key can be rotated and is used for the noise protocol handshake.
 /// serializes as `"nodekey:<64 hex chars>"`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct NodeKey(Vec<u8>);
+
+impl std::fmt::Debug for NodeKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NodeKey({})", self.short_string())
+    }
+}
 
 impl_key_serde!(NodeKey, "nodekey");
 
@@ -120,8 +132,14 @@ impl NodeKey {
 
 /// disco key - used for peer discovery (STUN/DERP coordination) or alternatively partying.
 /// serializes as `"discokey:<64 hex chars>"`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct DiscoKey(Vec<u8>);
+
+impl std::fmt::Debug for DiscoKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DiscoKey({})", self.short_string())
+    }
+}
 
 impl_key_serde!(DiscoKey, "discokey");
 
