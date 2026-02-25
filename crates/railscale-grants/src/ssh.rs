@@ -1,7 +1,4 @@
 //! ssh policy input types for policy json.
-//!
-//! these types represent the ssh section in the policy file, which is
-//! transformed into wire-format SshPolicy for clients.
 
 use std::collections::HashMap;
 use std::time::Duration;

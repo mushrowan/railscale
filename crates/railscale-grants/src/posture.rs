@@ -1,7 +1,4 @@
 //! device posture expressions and evaluation
-//!
-//! posture conditions allow grants to be conditional on device attributes
-//! like OS version, tailscale version, or custom attributes
 
 use std::collections::HashMap;
 use std::str::FromStr;

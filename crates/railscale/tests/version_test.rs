@@ -1,6 +1,4 @@
 //! integration tests for the `/version` endpoint
-//!
-//! the `/version` endpoint returns build and version information
 
 use axum::{
     body::Body,

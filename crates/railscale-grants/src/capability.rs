@@ -6,8 +6,7 @@ use crate::error::ParseError;
 
 /// network capability - what ports/protocols are allowed.
 ///
-/// capabilities specify which network connections are permitted by a grant.
-/// they can be parsed from strings like `"*"`, `"443"`, `"80-443"`, `"tcp:22"`.
+/// parsed from strings like `"*"`, `"443"`, `"80-443"`, `"tcp:22"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetworkCapability {
     /// wildcard - all tcp, udp, icmp traffic on any port.

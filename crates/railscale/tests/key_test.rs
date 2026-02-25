@@ -1,6 +1,4 @@
 //! integration tests for the `/key` endpoint.
-//!
-//! the `/key` endpoint returns the server's noise public key for ts2021 protocol.
 
 use axum::{
     body::Body,

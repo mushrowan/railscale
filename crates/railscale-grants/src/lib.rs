@@ -1,8 +1,4 @@
 //! grants-based access control for railscale.
-//!
-//! this crate implements tailscale's grants system for controlling network
-//! access and application capabilities. Grants use deny-by-default semantics
-//! with union composition (multiple matching grants combine their permissions).
 
 #![warn(missing_docs)]
 

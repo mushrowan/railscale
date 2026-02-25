@@ -627,7 +627,6 @@ impl AdminService for AdminServiceImpl {
             .expiration_days
             .map(|days| chrono::Utc::now() + chrono::Duration::days(days));
 
-        // generate a new api key secret (split-token pattern)
         let secret = railscale_types::ApiKeySecret::generate();
 
         let mut key = railscale_types::ApiKey::new(

@@ -1,6 +1,4 @@
 //! basic tests for the TS2021 protocol endpoint
-//!
-//! these tests verify endpoint existence and upgrade requirements
 
 mod ts2021_common;
 

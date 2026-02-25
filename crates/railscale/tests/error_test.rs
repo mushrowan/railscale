@@ -1,6 +1,4 @@
 //! tests for error handling with color-eyre
-//!
-//! these tests verify that error context is properly preserved and displayed
 
 use std::io;
 

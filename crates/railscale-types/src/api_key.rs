@@ -64,20 +64,16 @@ impl ApiKeySecret {
     pub fn generate() -> Self {
         let mut rng = rand::rng();
 
-        // generate random bytes - wrapped in Zeroizing for automatic cleanup
         let mut selector_bytes = Zeroizing::new([0u8; SELECTOR_BYTES]);
         let mut verifier_bytes = Zeroizing::new([0u8; VERIFIER_BYTES]);
         rng.fill_bytes(&mut *selector_bytes);
         rng.fill_bytes(&mut *verifier_bytes);
 
-        // encode as hex (deterministic length, no separator conflicts)
         let selector = hex::encode(*selector_bytes);
         let verifier = Zeroizing::new(hex::encode(*verifier_bytes));
 
-        // hash the verifier for storage (hash the hex string, not raw bytes)
         let verifier_hash = hex::encode(Sha256::digest(verifier.as_bytes()));
 
-        // build the full key
         let full_key = format!("{API_KEY_PREFIX}{selector}_{}", &*verifier);
 
         Self {

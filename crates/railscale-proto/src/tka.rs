@@ -1,6 +1,4 @@
 //! tailnet lock (tka) protocol types.
-//!
-//! these types are used in mapresponse and tka rpc endpoints.
 
 use std::collections::HashMap;
 

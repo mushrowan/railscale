@@ -463,12 +463,7 @@ impl RailscaleDb {
     }
 
     /// close the database connection.
-    ///
-    /// NOTE: sea-orm connections are reference-counted and cleaned up on drop.
-    /// this method exists for explicit cleanup and logging purposes.
     pub async fn close(&self) -> Result<()> {
-        // sea-orm handles connection cleanup on drop
-        // this method is kept for api compatibility and potential future cleanup logic
         tracing::debug!("database connection marked for close");
         Ok(())
     }
@@ -1179,7 +1174,6 @@ mod tests {
         let user = User::new(UserId(0), "apikeyowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        // generate api key secret (split-token pattern)
         let secret = ApiKeySecret::generate();
 
         // create key

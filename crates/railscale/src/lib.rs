@@ -1,12 +1,4 @@
-//! railscale library - HTTP handlers and application setup.
-//!
-//! this crate provides the http server and handlers for the railscale control server:
-//! - [`handlers`]: HTTP request handlers for Tailscale protocol endpoints
-//! - [`cli`]: Command-line interface implementation
-//! - [`oidc`]: OpenID Connect authentication provider
-//! - [`derp`]: DERP relay map management
-//! - [`derp_server`]: Embedded DERP relay server
-//! - [`resolver`]: Grants-based access control resolver
+//! railscale library - http handlers and application setup.
 
 #![warn(missing_docs)]
 

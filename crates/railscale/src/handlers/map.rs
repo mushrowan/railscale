@@ -183,11 +183,8 @@ enum StreamMessage {
     End,
 }
 
-/// stream wrapper that tracks presence and cleans up on drop.
-///
-/// when the stream is dropped (client disconnects), it marks the node as offline
-/// and notifies other clients of the state change. for ephemeral nodes, it
-/// schedules deletion after the configured inactivity timeout.
+/// stream wrapper that marks nodes offline on drop and schedules
+/// ephemeral node deletion after the configured inactivity timeout.
 struct PresenceTrackingStream<S> {
     inner: Pin<Box<S>>,
     state: AppState,

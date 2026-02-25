@@ -64,18 +64,13 @@ impl PreAuthKeyToken {
         self.0
     }
 
-    /// get the prefix portion for display (tskey-auth- + first 12 hex chars).
-    ///
-    /// this is safe to display in logs and api responses as it does not
-    /// contain enough entropy to reconstruct the full key.
+    /// safe-to-display prefix (tskey-auth- + first 12 hex chars).
     pub fn prefix(&self) -> &str {
         // "tskey-auth-" (11 chars) + 12 hex chars = 23 chars
         &self.0[..PREAUTH_KEY_PREFIX.len() + 12]
     }
 
-    /// compute the sha-256 hash of the full token.
-    ///
-    /// this hash is suitable for secure storage and comparison.
+    /// sha-256 hash of the full token for storage.
     pub fn hash(&self) -> [u8; 32] {
         let mut hasher = Sha256::new();
         hasher.update(self.0.as_bytes());

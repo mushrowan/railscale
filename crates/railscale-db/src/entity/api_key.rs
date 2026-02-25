@@ -1,8 +1,4 @@
 //! apikey entity for database storage.
-//!api keys use a split-token pattern for secure storage:
-//! - `selector`: hex-encoded lookup key (indexed for O(1) lookup)
-//! - `verifier_hash`: SHA-256 hash of the verifier portion
-//! - `verifier_hash`: SHA-256 hash of the verifier portion
 
 use chrono::{DateTime, Utc};
 use sea_orm::entity::prelude::*;

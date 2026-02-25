@@ -1,6 +1,4 @@
 //! tests for response format in /machine/map endpoint.
-//!
-//! tests for: zstd compression, disco key updates, hostinfo updates, cidr formatting.
 
 mod map_common;
 

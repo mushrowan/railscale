@@ -448,7 +448,6 @@ async fn handle_ts2021_http_connection(
     let client_key = handshake
         .remote_static()
         .ok_or("missing client static key")?;
-    // log a short prefix of the client key (not secret, but cleaner logs)
     let key_prefix = if client_key.len() >= 4 {
         format!("{:02x}{:02x}...", client_key[0], client_key[1])
     } else {

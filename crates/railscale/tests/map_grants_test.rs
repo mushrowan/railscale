@@ -1,6 +1,4 @@
 //! tests for grants/visibility in /machine/map endpoint
-//!
-//! tests that peer visibility respects grants policy
 
 mod map_common;
 

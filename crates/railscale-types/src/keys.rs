@@ -54,9 +54,7 @@ macro_rules! impl_key_serde {
 
 /// machine key - identifies a physical device.
 ///
-/// this key is stable across node key rotations and is used
-/// for machine-level authentication.
-/// serializes as `"mkey:<64 hex chars>"`.
+/// stable across node key rotations. serializes as `"mkey:<64 hex chars>"`.
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct MachineKey(Vec<u8>);
 
@@ -91,8 +89,7 @@ impl MachineKey {
 
 /// node key - identifies a node's current session.
 ///
-/// this key can be rotated and is used for the noise protocol handshake.
-/// serializes as `"nodekey:<64 hex chars>"`.
+/// rotatable, used for noise handshake. serializes as `"nodekey:<64 hex chars>"`.
 #[derive(Clone, PartialEq, Eq, Hash, Default)]
 pub struct NodeKey(Vec<u8>);
 
