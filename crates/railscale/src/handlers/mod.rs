@@ -30,10 +30,10 @@ pub(crate) fn validate_machine_key(
     machine_key_ctx: &Option<MachineKeyContext>,
     node: &railscale_types::Node,
 ) -> Result<(), ApiError> {
-    if let Some(ctx) = machine_key_ctx {
-        if ctx.machine_key().as_bytes() != node.machine_key.as_bytes() {
-            return Err(ApiError::unauthorized("machine key does not match node"));
-        }
+    if let Some(ctx) = machine_key_ctx
+        && ctx.machine_key().as_bytes() != node.machine_key.as_bytes()
+    {
+        return Err(ApiError::unauthorized("machine key does not match node"));
     }
     Ok(())
 }
