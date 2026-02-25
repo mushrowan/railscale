@@ -37,6 +37,7 @@ pub(crate) fn validate_machine_key(
     }
     Ok(())
 }
+
 pub use audit_log::audit_log;
 pub use bootstrap_dns::bootstrap_dns;
 pub use error::{ApiError, JsonBody, OptionExt, ResultExt};
@@ -54,3 +55,30 @@ pub use tka::{
 pub use ts2021::{ts2021, ts2021_http_upgrade};
 pub use verify::verify;
 pub use version::version;
+
+#[cfg(test)]
+mod validate_machine_key_tests {
+    use super::*;
+    use railscale_types::test_utils::TestNodeBuilder;
+
+    #[test]
+    fn matching_machine_key_passes() {
+        let node = TestNodeBuilder::new(1).build();
+        let ctx = MachineKeyContext(node.machine_key.clone());
+        assert!(validate_machine_key(&Some(ctx), &node).is_ok());
+    }
+
+    #[test]
+    fn mismatched_machine_key_rejects() {
+        let node = TestNodeBuilder::new(1).build();
+        let wrong_key = MachineKeyContext::from_bytes(vec![99u8; 32]);
+        let result = validate_machine_key(&Some(wrong_key), &node);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn no_machine_key_context_passes() {
+        let node = TestNodeBuilder::new(1).build();
+        assert!(validate_machine_key(&None, &node).is_ok());
+    }
+}
