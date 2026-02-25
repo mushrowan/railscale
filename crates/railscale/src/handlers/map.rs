@@ -85,15 +85,15 @@ pub async fn map(
     let req: MapRequest = serde_json::from_slice(&body)
         .map_err(|_| super::ApiError::bad_request("invalid JSON request body"))?;
     // validate the node exists
-    let mut node = state
-        .db
-        .get_node_by_node_key(&req.node_key)
-        .await
-        .map_internal()?
-        .or_unauthorized("node not found")?;
-
-    // verify the Noise session machine key matches this node
-    super::validate_machine_key(&machine_key_ctx, &node)?;
+    let mut node = super::VerifiedNode::verify(
+        state
+            .db
+            .get_node_by_node_key(&req.node_key)
+            .await
+            .map_internal()?
+            .or_unauthorized("node not found")?,
+        &machine_key_ctx,
+    )?;
 
     // update node with disco_key and hostinfo from request if provided
     let mut needs_update = false;
@@ -145,7 +145,7 @@ pub async fn map(
     let compression = Compression::from(req.compress.as_ref());
 
     if req.stream {
-        // streaming mode: keep connection open and push updates
+        let node = node.into_inner();
         Ok(
             streaming_response(state, node.id, node.node_key, compression, node.ephemeral)
                 .await

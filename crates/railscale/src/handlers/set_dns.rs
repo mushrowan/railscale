@@ -31,14 +31,15 @@ pub async fn set_dns(
         return Err(ApiError::bad_request("only TXT record type is supported"));
     }
 
-    // auth: look up node by node_key and verify machine key
-    let node = state
-        .db
-        .get_node_by_node_key(&req.node_key)
-        .await
-        .map_internal()?
-        .or_unauthorized("node not found")?;
-    super::validate_machine_key(&machine_key_ctx, &node)?;
+    let node = super::VerifiedNode::verify(
+        state
+            .db
+            .get_node_by_node_key(&req.node_key)
+            .await
+            .map_internal()?
+            .or_unauthorized("node not found")?,
+        &machine_key_ctx,
+    )?;
 
     // get dns provider or fail
     let provider = state

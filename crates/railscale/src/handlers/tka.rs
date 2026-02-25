@@ -60,7 +60,6 @@ fn parse_genesis(genesis_bytes: &[u8], endpoint: &str) -> Result<ParsedGenesis, 
     Ok(ParsedGenesis { public_key, hash })
 }
 
-/// verify the requesting node exists and machine key matches
 async fn verify_requesting_node(
     db: &impl Database,
     node_key: &railscale_types::NodeKey,
@@ -69,7 +68,7 @@ async fn verify_requesting_node(
 ) -> Result<(), ApiError> {
     match db.get_node_by_node_key(node_key).await {
         Ok(Some(node)) => {
-            super::validate_machine_key(machine_key_ctx, &node)?;
+            super::VerifiedNode::verify(node, machine_key_ctx)?;
             Ok(())
         }
         Ok(None) => {
