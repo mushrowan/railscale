@@ -24,8 +24,8 @@ pub const MAX_USERNAME_LEN: usize = 63;
 /// ```
 /// use railscale_types::Username;
 ///
-/// let username: Username = "alice".parse().unwrap();
-/// assert_eq!(username.as_str(), "alice");
+/// let username: Username = "alicja".parse().unwrap();
+/// assert_eq!(username.as_str(), "alicja");
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Username(String);
@@ -221,8 +221,8 @@ mod tests {
 
     #[test]
     fn test_valid_usernames() {
-        assert!(Username::new("alice").is_ok());
-        assert!(Username::new("alice-bob").is_ok());
+        assert!(Username::new("alicja").is_ok());
+        assert!(Username::new("alicja-ro").is_ok());
         assert!(Username::new("user123").is_ok());
         assert!(Username::new("a").is_ok());
         assert!(Username::new("123").is_ok());
@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn test_invalid_characters() {
         assert_eq!(
-            Username::new("Alice").unwrap_err(),
+            Username::new("Alicja").unwrap_err(),
             UsernameError::InvalidCharacters
         );
         assert_eq!(
@@ -258,11 +258,11 @@ mod tests {
             UsernameError::InvalidCharacters
         );
         assert_eq!(
-            Username::new("alice@example.com").unwrap_err(),
+            Username::new("alicja@example.com").unwrap_err(),
             UsernameError::InvalidCharacters
         );
         assert_eq!(
-            Username::new("alice bob").unwrap_err(),
+            Username::new("alicja ro").unwrap_err(),
             UsernameError::InvalidCharacters
         );
     }
@@ -270,11 +270,11 @@ mod tests {
     #[test]
     fn test_hyphen_position() {
         assert_eq!(
-            Username::new("-alice").unwrap_err(),
+            Username::new("-alicja").unwrap_err(),
             UsernameError::InvalidHyphenPosition
         );
         assert_eq!(
-            Username::new("alice-").unwrap_err(),
+            Username::new("alicja-").unwrap_err(),
             UsernameError::InvalidHyphenPosition
         );
         assert_eq!(
@@ -285,43 +285,43 @@ mod tests {
 
     #[test]
     fn test_as_str() {
-        let username = Username::new("alice").unwrap();
-        assert_eq!(username.as_str(), "alice");
+        let username = Username::new("alicja").unwrap();
+        assert_eq!(username.as_str(), "alicja");
     }
 
     #[test]
     fn test_into_inner() {
-        let username = Username::new("alice").unwrap();
-        assert_eq!(username.into_inner(), "alice");
+        let username = Username::new("alicja").unwrap();
+        assert_eq!(username.into_inner(), "alicja");
     }
 
     #[test]
     fn test_partial_eq_str() {
-        let username = Username::new("alice").unwrap();
-        assert_eq!(username, "alice");
-        assert_eq!(username, *"alice");
+        let username = Username::new("alicja").unwrap();
+        assert_eq!(username, "alicja");
+        assert_eq!(username, *"alicja");
     }
 
     #[test]
     fn test_display() {
-        let username = Username::new("alice").unwrap();
-        assert_eq!(format!("{}", username), "alice");
+        let username = Username::new("alicja").unwrap();
+        assert_eq!(format!("{}", username), "alicja");
     }
 
     #[test]
     fn test_from_str() {
-        let username: Username = "alice".parse().unwrap();
-        assert_eq!(username.as_str(), "alice");
+        let username: Username = "alicja".parse().unwrap();
+        assert_eq!(username.as_str(), "alicja");
 
-        let err: Result<Username, _> = "Alice".parse();
+        let err: Result<Username, _> = "Alicja".parse();
         assert!(err.is_err());
     }
 
     #[test]
     fn test_serde_roundtrip() {
-        let username = Username::new("alice").unwrap();
+        let username = Username::new("alicja").unwrap();
         let json = serde_json::to_string(&username).unwrap();
-        assert_eq!(json, "\"alice\"");
+        assert_eq!(json, "\"alicja\"");
 
         let parsed: Username = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, username);
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_serde_invalid() {
-        let result: Result<Username, _> = serde_json::from_str("\"Alice\"");
+        let result: Result<Username, _> = serde_json::from_str("\"Alicja\"");
         assert!(result.is_err());
 
         let result: Result<Username, _> = serde_json::from_str("\"\"");
@@ -339,50 +339,50 @@ mod tests {
     #[test]
     fn test_sanitise_valid() {
         // already valid
-        assert_eq!(Username::sanitise("alice").unwrap().as_str(), "alice");
+        assert_eq!(Username::sanitise("alicja").unwrap().as_str(), "alicja");
         assert_eq!(
-            Username::sanitise("alice-bob").unwrap().as_str(),
-            "alice-bob"
+            Username::sanitise("alicja-ro").unwrap().as_str(),
+            "alicja-ro"
         );
     }
 
     #[test]
     fn test_sanitise_uppercase() {
         // uppercase converted to lowercase
-        assert_eq!(Username::sanitise("Alice").unwrap().as_str(), "alice");
-        assert_eq!(Username::sanitise("ALICE").unwrap().as_str(), "alice");
+        assert_eq!(Username::sanitise("Alicja").unwrap().as_str(), "alicja");
+        assert_eq!(Username::sanitise("ALICJA").unwrap().as_str(), "alicja");
     }
 
     #[test]
     fn test_sanitise_special_chars() {
         // special chars become hyphens
         assert_eq!(
-            Username::sanitise("alice@example.com").unwrap().as_str(),
-            "alice-example-com"
+            Username::sanitise("alicja@example.com").unwrap().as_str(),
+            "alicja-example-com"
         );
         assert_eq!(
-            Username::sanitise("alice_bob").unwrap().as_str(),
-            "alice-bob"
+            Username::sanitise("alicja_ro").unwrap().as_str(),
+            "alicja-ro"
         );
         assert_eq!(
-            Username::sanitise("alice.bob").unwrap().as_str(),
-            "alice-bob"
+            Username::sanitise("alicja.ro").unwrap().as_str(),
+            "alicja-ro"
         );
     }
 
     #[test]
     fn test_sanitise_leading_trailing() {
         // leading/trailing invalid chars trimmed
-        assert_eq!(Username::sanitise("@alice@").unwrap().as_str(), "alice");
-        assert_eq!(Username::sanitise("---alice---").unwrap().as_str(), "alice");
+        assert_eq!(Username::sanitise("@alicja@").unwrap().as_str(), "alicja");
+        assert_eq!(Username::sanitise("---alicja---").unwrap().as_str(), "alicja");
     }
 
     #[test]
     fn test_sanitise_collapse_hyphens() {
         // multiple hyphens collapsed
         assert_eq!(
-            Username::sanitise("alice---bob").unwrap().as_str(),
-            "alice-bob"
+            Username::sanitise("alicja---ro").unwrap().as_str(),
+            "alicja-ro"
         );
         assert_eq!(Username::sanitise("a   b   c").unwrap().as_str(), "a-b-c");
     }

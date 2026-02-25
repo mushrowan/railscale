@@ -1,30 +1,10 @@
 # todo
 
-## audit serde field names against tailscale Go structs
+## ~~audit serde field names against tailscale Go structs~~ done
 
-go uses unusual casing for acronyms (e.g. `AuthURL` not `AuthUrl`, `NodeID` not
-`NodeId`). serde's `rename_all = "PascalCase"` gets these wrong since it doesn't
-know which segments are acronyms
-
-need to compare every `#[serde(rename_all = "PascalCase")]` struct in
-railscale-proto and railscale handlers against the corresponding Go struct in
-`~/dev/go/tailscale/tailcfg/tailcfg.go` and add explicit `#[serde(rename = "...")]`
-where they diverge
-
-known fixes:
-- [x] `RegisterResponse.auth_url` → `AuthURL` (was `AuthUrl`)
-
-likely suspects (fields with acronym suffixes):
-- anything with `_url`, `_id`, `_ip`, `_dns`, `_tls`, `_ssh` suffixes
-- `DERPMap`, `DERP` fields
-- `OS`, `DNS`, `SSH`, `TLS` in field names
-
-check at minimum:
-- `RegisterRequest` / `RegisterResponse`
-- `MapRequest` / `MapResponse`
-- `Node` / `Hostinfo` / `NetInfo`
-- `DERPMap` / `DERPRegion` / `DERPNode`
-- `SSHPolicy` / `SSHRule` / `SSHAction`
+audited all `rename_all = "PascalCase"` structs. all acronym fields already have
+explicit `#[serde(rename = "...")]` except `RegisterResponse.auth_url` which was
+fixed in v0.3.2
 
 ## audit logging for secrets
 

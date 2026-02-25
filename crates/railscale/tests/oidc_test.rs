@@ -120,10 +120,10 @@ fn create_test_id_token(issuer: &str, client_id: &str, nonce: &str) -> String {
         exp: now + 3600, // 1 hour from now
         iat: now,
         nonce: nonce.to_string(),
-        email: "alice@example.com".to_string(),
+        email: "alicja@example.com".to_string(),
         email_verified: true,
-        preferred_username: "alice".to_string(),
-        name: "Alice Smith".to_string(),
+        preferred_username: "alicja".to_string(),
+        name: "Alicja Smith".to_string(),
     };
 
     let mut header = Header::new(Algorithm::RS256);
@@ -424,8 +424,8 @@ async fn test_oidc_callback_full_flow_creates_user() {
         .expect("database query should succeed")
         .expect("user should have been created");
 
-    assert_eq!(user.email, Some("alice@example.com".to_string()));
-    assert_eq!(user.name, "alice");
+    assert_eq!(user.email, Some("alicja@example.com".to_string()));
+    assert_eq!(user.name, "alicja");
 }
 
 /// full integration test for interactive login flow:
@@ -629,7 +629,7 @@ async fn test_full_interactive_login_flow() {
         "auth_url should be empty after authorization"
     );
     assert_eq!(followup_resp.login.provider, "oidc");
-    assert_eq!(followup_resp.login.login_name, "alice");
+    assert_eq!(followup_resp.login.login_name, "alicja");
 
     // verify user was created
     let provider_identifier = format!("{}:test-user-sub", issuer);
@@ -639,7 +639,7 @@ async fn test_full_interactive_login_flow() {
         .expect("database query should succeed")
         .expect("user should have been created");
 
-    assert_eq!(user.email, Some("alice@example.com".to_string()));
+    assert_eq!(user.email, Some("alicja@example.com".to_string()));
 
     // verify node was created
     let nodes = db.list_nodes().await.expect("should list nodes");

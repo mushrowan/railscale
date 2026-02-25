@@ -18,7 +18,7 @@ IO.puts("initial policy: #{length(policy["grants"])} grants, groups: #{inspect(M
 IO.puts("--- SIGHUP policy reload ---")
 new_policy = Jason.encode!(%{
   "groups" => %{
-    "group:engineering" => ["alice@example.com"],
+    "group:engineering" => ["alicja@example.com"],
     "group:admins" => ["admin@example.com"],
     "group:ops" => ["ops@example.com"]
   },
@@ -46,7 +46,7 @@ IO.puts("SIGHUP reload ok - groups: #{inspect(Map.keys(policy["groups"]))}")
 IO.puts("--- CLI policy reload ---")
 cli_policy = Jason.encode!(%{
   "groups" => %{
-    "group:engineering" => ["alice@example.com"],
+    "group:engineering" => ["alicja@example.com"],
     "group:admins" => ["admin@example.com"],
     "group:ops" => ["ops@example.com"],
     "group:security" => ["security@example.com"]
@@ -98,7 +98,7 @@ IO.puts("CLI set ok - clean slate with 2 grants")
 IO.puts("--- restore original policy ---")
 original = Jason.encode!(%{
   "groups" => %{
-    "group:engineering" => ["alice@example.com"],
+    "group:engineering" => ["alicja@example.com"],
     "group:admins" => ["admin@example.com"]
   },
   "grants" => [

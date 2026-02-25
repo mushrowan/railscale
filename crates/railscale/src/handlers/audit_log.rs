@@ -89,7 +89,7 @@ mod tests {
         )
         .await;
 
-        let user = railscale_types::User::new(UserId(0), "alice".into());
+        let user = railscale_types::User::new(UserId(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)

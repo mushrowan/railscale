@@ -377,9 +377,9 @@ mod tests {
         let node = TestNodeBuilder::new(1).build();
         let user = User {
             id: UserId(1),
-            name: "alice".to_string(),
-            display_name: Some("Alice".to_string()),
-            email: Some("alice@example.com".to_string()),
+            name: "alicja".to_string(),
+            display_name: Some("Alicja".to_string()),
+            email: Some("alicja@example.com".to_string()),
             provider_identifier: None,
             provider: None,
             profile_pic_url: None,
@@ -409,9 +409,9 @@ mod tests {
         let node = TestNodeBuilder::new(1).build();
         let user = User {
             id: UserId(1),
-            name: "alice".to_string(),
-            display_name: Some("Alice".to_string()),
-            email: Some("alice@example.com".to_string()),
+            name: "alicja".to_string(),
+            display_name: Some("Alicja".to_string()),
+            email: Some("alicja@example.com".to_string()),
             provider_identifier: None,
             provider: None,
             profile_pic_url: None,
@@ -456,10 +456,10 @@ mod tests {
         OidcClaims {
             sub: "user123".to_string(),
             iss: "https://sso.example.com".to_string(),
-            email: "alice@example.com".to_string(),
+            email: "alicja@example.com".to_string(),
             email_verified: true,
-            preferred_username: "alice".to_string(),
-            name: "Alice Smith".to_string(),
+            preferred_username: "alicja".to_string(),
+            name: "Alicja Smith".to_string(),
             picture: String::new(),
             groups: vec!["users".to_string()],
         }
@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn test_validate_allowed_users_success() {
         let mut config = test_config();
-        config.allowed_users = vec!["alice@example.com".to_string()];
+        config.allowed_users = vec!["alicja@example.com".to_string()];
         let claims = test_claims();
         assert!(validate_oidc_claims(&config, &claims).is_ok());
     }
@@ -513,7 +513,7 @@ mod tests {
     #[test]
     fn test_validate_allowed_users_failure() {
         let mut config = test_config();
-        config.allowed_users = vec!["bob@example.com".to_string()];
+        config.allowed_users = vec!["ro@example.com".to_string()];
         let claims = test_claims();
         assert!(validate_oidc_claims(&config, &claims).is_err());
     }

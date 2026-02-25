@@ -30,7 +30,7 @@ in
         # declarative policy (immutable, nix-managed)
         policy = {
           groups = {
-            "group:engineering" = [ "alice@example.com" ];
+            "group:engineering" = [ "alicja@example.com" ];
             "group:admins" = [ "admin@example.com" ];
           };
           grants = [

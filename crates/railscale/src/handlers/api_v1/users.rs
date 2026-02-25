@@ -293,11 +293,11 @@ mod tests {
 
     #[test]
     fn test_user_response_from_user() {
-        let user = User::new(UserId(42), "alice".to_string());
+        let user = User::new(UserId(42), "alicja".to_string());
         let response = UserResponse::from(user);
 
         assert_eq!(response.id, "42");
-        assert_eq!(response.name, "alice");
+        assert_eq!(response.name, "alicja");
         assert!(response.display_name.is_none());
         assert!(response.email.is_none());
         assert!(response.oidc_groups.is_empty());
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_user_response_with_oidc_groups() {
-        let mut user = User::new(UserId(42), "alice".to_string());
+        let mut user = User::new(UserId(42), "alicja".to_string());
         user.oidc_groups = vec!["engineering".to_string(), "devops".to_string()];
 
         let response = UserResponse::from(user);
@@ -321,9 +321,9 @@ mod tests {
     fn test_user_response_serialization() {
         let response = UserResponse {
             id: "1".to_string(),
-            name: "alice".to_string(),
-            display_name: Some("Alice Smith".to_string()),
-            email: Some("alice@example.com".to_string()),
+            name: "alicja".to_string(),
+            display_name: Some("Alicja Smith".to_string()),
+            email: Some("alicja@example.com".to_string()),
             provider: None,
             profile_pic_url: None,
             oidc_groups: vec![],
@@ -349,7 +349,7 @@ mod tests {
         let response = ListUsersResponse {
             users: vec![UserResponse {
                 id: "1".to_string(),
-                name: "alice".to_string(),
+                name: "alicja".to_string(),
                 display_name: None,
                 email: None,
                 provider: None,
@@ -365,25 +365,25 @@ mod tests {
 
     #[test]
     fn test_create_user_request_deserialization() {
-        let json = r#"{"name": "bob"}"#;
+        let json = r#"{"name": "ro"}"#;
         let req: CreateUserRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.name, "bob");
+        assert_eq!(req.name, "ro");
         assert!(req.display_name.is_none());
         assert!(req.email.is_none());
 
-        let json = r#"{"name": "bob", "display_name": "Bob Smith", "email": "bob@example.com"}"#;
+        let json = r#"{"name": "ro", "display_name": "Ro Smith", "email": "ro@example.com"}"#;
         let req: CreateUserRequest = serde_json::from_str(json).unwrap();
-        assert_eq!(req.name, "bob");
-        assert_eq!(req.display_name.as_deref(), Some("Bob Smith"));
+        assert_eq!(req.name, "ro");
+        assert_eq!(req.display_name.as_deref(), Some("Ro Smith"));
         assert_eq!(
             req.email.as_ref().map(|e| e.as_str()),
-            Some("bob@example.com")
+            Some("ro@example.com")
         );
     }
 
     #[test]
     fn test_create_user_request_rejects_invalid_email() {
-        let json = r#"{"name": "bob", "email": "not-an-email"}"#;
+        let json = r#"{"name": "ro", "email": "not-an-email"}"#;
         let result: Result<CreateUserRequest, _> = serde_json::from_str(json);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();

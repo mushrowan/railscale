@@ -1261,7 +1261,7 @@ mod tests {
                 method: PkceMethod::S256,
             },
             allowed_domains: vec!["example.com".to_string()],
-            allowed_users: vec!["alice@example.com".to_string()],
+            allowed_users: vec!["alicja@example.com".to_string()],
             allowed_groups: vec!["headscale_users".to_string()],
             group_prefix: None,
             expiry_secs: 180 * 24 * 3600, // 180 days in seconds

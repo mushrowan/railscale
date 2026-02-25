@@ -50,7 +50,7 @@ pub struct AutoApproverPolicy {
 /// ```json
 /// {
 ///   "groups": {
-///     "group:engineering": ["alice@example.com", "bob@example.com"]
+///     "group:engineering": ["alicja@example.com", "ro@example.com"]
 ///   },
 ///   "grants": [
 ///     {"src": ["group:engineering"], "dst": ["tag:servers"], "ip": ["*"]}
@@ -355,7 +355,7 @@ mod tests {
     fn test_from_json_with_groups() {
         let json = r#"{
             "groups": {
-                "group:engineering": ["alice@example.com", "bob@example.com"],
+                "group:engineering": ["alicja@example.com", "ro@example.com"],
                 "group:admins": ["admin@example.com"]
             },
             "grants": [
@@ -374,8 +374,8 @@ mod tests {
         assert_eq!(
             policy.groups.get("group:engineering").unwrap(),
             &vec![
-                "alice@example.com".to_string(),
-                "bob@example.com".to_string()
+                "alicja@example.com".to_string(),
+                "ro@example.com".to_string()
             ]
         );
         assert_eq!(

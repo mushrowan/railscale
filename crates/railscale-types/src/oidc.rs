@@ -138,10 +138,10 @@ mod tests {
         let claims = OidcClaims {
             sub: "user123".to_string(),
             iss: "https://sso.example.com".to_string(),
-            email: "alice@example.com".to_string(),
+            email: "alicja@example.com".to_string(),
             email_verified: true,
-            preferred_username: "alice".to_string(),
-            name: "Alice Smith".to_string(),
+            preferred_username: "alicja".to_string(),
+            name: "Alicja Smith".to_string(),
             picture: "https://example.com/avatar.jpg".to_string(),
             groups: vec!["admins".to_string()],
         };
@@ -154,21 +154,21 @@ mod tests {
         let mut claims = OidcClaims {
             sub: "user123".to_string(),
             iss: "https://sso.example.com".to_string(),
-            email: "alice@example.com".to_string(),
+            email: "alicja@example.com".to_string(),
             email_verified: true,
-            preferred_username: "alice".to_string(),
-            name: "Alice Smith".to_string(),
+            preferred_username: "alicja".to_string(),
+            name: "Alicja Smith".to_string(),
             picture: String::new(),
             groups: vec![],
         };
 
-        assert_eq!(claims.display_name(), "Alice Smith");
+        assert_eq!(claims.display_name(), "Alicja Smith");
 
         claims.name = String::new();
-        assert_eq!(claims.display_name(), "alice@example.com");
+        assert_eq!(claims.display_name(), "alicja@example.com");
 
         claims.email = String::new();
-        assert_eq!(claims.display_name(), "alice");
+        assert_eq!(claims.display_name(), "alicja");
 
         claims.preferred_username = String::new();
         assert_eq!(claims.display_name(), "user123");

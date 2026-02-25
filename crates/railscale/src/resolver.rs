@@ -130,51 +130,51 @@ mod tests {
     #[test]
     fn test_resolve_groups_with_policy_groups() {
         let users = vec![
-            make_user(1, "alice", Some("alice@example.com")),
-            make_user(2, "bob", Some("bob@example.com")),
-            make_user(3, "eve", Some("eve@example.com")),
+            make_user(1, "alicja", Some("alicja@example.com")),
+            make_user(2, "ro", Some("ro@example.com")),
+            make_user(3, "valerie", Some("valerie@example.com")),
         ];
 
         let mut groups = HashMap::new();
         groups.insert(
             "group:engineering".to_string(),
             vec![
-                "alice@example.com".to_string(),
-                "bob@example.com".to_string(),
+                "alicja@example.com".to_string(),
+                "ro@example.com".to_string(),
             ],
         );
         groups.insert(
             "group:admins".to_string(),
-            vec!["alice@example.com".to_string()],
+            vec!["alicja@example.com".to_string()],
         );
 
         let resolver = MapUserResolver::with_groups(users, groups, None);
 
-        // alice is in both groups
+        // alicja is in both groups
         let alice_groups = resolver.resolve_groups(&UserId(1));
         assert!(alice_groups.contains(&"engineering".to_string()));
         assert!(alice_groups.contains(&"admins".to_string()));
         assert_eq!(alice_groups.len(), 2);
 
-        // bob is only in engineering
+        // ro is only in engineering
         let bob_groups = resolver.resolve_groups(&UserId(2));
         assert!(bob_groups.contains(&"engineering".to_string()));
         assert!(!bob_groups.contains(&"admins".to_string()));
         assert_eq!(bob_groups.len(), 1);
 
-        // eve is in no groups
+        // valerie is in no groups
         let eve_groups = resolver.resolve_groups(&UserId(3));
         assert!(eve_groups.is_empty());
     }
 
     #[test]
     fn test_resolve_groups_case_insensitive() {
-        let users = vec![make_user(1, "alice", Some("Alice@Example.COM"))];
+        let users = vec![make_user(1, "alicja", Some("Alicja@Example.COM"))];
 
         let mut groups = HashMap::new();
         groups.insert(
             "group:team".to_string(),
-            vec!["alice@example.com".to_string()],
+            vec!["alicja@example.com".to_string()],
         );
 
         let resolver = MapUserResolver::with_groups(users, groups, None);
@@ -208,8 +208,8 @@ mod tests {
     fn test_resolve_oidc_groups_without_prefix() {
         let users = vec![make_user_with_oidc_groups(
             1,
-            "alice",
-            Some("alice@example.com"),
+            "alicja",
+            Some("alicja@example.com"),
             vec!["engineering", "devops"],
         )];
 
@@ -225,8 +225,8 @@ mod tests {
     fn test_resolve_oidc_groups_with_prefix() {
         let users = vec![make_user_with_oidc_groups(
             1,
-            "alice",
-            Some("alice@example.com"),
+            "alicja",
+            Some("alicja@example.com"),
             vec!["engineering", "devops"],
         )];
 
@@ -243,15 +243,15 @@ mod tests {
     fn test_resolve_combined_oidc_and_policy_groups() {
         let users = vec![make_user_with_oidc_groups(
             1,
-            "alice",
-            Some("alice@example.com"),
+            "alicja",
+            Some("alicja@example.com"),
             vec!["engineering"], // OIDC group
         )];
 
         let mut policy_groups = HashMap::new();
         policy_groups.insert(
             "group:admins".to_string(),
-            vec!["alice@example.com".to_string()],
+            vec!["alicja@example.com".to_string()],
         );
 
         let resolver = MapUserResolver::with_groups(users, policy_groups, None);
@@ -268,15 +268,15 @@ mod tests {
         // user has oidc group that matches a policy group they're also in
         let users = vec![make_user_with_oidc_groups(
             1,
-            "alice",
-            Some("alice@example.com"),
+            "alicja",
+            Some("alicja@example.com"),
             vec!["engineering"], // OIDC group
         )];
 
         let mut policy_groups = HashMap::new();
         policy_groups.insert(
             "group:engineering".to_string(), // Same name as OIDC group
-            vec!["alice@example.com".to_string()],
+            vec!["alicja@example.com".to_string()],
         );
 
         let resolver = MapUserResolver::with_groups(users, policy_groups, None);

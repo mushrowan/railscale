@@ -3085,7 +3085,7 @@ checksum = "dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09"
 
 [[package]]
 name = "railscale"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -3146,7 +3146,7 @@ dependencies = [
 
 [[package]]
 name = "railscale-admin"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "hex",
@@ -3171,7 +3171,7 @@ dependencies = [
 
 [[package]]
 name = "railscale-db"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3190,7 +3190,7 @@ dependencies = [
 
 [[package]]
 name = "railscale-grants"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "humantime-serde",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "railscale-proto"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -3222,7 +3222,7 @@ dependencies = [
 
 [[package]]
 name = "railscale-tka"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.22.1",
  "blake2",
@@ -3240,7 +3240,7 @@ dependencies = [
 
 [[package]]
 name = "railscale-types"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",

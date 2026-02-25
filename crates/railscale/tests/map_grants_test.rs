@@ -19,22 +19,22 @@ async fn test_map_request_respects_user_grants() {
     db.migrate().await.unwrap();
 
     // create users
-    let alice = db
-        .create_user(&User::new(UserId(1), "alice@example.com".to_string()))
+    let alicja = db
+        .create_user(&User::new(UserId(1), "alicja@example.com".to_string()))
         .await
         .unwrap();
-    let bob = db
-        .create_user(&User::new(UserId(2), "bob@example.com".to_string()))
+    let ro = db
+        .create_user(&User::new(UserId(2), "ro@example.com".to_string()))
         .await
         .unwrap();
-    let charlie = db
-        .create_user(&User::new(UserId(3), "charlie@example.com".to_string()))
+    let esme = db
+        .create_user(&User::new(UserId(3), "esme@example.com".to_string()))
         .await
         .unwrap();
 
     // create nodes
     let now = chrono::Utc::now();
-    let alice_node = db
+    let alicja_node = db
         .create_node(&Node {
             id: NodeId(0),
             machine_key: MachineKey::from_bytes(vec![1u8; 32]),
@@ -44,9 +44,9 @@ async fn test_map_request_respects_user_grants() {
             ipv6: None,
             endpoints: vec![],
             hostinfo: None,
-            hostname: "alice-node".to_string(),
-            given_name: "alice-node".to_string(),
-            user_id: Some(alice.id),
+            hostname: "alicja-node".to_string(),
+            given_name: "alicja-node".to_string(),
+            user_id: Some(alicja.id),
             register_method: RegisterMethod::AuthKey,
             tags: vec![],
             auth_key_id: None,
@@ -64,7 +64,7 @@ async fn test_map_request_respects_user_grants() {
         .await
         .unwrap();
 
-    let bob_node = db
+    let ro_node = db
         .create_node(&Node {
             id: NodeId(0),
             machine_key: MachineKey::from_bytes(vec![2u8; 32]),
@@ -74,9 +74,9 @@ async fn test_map_request_respects_user_grants() {
             ipv6: None,
             endpoints: vec![],
             hostinfo: None,
-            hostname: "bob-node".to_string(),
-            given_name: "bob-node".to_string(),
-            user_id: Some(bob.id),
+            hostname: "ro-node".to_string(),
+            given_name: "ro-node".to_string(),
+            user_id: Some(ro.id),
             register_method: RegisterMethod::AuthKey,
             tags: vec![],
             auth_key_id: None,
@@ -94,7 +94,7 @@ async fn test_map_request_respects_user_grants() {
         .await
         .unwrap();
 
-    let _charlie_node = db
+    let _esme_node = db
         .create_node(&Node {
             id: NodeId(0),
             machine_key: MachineKey::from_bytes(vec![3u8; 32]),
@@ -104,9 +104,9 @@ async fn test_map_request_respects_user_grants() {
             ipv6: None,
             endpoints: vec![],
             hostinfo: None,
-            hostname: "charlie-node".to_string(),
-            given_name: "charlie-node".to_string(),
-            user_id: Some(charlie.id),
+            hostname: "esme-node".to_string(),
+            given_name: "esme-node".to_string(),
+            user_id: Some(esme.id),
             register_method: RegisterMethod::AuthKey,
             tags: vec![],
             auth_key_id: None,
@@ -124,11 +124,11 @@ async fn test_map_request_respects_user_grants() {
         .await
         .unwrap();
 
-    // define policy: Alice can see Bob
+    // define policy: Alicja can see Ro
     let mut policy = Policy::empty();
     policy.grants.push(Grant {
-        src: vec![Selector::User("alice@example.com".to_string())],
-        dst: vec![Selector::User("bob@example.com".to_string())],
+        src: vec![Selector::User("alicja@example.com".to_string())],
+        dst: vec![Selector::User("ro@example.com".to_string())],
         ip: vec![NetworkCapability::Wildcard],
         app: vec![],
         src_posture: vec![],
@@ -176,54 +176,54 @@ async fn test_map_request_respects_user_grants() {
         }
     };
 
-    // alice should see Bob
-    let alice_map = request_map(alice_node.node_key).await;
+    // alicja should see Ro
+    let alice_map = request_map(alicja_node.node_key).await;
     assert_eq!(alice_map.peers.len(), 1);
-    assert_eq!(alice_map.peers[0].id, bob_node.id.0);
+    assert_eq!(alice_map.peers[0].id, ro_node.id.0);
 
-    // alice's user_profiles should contain alice + bob, but NOT charlie
+    // alicja's user_profiles should contain alicja + ro, but NOT esme
     let alice_profile_ids: std::collections::HashSet<u64> =
         alice_map.user_profiles.iter().map(|p| p.id).collect();
     assert!(
-        alice_profile_ids.contains(&alice.id.0),
-        "alice should see her own profile"
+        alice_profile_ids.contains(&alicja.id.0),
+        "alicja should see her own profile"
     );
     assert!(
-        alice_profile_ids.contains(&bob.id.0),
-        "alice should see bob's profile (visible peer)"
+        alice_profile_ids.contains(&ro.id.0),
+        "alicja should see ro's profile (visible peer)"
     );
     assert!(
-        !alice_profile_ids.contains(&charlie.id.0),
-        "alice should NOT see charlie's profile (not a visible peer)"
+        !alice_profile_ids.contains(&esme.id.0),
+        "alicja should NOT see esme's profile (not a visible peer)"
     );
     assert_eq!(
         alice_map.user_profiles.len(),
         2,
-        "only alice + bob profiles expected"
+        "only alicja + ro profiles expected"
     );
 
-    // bob should not see anyone (directional grant)
-    let bob_map = request_map(bob_node.node_key).await;
+    // ro should not see anyone (directional grant)
+    let bob_map = request_map(ro_node.node_key).await;
     assert_eq!(bob_map.peers.len(), 0);
 
-    // bob's user_profiles should only contain bob (no visible peers)
+    // ro's user_profiles should only contain ro (no visible peers)
     let bob_profile_ids: std::collections::HashSet<u64> =
         bob_map.user_profiles.iter().map(|p| p.id).collect();
     assert!(
-        bob_profile_ids.contains(&bob.id.0),
-        "bob should see his own profile"
+        bob_profile_ids.contains(&ro.id.0),
+        "ro should see his own profile"
     );
     assert!(
-        !bob_profile_ids.contains(&alice.id.0),
-        "bob should NOT see alice's profile"
+        !bob_profile_ids.contains(&alicja.id.0),
+        "ro should NOT see alicja's profile"
     );
     assert!(
-        !bob_profile_ids.contains(&charlie.id.0),
-        "bob should NOT see charlie's profile"
+        !bob_profile_ids.contains(&esme.id.0),
+        "ro should NOT see esme's profile"
     );
     assert_eq!(
         bob_map.user_profiles.len(),
         1,
-        "only bob's own profile expected"
+        "only ro's own profile expected"
     );
 }

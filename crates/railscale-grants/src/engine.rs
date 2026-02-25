@@ -1010,8 +1010,8 @@ mod tests {
     fn test_user_selector() {
         let mut policy = Policy::empty();
         policy.grants.push(Grant {
-            src: vec![Selector::User("alice@example.com".to_string())],
-            dst: vec![Selector::User("bob@example.com".to_string())],
+            src: vec![Selector::User("alicja@example.com".to_string())],
+            dst: vec![Selector::User("ro@example.com".to_string())],
             ip: vec![NetworkCapability::Wildcard],
             app: vec![],
             src_posture: vec![],
@@ -1022,26 +1022,26 @@ mod tests {
         let mut resolver = MockResolver::new();
         resolver
             .users
-            .insert(UserId(1), "alice@example.com".to_string());
+            .insert(UserId(1), "alicja@example.com".to_string());
         resolver
             .users
-            .insert(UserId(2), "bob@example.com".to_string());
+            .insert(UserId(2), "ro@example.com".to_string());
         resolver
             .users
-            .insert(UserId(3), "charlie@example.com".to_string());
+            .insert(UserId(3), "esme@example.com".to_string());
 
-        let alice_node = test_node(1, vec![]);
-        let bob_node = test_node(2, vec![]);
-        let charlie_node = test_node(3, vec![]);
+        let alicja_node = test_node(1, vec![]);
+        let ro_node = test_node(2, vec![]);
+        let esme_node = test_node(3, vec![]);
 
-        // alice can see bob
-        assert!(engine.can_see(&alice_node, &bob_node, &resolver));
+        // alicja can see ro
+        assert!(engine.can_see(&alicja_node, &ro_node, &resolver));
 
-        // bob cannot see alice (directional)
-        assert!(!engine.can_see(&bob_node, &alice_node, &resolver));
+        // ro cannot see alicja (directional)
+        assert!(!engine.can_see(&ro_node, &alicja_node, &resolver));
 
-        // charlie cannot see anyone
-        assert!(!engine.can_see(&charlie_node, &bob_node, &resolver));
+        // esme cannot see anyone
+        assert!(!engine.can_see(&esme_node, &ro_node, &resolver));
     }
 
     #[test]
@@ -1865,8 +1865,8 @@ mod tests {
         // cross-user file sharing requires explicit policy grant with both caps
         let mut policy = Policy::empty();
         policy.grants.push(Grant {
-            src: vec![Selector::User("bob@example.com".to_string())],
-            dst: vec![Selector::User("alice@example.com".to_string())],
+            src: vec![Selector::User("ro@example.com".to_string())],
+            dst: vec![Selector::User("alicja@example.com".to_string())],
             ip: vec![],
             app: vec![
                 AppCapability {
@@ -1884,35 +1884,35 @@ mod tests {
 
         let engine = GrantsEngine::new(policy);
 
-        // alice = user 1, bob = user 2
+        // alicja = user 1, ro = user 2
         let mut resolver = MockResolver::new();
         resolver
             .users
-            .insert(UserId(1), "alice@example.com".to_string());
+            .insert(UserId(1), "alicja@example.com".to_string());
         resolver
             .users
-            .insert(UserId(2), "bob@example.com".to_string());
+            .insert(UserId(2), "ro@example.com".to_string());
 
-        let alice = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let bob = test_node_with_user(2, vec![], Some(UserId::from(2)));
-        let all_nodes = vec![alice.clone(), bob.clone()];
+        let alicja = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let ro = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let all_nodes = vec![alicja.clone(), ro.clone()];
 
-        // from alice's perspective: bob is a peer, check caps bob→alice
-        let rules = engine.generate_cap_grant_rules(&alice, &all_nodes, &resolver);
+        // from alicja's perspective: ro is a peer, check caps ro→alicja
+        let rules = engine.generate_cap_grant_rules(&alicja, &all_nodes, &resolver);
         assert!(
             !rules.is_empty(),
             "should generate cap grant rules for cross-user taildrop"
         );
 
-        // find the rule with bob's IPs as src
+        // find the rule with ro's IPs as src
         let bob_rule = rules
             .iter()
             .find(|r| {
                 r.src_ips
                     .iter()
-                    .any(|ip| bob.ips().contains(&ip.parse().unwrap()))
+                    .any(|ip| ro.ips().contains(&ip.parse().unwrap()))
             })
-            .expect("should have a rule with bob's IP as src");
+            .expect("should have a rule with ro's IP as src");
 
         let cap_map = &bob_rule.cap_grant[0].cap_map;
         assert!(

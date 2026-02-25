@@ -19,18 +19,18 @@ async fn test_policy_hot_reload_changes_visibility() {
     db.migrate().await.unwrap();
 
     // create users
-    let alice = db
-        .create_user(&User::new(UserId(1), "alice@example.com".to_string()))
+    let alicja = db
+        .create_user(&User::new(UserId(1), "alicja@example.com".to_string()))
         .await
         .unwrap();
-    let bob = db
-        .create_user(&User::new(UserId(2), "bob@example.com".to_string()))
+    let ro = db
+        .create_user(&User::new(UserId(2), "ro@example.com".to_string()))
         .await
         .unwrap();
 
     // create nodes
     let now = chrono::Utc::now();
-    let alice_node = db
+    let alicja_node = db
         .create_node(&Node {
             id: NodeId(0),
             machine_key: MachineKey::from_bytes(vec![1u8; 32]),
@@ -40,9 +40,9 @@ async fn test_policy_hot_reload_changes_visibility() {
             ipv6: None,
             endpoints: vec![],
             hostinfo: None,
-            hostname: "alice-node".to_string(),
-            given_name: "alice-node".to_string(),
-            user_id: Some(alice.id),
+            hostname: "alicja-node".to_string(),
+            given_name: "alicja-node".to_string(),
+            user_id: Some(alicja.id),
             register_method: RegisterMethod::AuthKey,
             tags: vec![],
             auth_key_id: None,
@@ -60,7 +60,7 @@ async fn test_policy_hot_reload_changes_visibility() {
         .await
         .unwrap();
 
-    let bob_node = db
+    let ro_node = db
         .create_node(&Node {
             id: NodeId(0),
             machine_key: MachineKey::from_bytes(vec![2u8; 32]),
@@ -70,9 +70,9 @@ async fn test_policy_hot_reload_changes_visibility() {
             ipv6: None,
             endpoints: vec![],
             hostinfo: None,
-            hostname: "bob-node".to_string(),
-            given_name: "bob-node".to_string(),
-            user_id: Some(bob.id),
+            hostname: "ro-node".to_string(),
+            given_name: "ro-node".to_string(),
+            user_id: Some(ro.id),
             register_method: RegisterMethod::AuthKey,
             tags: vec![],
             auth_key_id: None,
@@ -138,19 +138,19 @@ async fn test_policy_hot_reload_changes_visibility() {
         map_response
     };
 
-    // initially alice should not see bob (empty policy)
-    let alice_map = request_map(app.clone(), alice_node.node_key.clone()).await;
+    // initially alicja should not see ro (empty policy)
+    let alice_map = request_map(app.clone(), alicja_node.node_key.clone()).await;
     assert_eq!(
         alice_map.peers.len(),
         0,
-        "With empty policy, Alice should not see any peers"
+        "With empty policy, Alicja should not see any peers"
     );
 
-    // reload policy to allow alice -> bob
+    // reload policy to allow alicja -> ro
     let mut new_policy = Policy::empty();
     new_policy.grants.push(Grant {
-        src: vec![Selector::User("alice@example.com".to_string())],
-        dst: vec![Selector::User("bob@example.com".to_string())],
+        src: vec![Selector::User("alicja@example.com".to_string())],
+        dst: vec![Selector::User("ro@example.com".to_string())],
         ip: vec![NetworkCapability::Wildcard],
         app: vec![],
         src_posture: vec![],
@@ -158,23 +158,23 @@ async fn test_policy_hot_reload_changes_visibility() {
     });
     policy_handle.reload(new_policy).await;
 
-    // now alice should see bob
-    let alice_map = request_map(app.clone(), alice_node.node_key.clone()).await;
+    // now alicja should see ro
+    let alice_map = request_map(app.clone(), alicja_node.node_key.clone()).await;
     assert_eq!(
         alice_map.peers.len(),
         1,
-        "After policy reload, Alice should see Bob"
+        "After policy reload, Alicja should see Ro"
     );
-    assert_eq!(alice_map.peers[0].id, bob_node.id.0);
+    assert_eq!(alice_map.peers[0].id, ro_node.id.0);
 
     // reload back to empty policy
     policy_handle.reload(Policy::empty()).await;
 
-    // alice should not see bob again
-    let alice_map = request_map(app.clone(), alice_node.node_key).await;
+    // alicja should not see ro again
+    let alice_map = request_map(app.clone(), alicja_node.node_key).await;
     assert_eq!(
         alice_map.peers.len(),
         0,
-        "After reverting policy, Alice should not see any peers"
+        "After reverting policy, Alicja should not see any peers"
     );
 }

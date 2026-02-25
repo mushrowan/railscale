@@ -1511,7 +1511,7 @@ mod tests {
     async fn test_delete_nodes_for_user() {
         let db = setup_test_db().await;
 
-        let user = User::new(UserId(0), "alice".to_string());
+        let user = User::new(UserId(0), "alicja".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // create two nodes for this user
@@ -1537,7 +1537,7 @@ mod tests {
     async fn test_delete_preauth_keys_for_user() {
         let db = setup_test_db().await;
 
-        let user = User::new(UserId(0), "bob".to_string());
+        let user = User::new(UserId(0), "ro".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // create two preauth keys
@@ -1561,11 +1561,11 @@ mod tests {
     async fn test_duplicate_username_rejected() {
         let db = setup_test_db().await;
 
-        let user1 = User::new(UserId(0), "alice".to_string());
+        let user1 = User::new(UserId(0), "alicja".to_string());
         db.create_user(&user1).await.unwrap();
 
         // second user with same name should fail
-        let user2 = User::new(UserId(0), "alice".to_string());
+        let user2 = User::new(UserId(0), "alicja".to_string());
         let result = db.create_user(&user2).await;
         assert!(result.is_err(), "duplicate username should be rejected");
     }
