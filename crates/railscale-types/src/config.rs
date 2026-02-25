@@ -225,6 +225,22 @@ pub struct DatabaseConfig {
     /// database connection string or file path.
     pub connection_string: String,
 
+    /// maximum number of connections in the pool.
+    #[serde(default = "default_max_connections")]
+    pub max_connections: u32,
+
+    /// minimum number of idle connections to maintain.
+    #[serde(default = "default_min_connections")]
+    pub min_connections: u32,
+
+    /// connection timeout in seconds.
+    #[serde(default = "default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+
+    /// idle connection timeout in seconds.
+    #[serde(default = "default_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+
     /// sqlite-specific options.
     pub sqlite: SqliteConfig,
 }
@@ -234,10 +250,6 @@ pub struct DatabaseConfig {
 #[serde(default)]
 pub struct SqliteConfig {
     /// enable write-ahead logging (WAL) mode.
-    ///
-    /// WAL mode improves concurrency by allowing simultaneous readers
-    /// and a single writer. recommended for production use.
-    /// see: https://www.sqlite.org/wal.html
     pub write_ahead_log: bool,
 }
 
@@ -257,6 +269,10 @@ impl std::fmt::Debug for DatabaseConfig {
                 "connection_string",
                 &redact_connection_string(&self.connection_string),
             )
+            .field("max_connections", &self.max_connections)
+            .field("min_connections", &self.min_connections)
+            .field("connect_timeout_secs", &self.connect_timeout_secs)
+            .field("idle_timeout_secs", &self.idle_timeout_secs)
             .field("sqlite", &self.sqlite)
             .finish()
     }
@@ -287,11 +303,31 @@ fn redact_connection_string(s: &str) -> String {
     s.to_string()
 }
 
+fn default_max_connections() -> u32 {
+    5
+}
+
+fn default_min_connections() -> u32 {
+    1
+}
+
+fn default_connect_timeout_secs() -> u64 {
+    8
+}
+
+fn default_idle_timeout_secs() -> u64 {
+    300
+}
+
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
             db_type: "sqlite".to_string(),
             connection_string: "/var/lib/railscale/db.sqlite".to_string(),
+            max_connections: default_max_connections(),
+            min_connections: default_min_connections(),
+            connect_timeout_secs: default_connect_timeout_secs(),
+            idle_timeout_secs: default_idle_timeout_secs(),
             sqlite: SqliteConfig::default(),
         }
     }
@@ -1379,6 +1415,32 @@ mod tests {
             !debug_output.contains("super-secret-value"),
             "client_secret should be redacted in Debug output"
         );
+    }
+
+    #[test]
+    fn database_pool_config_defaults() {
+        let config = DatabaseConfig::default();
+        assert_eq!(config.max_connections, 5);
+        assert_eq!(config.min_connections, 1);
+        assert_eq!(config.connect_timeout_secs, 8);
+        assert_eq!(config.idle_timeout_secs, 300);
+    }
+
+    #[test]
+    fn database_pool_config_from_json() {
+        let json = r#"{
+            "db_type": "sqlite",
+            "connection_string": "/tmp/test.db",
+            "max_connections": 20,
+            "min_connections": 5,
+            "connect_timeout_secs": 30,
+            "idle_timeout_secs": 600
+        }"#;
+        let config: DatabaseConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.max_connections, 20);
+        assert_eq!(config.min_connections, 5);
+        assert_eq!(config.connect_timeout_secs, 30);
+        assert_eq!(config.idle_timeout_secs, 600);
     }
 
     #[test]

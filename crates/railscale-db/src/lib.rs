@@ -363,7 +363,16 @@ impl RailscaleDb {
     /// create a new database connection from config.
     pub async fn new(config: &Config) -> Result<Self> {
         let url = Self::build_connection_url(&config.database)?;
-        let conn: DatabaseConnection = SeaOrmDatabase::connect(&url)
+        let mut opts = sea_orm::ConnectOptions::new(&url);
+        opts.max_connections(config.database.max_connections)
+            .min_connections(config.database.min_connections)
+            .connect_timeout(std::time::Duration::from_secs(
+                config.database.connect_timeout_secs,
+            ))
+            .idle_timeout(std::time::Duration::from_secs(
+                config.database.idle_timeout_secs,
+            ));
+        let conn: DatabaseConnection = SeaOrmDatabase::connect(opts)
             .await
             .map_err(|e| Error::Connection(e.to_string()))?;
 
@@ -379,9 +388,6 @@ impl RailscaleDb {
     }
 
     /// enable write-ahead logging mode for sqlite.
-    ///
-    /// WAL mode allows concurrent reads during writes and generally
-    /// improves performance. must be called before any writes.
     async fn enable_wal_mode(&self) -> Result<()> {
         use sea_orm::ConnectionTrait;
         self.conn
