@@ -1,10 +1,4 @@
 //! user endpoints for api v1 (headscale-compatible).
-//!
-//! endpoints:
-//! - `GET /api/v1/user` - list all users
-//! - `POST /api/v1/user` - create a user
-//! - `DELETE /api/v1/user/{id}` - delete a user
-//! - `POST /api/v1/user/{old_id}/rename/{new_name}` - rename a user
 
 use axum::{
     Json, Router,
@@ -15,6 +9,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::nodes::PaginationParams;
+
+use tracing::{debug, info, warn};
 
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
@@ -28,7 +24,6 @@ pub struct ListUsersResponse {
 }
 
 /// user representation in api responses.
-/// uses snake_case to match headscale's json format.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UserResponse {
     pub id: String,
@@ -65,12 +60,9 @@ impl From<User> for UserResponse {
 /// request body for creating a user.
 #[derive(Debug, Deserialize)]
 pub struct CreateUserRequest {
-    /// username must be 1-63 lowercase alphanumeric chars with hyphens.
-    /// validated automatically via serde deserialization.
     pub name: Username,
     #[serde(default)]
     pub display_name: Option<String>,
-    /// email address (validated automatically via serde deserialization).
     #[serde(default)]
     pub email: Option<Email>,
 }
@@ -111,6 +103,7 @@ async fn list_users(
 ) -> Result<Json<ListUsersResponse>, ApiError> {
     let users = state.db.list_users().await.map_err(ApiError::internal)?;
 
+    debug!(count = users.len(), "listing users");
     let users: Vec<UserResponse> = pagination
         .apply(users)
         .into_iter()
@@ -131,7 +124,6 @@ async fn create_user(
     State(state): State<AppState>,
     JsonBody(req): JsonBody<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<CreateUserResponse>), ApiError> {
-    // validate display name length if provided
     if let Some(ref display_name) = req.display_name
         && display_name.chars().count() > MAX_DISPLAY_NAME_LEN
     {
@@ -141,10 +133,8 @@ async fn create_user(
         )));
     }
 
-    // username is already validated by serde deserialization
     let name = req.name.into_inner();
 
-    // check if user already exists
     if state
         .db
         .get_user_by_name(&name)
@@ -168,6 +158,7 @@ async fn create_user(
         .await
         .map_err(ApiError::internal)?;
 
+    info!(user_id = user.id.0, name = %user.name, "user created");
     Ok((
         StatusCode::CREATED,
         Json(CreateUserResponse {
@@ -186,7 +177,6 @@ async fn delete_user(
 ) -> Result<Json<DeleteUserResponse>, ApiError> {
     let user_id = UserId(id);
 
-    // check user exists
     if state
         .db
         .get_user(user_id)
@@ -197,21 +187,18 @@ async fn delete_user(
         return Err(ApiError::not_found(format!("user {} not found", id)));
     }
 
-    // fetch user's nodes to release IPs after deletion
     let user_nodes = state
         .db
         .list_nodes_for_user(user_id)
         .await
         .map_err(ApiError::internal)?;
 
-    // cascade: soft-delete nodes and preauth keys belonging to this user
     state
         .db
         .delete_nodes_for_user(user_id)
         .await
         .map_err(ApiError::internal)?;
 
-    // release allocated IPs back to the pool
     {
         let mut allocator = state.ip_allocator.lock().await;
         for node in &user_nodes {
@@ -236,6 +223,11 @@ async fn delete_user(
         .await
         .map_err(ApiError::internal)?;
 
+    warn!(
+        user_id = id,
+        nodes_deleted = user_nodes.len(),
+        "user deleted"
+    );
     Ok(Json(DeleteUserResponse {}))
 }
 
@@ -247,12 +239,10 @@ async fn rename_user(
     State(state): State<AppState>,
     Path((old_id, new_name)): Path<(u64, String)>,
 ) -> Result<Json<RenameUserResponse>, ApiError> {
-    // validate new username
     let new_name = Username::new(&new_name).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let user_id = UserId(old_id);
 
-    // get existing user
     let mut user = state
         .db
         .get_user(user_id)
@@ -260,7 +250,6 @@ async fn rename_user(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("user {} not found", old_id)))?;
 
-    // check new name doesn't conflict
     if let Some(existing) = state
         .db
         .get_user_by_name(new_name.as_str())
@@ -274,7 +263,7 @@ async fn rename_user(
         )));
     }
 
-    // update name
+    let old_name = user.name.clone();
     user.name = new_name.into_inner();
     let user = state
         .db
@@ -282,6 +271,7 @@ async fn rename_user(
         .await
         .map_err(ApiError::internal)?;
 
+    info!(user_id = old_id, old_name = %old_name, new_name = %user.name, "user renamed");
     Ok(Json(RenameUserResponse {
         user: UserResponse::from(user),
     }))

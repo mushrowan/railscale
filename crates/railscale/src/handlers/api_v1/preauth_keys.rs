@@ -1,11 +1,4 @@
 //! preauth key endpoints for api v1 (headscale-compatible).
-//!
-//! endpoints:
-//! - `GET /api/v1/preauthkey` - list all preauth keys
-//! - `POST /api/v1/preauthkey` - create a preauth key
-//! - `POST /api/v1/preauthkey/expire` - expire a preauth key
-//! - `DELETE /api/v1/preauthkey` - delete a preauth key (json body, legacy)
-//! - `DELETE /api/v1/preauthkey/{id}` - delete a preauth key (path param, preferred)
 
 use axum::{
     Json, Router,
@@ -15,6 +8,8 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+
+use tracing::{debug, info, warn};
 
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
@@ -44,11 +39,10 @@ pub struct PreAuthKeyResponse {
 }
 
 impl PreAuthKeyResponse {
-    /// create from preauthkey with prefix only (for list operations).
     fn from_key_prefix_only(key: PreAuthKey) -> Self {
         Self {
             id: key.id.to_string(),
-            key: key.key_prefix, // Only show prefix, not full key
+            key: key.key_prefix,
             user_id: key.user_id.0.to_string(),
             reusable: key.reusable,
             ephemeral: key.ephemeral,
@@ -59,11 +53,10 @@ impl PreAuthKeyResponse {
         }
     }
 
-    /// create from preauthkey with full key (for creation response only).
     fn from_key_with_full_token(key: PreAuthKey, full_key: &str) -> Self {
         Self {
             id: key.id.to_string(),
-            key: full_key.to_string(), // Full key returned only at creation
+            key: full_key.to_string(),
             user_id: key.user_id.0.to_string(),
             reusable: key.reusable,
             ephemeral: key.ephemeral,
@@ -138,9 +131,6 @@ pub fn router() -> Router<AppState> {
 }
 
 /// list all preauth keys.
-///
-/// note: only returns the key prefix for security. the full key is only
-/// available at creation time.
 async fn list_preauth_keys(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
@@ -151,6 +141,7 @@ async fn list_preauth_keys(
         .await
         .map_err(ApiError::internal)?;
 
+    debug!(count = keys.len(), "listing preauth keys");
     let preauth_keys: Vec<PreAuthKeyResponse> = keys
         .into_iter()
         .map(PreAuthKeyResponse::from_key_prefix_only)
@@ -167,7 +158,6 @@ async fn create_preauth_key(
     State(state): State<AppState>,
     JsonBody(req): JsonBody<CreatePreAuthKeyRequest>,
 ) -> Result<(StatusCode, Json<CreatePreAuthKeyResponse>), ApiError> {
-    // verify user exists
     let user_id = UserId(req.user);
     if state
         .db
@@ -179,9 +169,6 @@ async fn create_preauth_key(
         return Err(ApiError::not_found(format!("user {} not found", req.user)));
     }
 
-    // tags validated by Tags newtype during deserialization
-
-    // parse expiration or default to 90 days
     let expiration = if let Some(exp_str) = req.expiration {
         Some(
             chrono::DateTime::parse_from_rfc3339(&exp_str)
@@ -192,7 +179,6 @@ async fn create_preauth_key(
         Some(Utc::now() + Duration::days(90))
     };
 
-    // generate token
     let token = PreAuthKeyToken::generate();
 
     let mut key = PreAuthKey::from_token(0, &token, user_id);
@@ -207,7 +193,13 @@ async fn create_preauth_key(
         .await
         .map_err(ApiError::internal)?;
 
-    // return the full token at creation time (this is the only time it's available)
+    info!(
+        key_id = key.id,
+        user_id = user_id.0,
+        reusable = key.reusable,
+        ephemeral = key.ephemeral,
+        "preauth key created"
+    );
     Ok((
         StatusCode::CREATED,
         Json(CreatePreAuthKeyResponse {
@@ -230,15 +222,13 @@ async fn expire_preauth_key(
         .await
         .map_err(ApiError::internal)?;
 
+    info!(key_id = req.id, "preauth key expired");
     Ok(Json(ExpirePreAuthKeyResponse {}))
 }
 
 /// delete a preauth key (legacy json body).
 ///
 /// `DELETE /api/v1/preauthkey` with `{"id": N}`
-///
-/// note: some http clients don't support DELETE with body.
-/// prefer `DELETE /api/v1/preauthkey/{id}` instead.
 async fn delete_preauth_key_json(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
@@ -250,10 +240,11 @@ async fn delete_preauth_key_json(
         .await
         .map_err(ApiError::internal)?;
 
+    warn!(key_id = req.id, "preauth key deleted");
     Ok(Json(DeletePreAuthKeyResponse {}))
 }
 
-/// delete a preauth key (path param, preferred).
+/// delete a preauth key (path param).
 ///
 /// `DELETE /api/v1/preauthkey/{id}`
 async fn delete_preauth_key_path(
@@ -267,6 +258,7 @@ async fn delete_preauth_key_path(
         .await
         .map_err(ApiError::internal)?;
 
+    warn!(key_id = id, "preauth key deleted");
     Ok(Json(DeletePreAuthKeyResponse {}))
 }
 

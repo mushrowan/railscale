@@ -1,6 +1,4 @@
 //! handler for the `/key` endpoint.
-//!
-//! returns the server's noise public key for ts2021 protocol.
 
 use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
@@ -11,41 +9,28 @@ use crate::AppState;
 /// a zero-valued 32-byte key (all zeros).
 const ZERO_KEY: [u8; 32] = [0u8; 32];
 
-/// response for the `/key` endpoint.
-///
-/// this matches tailscale's `overtlspublickeyresponse` structure.
-/// keys are serialized as strings with the `mkey:` prefix followed by hex-encoded bytes.
+/// response for the `/key` endpoint (matches tailscale's `overtlspublickeyresponse`).
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyResponse {
-    /// legacy nacl crypto_box machine key.
-    /// zero-valued for modern clients using noise protocol.
-    /// must still be formatted as "mkey:" + hex(32 zero bytes).
+    /// legacy nacl machine key, always zero for noise clients.
     pub legacy_public_key: String,
 
-    /// server's noise public key (32 bytes, curve25519).
-    /// serialized as "mkey:" + hex(32 bytes).
+    /// server's noise public key (curve25519).
     pub public_key: String,
 }
 
-/// format a public key as a tailscale machine key string.
-///
-/// returns `"mkey:" + hex(key_bytes)`.
+/// format a public key as `"mkey:" + hex(key_bytes)`.
 fn format_machine_public_key(key: &[u8]) -> String {
     format!("mkey:{}", hex::encode(key))
 }
 
 /// get /key - return the server's noise public key.
-///
-/// this endpoint is used by tailscale clients to obtain the server's
-/// static public key before initiating the TS2021 Noise handshake.
 pub async fn key(State(state): State<AppState>) -> Json<KeyResponse> {
     let public_key = format_machine_public_key(&state.noise_public_key);
-    // log short prefix only to reduce noise
     let key_prefix = &public_key[..14.min(public_key.len())];
     debug!(key_prefix = %key_prefix, "returning noise public key");
     Json(KeyResponse {
-        // legacy key is zero-valued (must still have mkey: prefix + 64 hex zeros)
         legacy_public_key: format_machine_public_key(&ZERO_KEY),
         public_key,
     })

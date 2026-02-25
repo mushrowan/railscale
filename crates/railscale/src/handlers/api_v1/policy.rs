@@ -112,7 +112,6 @@ async fn set_policy(
         }
     }
 
-    // notify connected clients about the policy change
     state.notifier.notify_state_changed();
 
     let updated_at = chrono::Utc::now().to_rfc3339();

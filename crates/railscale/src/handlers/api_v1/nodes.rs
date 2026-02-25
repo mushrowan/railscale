@@ -1,14 +1,4 @@
 //! node endpoints for api v1 (headscale-compatible).
-//!
-//! endpoints:
-//! - `GET /api/v1/node` - list all nodes
-//! - `GET /api/v1/node/{id}` - get a specific node
-//! - `DELETE /api/v1/node/{id}` - delete a node
-//! - `POST /api/v1/node/{id}/expire` - expire a node
-//! - `POST /api/v1/node/{id}/rename/{new_name}` - rename a node
-//! - `POST /api/v1/node/{id}/tags` - set node tags
-//! - `POST /api/v1/node/{id}/routes` - set approved routes
-//! - `PATCH /api/v1/node/{id}/attributes` - set posture attributes
 
 use std::collections::HashMap;
 
@@ -20,6 +10,8 @@ use axum::{
 use chrono::Utc;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
+
+use tracing::{debug, info, warn};
 
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
@@ -87,10 +79,7 @@ pub struct NodeResponse {
     pub connected_at: Option<String>,
 }
 
-/// format a key as "prefix:<first 8 hex chars>..." (redacted)
-///
-/// only shows the first 4 bytes of key material for identification
-/// without exposing full cryptographic keys via the API
+/// format a key as "prefix:<first 8 hex chars>..." (redacted).
 fn format_key(prefix: &str, bytes: &[u8]) -> String {
     let truncated = &bytes[..bytes.len().min(4)];
     format!("{}:{}...", prefix, hex::encode(truncated))
@@ -256,8 +245,6 @@ async fn delete_node(
         .delete_node(node_id)
         .await
         .map_err(ApiError::internal)?;
-
-    // release allocated IPs back to the pool
     {
         let mut allocator = state.ip_allocator.lock().await;
         if let Some(v4) = node.ipv4 {
@@ -268,9 +255,8 @@ async fn delete_node(
         }
     }
 
-    // notify connected clients about the change
     state.notifier.notify_state_changed();
-
+    warn!(node_id = id, hostname = %node.hostname, "node deleted");
     Ok(Json(EmptyResponse {}))
 }
 
@@ -292,7 +278,6 @@ async fn expire_node(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    // parse expiry or use now
     let expiry = if let Some(expiry_str) = req.expiry {
         chrono::DateTime::parse_from_rfc3339(&expiry_str)
             .map_err(|_| ApiError::bad_request("invalid expiration format, expected RFC3339"))?
@@ -308,7 +293,7 @@ async fn expire_node(
         .await
         .map_err(ApiError::internal)?;
 
-    // notify connected clients
+    info!(node_id = id, expiry = %expiry, "node expired");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;
@@ -325,7 +310,6 @@ async fn rename_node(
     State(state): State<AppState>,
     Path((id, new_name)): Path<(u64, String)>,
 ) -> Result<Json<RenameNodeResponse>, ApiError> {
-    // validate new node name
     let new_name = NodeName::new(&new_name).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let node_id = NodeId(id);
@@ -344,7 +328,7 @@ async fn rename_node(
         .await
         .map_err(ApiError::internal)?;
 
-    // notify connected clients
+    info!(node_id = id, new_name = %node.given_name, "node renamed");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;
@@ -357,8 +341,7 @@ async fn rename_node(
 ///
 /// `POST /api/v1/node/{id}/tags`
 ///
-/// NOTE: once a node has tags, it becomes a "tagged node" and tags
-/// cannot be completely removed (tags-as-identity model).
+/// once tagged, a node cannot have all tags removed (tags-as-identity).
 async fn set_tags(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
@@ -367,8 +350,6 @@ async fn set_tags(
 ) -> Result<Json<SetTagsResponse>, ApiError> {
     let node_id = NodeId(id);
 
-    // tag format and count validated by Tags newtype during deserialization
-
     let mut node = state
         .db
         .get_node(node_id)
@@ -376,7 +357,6 @@ async fn set_tags(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    // once tagged, cannot remove all tags (tags-as-identity)
     if !node.tags.is_empty() && req.tags.is_empty() {
         return Err(ApiError::bad_request(
             "cannot remove all tags from a tagged node - tagged nodes must have at least one tag",
@@ -390,7 +370,7 @@ async fn set_tags(
         .await
         .map_err(ApiError::internal)?;
 
-    // notify connected clients
+    info!(node_id = id, tags = ?node.tags, "node tags updated");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;
@@ -410,8 +390,6 @@ async fn set_routes(
 ) -> Result<Json<SetRoutesResponse>, ApiError> {
     let node_id = NodeId(id);
 
-    // routes validated as CIDR during deserialization
-
     let mut node = state
         .db
         .get_node(node_id)
@@ -426,7 +404,7 @@ async fn set_routes(
         .await
         .map_err(ApiError::internal)?;
 
-    // notify connected clients
+    info!(node_id = id, routes = ?node.approved_routes, "node routes updated");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;
@@ -465,7 +443,6 @@ async fn set_posture_attributes(
 ) -> Result<Json<SetPostureAttributesResponse>, ApiError> {
     let node_id = NodeId(id);
 
-    // get the current node
     let mut node = state
         .db
         .get_node(node_id)
@@ -473,7 +450,6 @@ async fn set_posture_attributes(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    // merge attributes: null values delete the key
     for (key, value) in req.attributes {
         if value.is_null() {
             node.posture_attributes.remove(&key);
@@ -482,14 +458,12 @@ async fn set_posture_attributes(
         }
     }
 
-    // update in database
     state
         .db
         .set_node_posture_attributes(node_id, &node.posture_attributes)
         .await
         .map_err(ApiError::internal)?;
 
-    // refetch to get updated node
     let node = state
         .db
         .get_node(node_id)
@@ -497,7 +471,7 @@ async fn set_posture_attributes(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    // notify connected clients
+    debug!(node_id = id, "posture attributes updated");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;

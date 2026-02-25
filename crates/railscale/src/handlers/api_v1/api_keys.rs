@@ -1,10 +1,4 @@
 //! api key endpoints for api v1 (headscale-compatible).
-//!
-//! endpoints:
-//! - `get /api/v1/apikey` - list all api keys
-//! - `post /api/v1/apikey` - create an api key
-//! - `post /api/v1/apikey/expire` - expire an api key
-//! - `delete /api/v1/apikey/{prefix}` - delete an api key by prefix
 
 use axum::{
     Json, Router,
@@ -14,6 +8,8 @@ use axum::{
 };
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
+
+use tracing::{debug, info, warn};
 
 use crate::AppState;
 use crate::handlers::{ApiError, ApiKeyContext, JsonBody};
@@ -28,7 +24,6 @@ pub struct ListApiKeysResponse {
 }
 
 /// api key representation in api responses.
-/// NOTE: the actual secret is never returned after creation.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ApiKeyResponse {
     pub id: String,
@@ -71,10 +66,8 @@ pub struct CreateApiKeyRequest {
 }
 
 /// response for create api key endpoint.
-/// includes the full key (only shown once).
 #[derive(Debug, Serialize)]
 pub struct CreateApiKeyResponse {
-    /// the full api key - only returned on creation, never again.
     #[serde(rename = "apiKey")]
     pub api_key: String,
     /// metadata about the created key.
@@ -121,6 +114,7 @@ async fn list_api_keys(
         .await
         .map_err(ApiError::internal)?;
 
+    debug!(count = keys.len(), "listing api keys");
     let api_keys: Vec<ApiKeyResponse> = keys.into_iter().map(ApiKeyResponse::from).collect();
 
     Ok(Json(ListApiKeysResponse { api_keys }))
@@ -129,14 +123,11 @@ async fn list_api_keys(
 /// create a new api key.
 ///
 /// `POST /api/v1/apikey`
-///
-/// returns the full key only once - it cannot be retrieved later.
 async fn create_api_key(
     _auth: ApiKeyContext,
     State(state): State<AppState>,
     JsonBody(req): JsonBody<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<CreateApiKeyResponse>), ApiError> {
-    // verify user exists
     let user_id = UserId(req.user);
     if state
         .db
@@ -148,7 +139,6 @@ async fn create_api_key(
         return Err(ApiError::not_found(format!("user {} not found", req.user)));
     }
 
-    // parse expiration or default to 90 days
     let expiration = if let Some(exp_str) = req.expiration {
         Some(
             chrono::DateTime::parse_from_rfc3339(&exp_str)
@@ -159,7 +149,6 @@ async fn create_api_key(
         Some(Utc::now() + Duration::days(90))
     };
 
-    // generate key
     let secret = ApiKeySecret::generate();
     let name = req
         .name
@@ -174,10 +163,12 @@ async fn create_api_key(
         .await
         .map_err(ApiError::internal)?;
 
+    info!(key_id = key.id, user_id = user_id.0, name = %key.name, "api key created");
+
     Ok((
         StatusCode::CREATED,
         Json(CreateApiKeyResponse {
-            api_key: secret.full_key.clone(), // Cloned because ApiKeySecret zeroizes on drop
+            api_key: secret.full_key.clone(),
             key: ApiKeyResponse::from(key),
         }),
     ))
@@ -194,7 +185,6 @@ async fn expire_api_key(
     let key_id = match (req.id, req.prefix) {
         (Some(id), _) => id,
         (None, Some(prefix)) => {
-            // look up by prefix (selector prefix, first 8 chars)
             let selector_prefix = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
             let keys = state
                 .db
@@ -230,6 +220,7 @@ async fn expire_api_key(
         .await
         .map_err(ApiError::internal)?;
 
+    info!(key_id, "api key expired");
     Ok(Json(ExpireApiKeyResponse {}))
 }
 
@@ -241,7 +232,6 @@ async fn delete_api_key(
     State(state): State<AppState>,
     Path(prefix): Path<String>,
 ) -> Result<Json<DeleteApiKeyResponse>, ApiError> {
-    // look up by prefix (selector prefix, first 8 chars)
     let selector_prefix = prefix.strip_prefix("rsapi_").unwrap_or(&prefix);
     let keys = state
         .db
@@ -272,6 +262,7 @@ async fn delete_api_key(
         .await
         .map_err(ApiError::internal)?;
 
+    warn!(key_id, prefix = %prefix, "api key deleted");
     Ok(Json(DeleteApiKeyResponse {}))
 }
 
