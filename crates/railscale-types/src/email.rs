@@ -74,21 +74,12 @@ impl Serialize for Email {
 }
 
 /// error type for email validation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EmailError {
     /// email format is invalid.
+    #[error("invalid email format")]
     Invalid,
 }
-
-impl fmt::Display for EmailError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EmailError::Invalid => write!(f, "invalid email format"),
-        }
-    }
-}
-
-impl std::error::Error for EmailError {}
 
 #[cfg(test)]
 mod tests {

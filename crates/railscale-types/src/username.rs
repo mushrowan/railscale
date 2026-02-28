@@ -177,43 +177,21 @@ impl Serialize for Username {
 }
 
 /// error type for username validation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum UsernameError {
     /// username cannot be empty.
+    #[error("username cannot be empty")]
     Empty,
     /// username exceeds maximum length.
+    #[error("username too long ({0} chars, max {MAX_USERNAME_LEN})")]
     TooLong(usize),
     /// username contains invalid characters.
+    #[error("username must contain only lowercase letters, digits, and hyphens")]
     InvalidCharacters,
     /// username starts or ends with a hyphen.
+    #[error("username cannot start or end with a hyphen")]
     InvalidHyphenPosition,
 }
-
-impl fmt::Display for UsernameError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            UsernameError::Empty => write!(f, "username cannot be empty"),
-            UsernameError::TooLong(len) => {
-                write!(
-                    f,
-                    "username too long ({} chars, max {})",
-                    len, MAX_USERNAME_LEN
-                )
-            }
-            UsernameError::InvalidCharacters => {
-                write!(
-                    f,
-                    "username must contain only lowercase letters, digits, and hyphens"
-                )
-            }
-            UsernameError::InvalidHyphenPosition => {
-                write!(f, "username cannot start or end with a hyphen")
-            }
-        }
-    }
-}
-
-impl std::error::Error for UsernameError {}
 
 #[cfg(test)]
 mod tests {

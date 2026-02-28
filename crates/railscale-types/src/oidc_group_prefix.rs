@@ -129,43 +129,21 @@ impl Serialize for OidcGroupPrefix {
 }
 
 /// error type for oidc group prefix validation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OidcGroupPrefixError {
     /// prefix cannot be empty.
+    #[error("OIDC group prefix cannot be empty")]
     Empty,
     /// prefix exceeds maximum length.
+    #[error("OIDC group prefix too long ({0} chars, max {MAX_OIDC_GROUP_PREFIX_LEN})")]
     TooLong(usize),
     /// prefix cannot contain colons (reserved for selector syntax).
+    #[error("OIDC group prefix cannot contain colons")]
     ContainsColon,
     /// prefix contains invalid characters.
+    #[error("OIDC group prefix must be alphanumeric with hyphens or underscores")]
     InvalidCharacters,
 }
-
-impl fmt::Display for OidcGroupPrefixError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OidcGroupPrefixError::Empty => write!(f, "OIDC group prefix cannot be empty"),
-            OidcGroupPrefixError::TooLong(len) => {
-                write!(
-                    f,
-                    "OIDC group prefix too long ({} chars, max {})",
-                    len, MAX_OIDC_GROUP_PREFIX_LEN
-                )
-            }
-            OidcGroupPrefixError::ContainsColon => {
-                write!(f, "OIDC group prefix cannot contain colons")
-            }
-            OidcGroupPrefixError::InvalidCharacters => {
-                write!(
-                    f,
-                    "OIDC group prefix must be alphanumeric with hyphens or underscores"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for OidcGroupPrefixError {}
 
 #[cfg(test)]
 mod tests {

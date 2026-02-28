@@ -177,43 +177,21 @@ impl Serialize for NodeName {
 }
 
 /// error type for node name validation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NodeNameError {
     /// node name cannot be empty.
+    #[error("node name cannot be empty")]
     Empty,
     /// node name exceeds maximum length.
+    #[error("node name too long ({0} chars, max {MAX_NODE_NAME_LEN})")]
     TooLong(usize),
     /// node name contains invalid characters.
+    #[error("node name must contain only lowercase letters, digits, and hyphens")]
     InvalidCharacters,
     /// node name starts or ends with a hyphen.
+    #[error("node name cannot start or end with a hyphen")]
     InvalidHyphenPosition,
 }
-
-impl fmt::Display for NodeNameError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            NodeNameError::Empty => write!(f, "node name cannot be empty"),
-            NodeNameError::TooLong(len) => {
-                write!(
-                    f,
-                    "node name too long ({} chars, max {})",
-                    len, MAX_NODE_NAME_LEN
-                )
-            }
-            NodeNameError::InvalidCharacters => {
-                write!(
-                    f,
-                    "node name must contain only lowercase letters, digits, and hyphens"
-                )
-            }
-            NodeNameError::InvalidHyphenPosition => {
-                write!(f, "node name cannot start or end with a hyphen")
-            }
-        }
-    }
-}
-
-impl std::error::Error for NodeNameError {}
 
 #[cfg(test)]
 mod tests {

@@ -134,46 +134,24 @@ impl Serialize for Tag {
 }
 
 /// error type for tag validation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TagError {
     /// tag must start with "tag:".
+    #[error("tag must start with 'tag:'")]
     MissingPrefix,
     /// tag name cannot be empty.
+    #[error("tag name cannot be empty")]
     EmptyName,
     /// tag name exceeds maximum length.
+    #[error("tag name too long ({0} chars, max {MAX_TAG_NAME_LEN})")]
     NameTooLong(usize),
     /// tag name contains invalid characters.
+    #[error("tag name must be lowercase alphanumeric with hyphens or underscores")]
     InvalidCharacters,
     /// too many tags in collection.
+    #[error("too many tags ({0} provided, max {MAX_TAGS})")]
     TooManyTags(usize),
 }
-
-impl fmt::Display for TagError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TagError::MissingPrefix => write!(f, "tag must start with 'tag:'"),
-            TagError::EmptyName => write!(f, "tag name cannot be empty"),
-            TagError::NameTooLong(len) => {
-                write!(
-                    f,
-                    "tag name too long ({} chars, max {})",
-                    len, MAX_TAG_NAME_LEN
-                )
-            }
-            TagError::InvalidCharacters => {
-                write!(
-                    f,
-                    "tag name must be lowercase alphanumeric with hyphens or underscores"
-                )
-            }
-            TagError::TooManyTags(count) => {
-                write!(f, "too many tags ({} provided, max {})", count, MAX_TAGS)
-            }
-        }
-    }
-}
-
-impl std::error::Error for TagError {}
 
 /// a validated collection of tags with count limit enforcement.
 ///

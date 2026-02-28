@@ -73,22 +73,13 @@ impl Serialize for PolicyJson {
 }
 
 /// error type for policy json validation
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PolicyJsonError {
     /// policy exceeds maximum size
+    // intentionally generic - don't leak the actual size
+    #[error("policy exceeds maximum size")]
     TooLarge(usize),
 }
-
-impl fmt::Display for PolicyJsonError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            // intentionally generic - don't leak the actual size
-            PolicyJsonError::TooLarge(_) => write!(f, "policy exceeds maximum size"),
-        }
-    }
-}
-
-impl std::error::Error for PolicyJsonError {}
 
 #[cfg(test)]
 mod tests {
