@@ -90,35 +90,39 @@ pub enum Autogroup {
 impl Selector {
     /// parse a selector from a string.
     pub fn parse(s: &str) -> Result<Self, ParseError> {
-        match s {
-            "*" => Ok(Selector::Wildcard),
-            s if s.starts_with("tag:") => Ok(Selector::Tag(s[4..].to_string())),
-            s if s.starts_with("group:") => Ok(Selector::Group(s[6..].to_string())),
-            s if s.starts_with("autogroup:") => {
-                let name = &s[10..];
-                let autogroup = match name {
-                    "admin" => Autogroup::Admin,
-                    "member" => Autogroup::Member,
-                    "owner" => Autogroup::Owner,
-                    "tagged" => Autogroup::Tagged,
-                    "shared" => Autogroup::Shared,
-                    "internet" => Autogroup::Internet,
-                    "self" => Autogroup::SelfDevices,
-                    "nonroot" => Autogroup::NonRoot,
-                    _ => return Err(ParseError::UnknownAutogroup(name.to_string())),
-                };
-                Ok(Selector::Autogroup(autogroup))
-            }
-            s if s.contains('@') => Ok(Selector::User(s.to_string())),
-            s if s.contains('/') => {
-                // try to parse as cidr
-                let net: IpNet = s
-                    .parse()
-                    .map_err(|_| ParseError::InvalidCidr(s.to_string()))?;
-                Ok(Selector::Cidr(net))
-            }
-            other => Err(ParseError::UnknownSelector(other.to_string())),
+        if s == "*" {
+            return Ok(Selector::Wildcard);
         }
+        if let Some(name) = s.strip_prefix("tag:") {
+            return Ok(Selector::Tag(name.to_string()));
+        }
+        if let Some(name) = s.strip_prefix("group:") {
+            return Ok(Selector::Group(name.to_string()));
+        }
+        if let Some(name) = s.strip_prefix("autogroup:") {
+            let autogroup = match name {
+                "admin" => Autogroup::Admin,
+                "member" => Autogroup::Member,
+                "owner" => Autogroup::Owner,
+                "tagged" => Autogroup::Tagged,
+                "shared" => Autogroup::Shared,
+                "internet" => Autogroup::Internet,
+                "self" => Autogroup::SelfDevices,
+                "nonroot" => Autogroup::NonRoot,
+                _ => return Err(ParseError::UnknownAutogroup(name.to_string())),
+            };
+            return Ok(Selector::Autogroup(autogroup));
+        }
+        if s.contains('@') {
+            return Ok(Selector::User(s.to_string()));
+        }
+        if s.contains('/') {
+            let net: IpNet = s
+                .parse()
+                .map_err(|_| ParseError::InvalidCidr(s.to_string()))?;
+            return Ok(Selector::Cidr(net));
+        }
+        Err(ParseError::UnknownSelector(s.to_string()))
     }
 }
 
