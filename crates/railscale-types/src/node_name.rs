@@ -49,45 +49,7 @@ impl NodeName {
     ///
     /// returns `None` if the result would be empty
     pub fn sanitise(s: &str) -> Option<Self> {
-        // convert to lowercase and replace invalid chars with hyphens
-        let sanitised: String = s
-            .to_lowercase()
-            .chars()
-            .map(|c| {
-                if c.is_ascii_lowercase() || c.is_ascii_digit() {
-                    c
-                } else {
-                    '-'
-                }
-            })
-            .collect();
-
-        // collapse multiple hyphens and trim leading/trailing
-        let mut result = String::new();
-        let mut last_was_hyphen = true; // Treat start as if preceded by hyphen
-        for c in sanitised.chars() {
-            if c == '-' {
-                if !last_was_hyphen && result.len() < MAX_NODE_NAME_LEN {
-                    result.push(c);
-                    last_was_hyphen = true;
-                }
-            } else if result.len() < MAX_NODE_NAME_LEN {
-                result.push(c);
-                last_was_hyphen = false;
-            }
-        }
-
-        // trim trailing hyphen
-        while result.ends_with('-') {
-            result.pop();
-        }
-
-        if result.is_empty() {
-            None
-        } else {
-            // this should always succeed given our sanitisation logic
-            Self::new(result).ok()
-        }
+        crate::dns_label::sanitise(s, MAX_NODE_NAME_LEN).and_then(|r| Self::new(r).ok())
     }
 
     /// get the node name string.
@@ -101,26 +63,14 @@ impl NodeName {
     }
 
     fn validate(s: &str) -> Result<(), NodeNameError> {
-        if s.is_empty() {
-            return Err(NodeNameError::Empty);
-        }
-
-        if s.len() > MAX_NODE_NAME_LEN {
-            return Err(NodeNameError::TooLong(s.len()));
-        }
-
-        if !s
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
-            return Err(NodeNameError::InvalidCharacters);
-        }
-
-        if s.starts_with('-') || s.ends_with('-') {
-            return Err(NodeNameError::InvalidHyphenPosition);
-        }
-
-        Ok(())
+        crate::dns_label::validate(s, MAX_NODE_NAME_LEN).map_err(|e| match e {
+            crate::dns_label::DnsLabelError::Empty => NodeNameError::Empty,
+            crate::dns_label::DnsLabelError::TooLong(len) => NodeNameError::TooLong(len),
+            crate::dns_label::DnsLabelError::InvalidCharacters => NodeNameError::InvalidCharacters,
+            crate::dns_label::DnsLabelError::InvalidHyphenPosition => {
+                NodeNameError::InvalidHyphenPosition
+            }
+        })
     }
 }
 

@@ -49,45 +49,7 @@ impl Username {
     ///
     /// returns `None` if the result would be empty
     pub fn sanitise(s: &str) -> Option<Self> {
-        // convert to lowercase and replace invalid chars with hyphens
-        let sanitised: String = s
-            .to_lowercase()
-            .chars()
-            .map(|c| {
-                if c.is_ascii_lowercase() || c.is_ascii_digit() {
-                    c
-                } else {
-                    '-'
-                }
-            })
-            .collect();
-
-        // collapse multiple hyphens and trim leading/trailing
-        let mut result = String::new();
-        let mut last_was_hyphen = true; // Treat start as if preceded by hyphen
-        for c in sanitised.chars() {
-            if c == '-' {
-                if !last_was_hyphen && result.len() < MAX_USERNAME_LEN {
-                    result.push(c);
-                    last_was_hyphen = true;
-                }
-            } else if result.len() < MAX_USERNAME_LEN {
-                result.push(c);
-                last_was_hyphen = false;
-            }
-        }
-
-        // trim trailing hyphen
-        while result.ends_with('-') {
-            result.pop();
-        }
-
-        if result.is_empty() {
-            None
-        } else {
-            // this should always succeed given our sanitisation logic
-            Self::new(result).ok()
-        }
+        crate::dns_label::sanitise(s, MAX_USERNAME_LEN).and_then(|r| Self::new(r).ok())
     }
 
     /// get the username string.
@@ -101,26 +63,14 @@ impl Username {
     }
 
     fn validate(s: &str) -> Result<(), UsernameError> {
-        if s.is_empty() {
-            return Err(UsernameError::Empty);
-        }
-
-        if s.len() > MAX_USERNAME_LEN {
-            return Err(UsernameError::TooLong(s.len()));
-        }
-
-        if !s
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
-            return Err(UsernameError::InvalidCharacters);
-        }
-
-        if s.starts_with('-') || s.ends_with('-') {
-            return Err(UsernameError::InvalidHyphenPosition);
-        }
-
-        Ok(())
+        crate::dns_label::validate(s, MAX_USERNAME_LEN).map_err(|e| match e {
+            crate::dns_label::DnsLabelError::Empty => UsernameError::Empty,
+            crate::dns_label::DnsLabelError::TooLong(len) => UsernameError::TooLong(len),
+            crate::dns_label::DnsLabelError::InvalidCharacters => UsernameError::InvalidCharacters,
+            crate::dns_label::DnsLabelError::InvalidHyphenPosition => {
+                UsernameError::InvalidHyphenPosition
+            }
+        })
     }
 }
 

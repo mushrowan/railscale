@@ -10,6 +10,7 @@
 
 mod api_key;
 mod config;
+mod dns_label;
 mod email;
 mod error;
 mod keys;
