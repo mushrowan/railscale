@@ -43,7 +43,7 @@ impl From<Model> for AuditLog {
     fn from(model: Model) -> Self {
         AuditLog {
             id: model.id as u64,
-            node_id: NodeId(model.node_id as u64),
+            node_id: NodeId::from(model.node_id),
             action: model.action,
             details: model.details,
             client_timestamp: model.client_timestamp,
@@ -60,7 +60,7 @@ impl From<&AuditLog> for ActiveModel {
             } else {
                 Set(log.id as i64)
             },
-            node_id: Set(log.node_id.0 as i64),
+            node_id: Set(log.node_id.as_i64()),
             action: Set(log.action.clone()),
             details: Set(log.details.clone()),
             client_timestamp: Set(log.client_timestamp),

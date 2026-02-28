@@ -1170,7 +1170,7 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let node = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node = test_node_with_user(1, vec![], Some(UserId(1)));
         let all_nodes = vec![node.clone()];
 
         let ssh_policy = engine.compile_ssh_policy(&node, &all_nodes, &resolver);
@@ -1215,8 +1215,8 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId(2)));
         let all_nodes = vec![node1.clone(), node2.clone()];
 
         // compile ssh policy for node1
@@ -1251,11 +1251,11 @@ mod tests {
         let resolver = EmptyResolver;
 
         // user 1's devices
-        let user1_node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let user1_node2 = test_node_with_user(2, vec![], Some(UserId::from(1)));
+        let user1_node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let user1_node2 = test_node_with_user(2, vec![], Some(UserId(1)));
 
         // user 2's device
-        let user2_node = test_node_with_user(3, vec![], Some(UserId::from(2)));
+        let user2_node = test_node_with_user(3, vec![], Some(UserId(2)));
 
         let all_nodes = vec![user1_node1.clone(), user1_node2.clone(), user2_node.clone()];
 
@@ -1653,8 +1653,8 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId(2)));
         let all_nodes = vec![node1.clone(), node2.clone()];
 
         let ssh_policy = engine.compile_ssh_policy(&node1, &all_nodes, &resolver);
@@ -1683,8 +1683,8 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId(2)));
         let all_nodes = vec![node1.clone(), node2.clone()];
 
         let ssh_policy = engine.compile_ssh_policy(&node1, &all_nodes, &resolver);
@@ -1715,8 +1715,8 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId(2)));
         let all_nodes = vec![node1.clone(), node2.clone()];
 
         let rules = engine.generate_cap_grant_rules(&node1, &all_nodes, &resolver);
@@ -1756,8 +1756,8 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId(2)));
         let all_nodes = vec![node1.clone(), node2.clone()];
 
         let rules = engine.generate_cap_grant_rules(&node1, &all_nodes, &resolver);
@@ -1773,12 +1773,12 @@ mod tests {
         let resolver = EmptyResolver;
 
         // two nodes owned by the same user
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let mut node2 = test_node_with_user(2, vec![], Some(UserId::from(1)));
-        node2.user_id = Some(UserId::from(1));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let mut node2 = test_node_with_user(2, vec![], Some(UserId(1)));
+        node2.user_id = Some(UserId(1));
 
         // different user
-        let node3 = test_node_with_user(3, vec![], Some(UserId::from(2)));
+        let node3 = test_node_with_user(3, vec![], Some(UserId(2)));
 
         let all_nodes = vec![node1.clone(), node2.clone(), node3.clone()];
 
@@ -1805,8 +1805,8 @@ mod tests {
         let resolver = EmptyResolver;
 
         // nodes owned by different users
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let node2 = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId(2)));
         let all_nodes = vec![node1.clone(), node2.clone()];
 
         let rules = engine.generate_taildrop_rules(&node1, &all_nodes, &resolver);
@@ -1821,7 +1821,7 @@ mod tests {
         let engine = GrantsEngine::empty();
         let resolver = EmptyResolver;
 
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
         let tagged = test_node(2, vec!["tag:server"]);
         let all_nodes = vec![node1.clone(), tagged.clone()];
 
@@ -1839,8 +1839,8 @@ mod tests {
         let engine = GrantsEngine::empty();
         let resolver = EmptyResolver;
 
-        let node1 = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let node2 = test_node_with_user(2, vec![], Some(UserId::from(1)));
+        let node1 = test_node_with_user(1, vec![], Some(UserId(1)));
+        let node2 = test_node_with_user(2, vec![], Some(UserId(1)));
         let all_nodes = vec![node1.clone(), node2.clone()];
 
         let rules = engine.generate_taildrop_rules(&node1, &all_nodes, &resolver);
@@ -1892,8 +1892,8 @@ mod tests {
             .users
             .insert(UserId(2), "ro@example.com".to_string());
 
-        let alicja = test_node_with_user(1, vec![], Some(UserId::from(1)));
-        let ro = test_node_with_user(2, vec![], Some(UserId::from(2)));
+        let alicja = test_node_with_user(1, vec![], Some(UserId(1)));
+        let ro = test_node_with_user(2, vec![], Some(UserId(2)));
         let all_nodes = vec![alicja.clone(), ro.clone()];
 
         // from alicja's perspective: ro is a peer, check caps ro→alicja

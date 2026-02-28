@@ -458,7 +458,7 @@ impl Database for RailscaleDb {
     }
 
     async fn get_user(&self, id: UserId) -> Result<Option<User>> {
-        let result = entity::user::Entity::find_by_id(id.0 as i64)
+        let result = entity::user::Entity::find_by_id(id.as_i64())
             .filter(entity::user::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -503,7 +503,7 @@ impl Database for RailscaleDb {
                 entity::user::Column::DeletedAt,
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
-            .filter(entity::user::Column::Id.eq(id.0 as i64))
+            .filter(entity::user::Column::Id.eq(id.as_i64()))
             .exec(&self.conn)
             .await?;
         Ok(())
@@ -518,7 +518,7 @@ impl Database for RailscaleDb {
     }
 
     async fn get_node(&self, id: NodeId) -> Result<Option<Node>> {
-        let result = entity::node::Entity::find_by_id(id.0 as i64)
+        let result = entity::node::Entity::find_by_id(id.as_i64())
             .filter(entity::node::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -559,7 +559,7 @@ impl Database for RailscaleDb {
 
     async fn list_nodes_for_user(&self, user_id: UserId) -> Result<Vec<Node>> {
         let results = entity::node::Entity::find()
-            .filter(entity::node::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::node::Column::UserId.eq(user_id.as_i64()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .all(&self.conn)
             .await?;
@@ -592,7 +592,7 @@ impl Database for RailscaleDb {
                 entity::node::Column::UpdatedAt,
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
-            .filter(entity::node::Column::Id.eq(id.0 as i64))
+            .filter(entity::node::Column::Id.eq(id.as_i64()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
@@ -605,7 +605,7 @@ impl Database for RailscaleDb {
                 entity::node::Column::DeletedAt,
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
-            .filter(entity::node::Column::Id.eq(id.0 as i64))
+            .filter(entity::node::Column::Id.eq(id.as_i64()))
             .exec(&self.conn)
             .await?;
         Ok(())
@@ -617,7 +617,7 @@ impl Database for RailscaleDb {
                 entity::node::Column::DeletedAt,
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
-            .filter(entity::node::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::node::Column::UserId.eq(user_id.as_i64()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
@@ -645,7 +645,7 @@ impl Database for RailscaleDb {
 
     async fn list_preauth_keys(&self, user_id: UserId) -> Result<Vec<PreAuthKey>> {
         let results = entity::preauth_key::Entity::find()
-            .filter(entity::preauth_key::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::preauth_key::Column::UserId.eq(user_id.as_i64()))
             .filter(entity::preauth_key::Column::DeletedAt.is_null())
             .all(&self.conn)
             .await?;
@@ -683,7 +683,7 @@ impl Database for RailscaleDb {
                 entity::preauth_key::Column::DeletedAt,
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
-            .filter(entity::preauth_key::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::preauth_key::Column::UserId.eq(user_id.as_i64()))
             .filter(entity::preauth_key::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
@@ -747,7 +747,7 @@ impl Database for RailscaleDb {
 
     async fn list_api_keys(&self, user_id: UserId) -> Result<Vec<ApiKey>> {
         let results = entity::api_key::Entity::find()
-            .filter(entity::api_key::Column::UserId.eq(user_id.0 as i64))
+            .filter(entity::api_key::Column::UserId.eq(user_id.as_i64()))
             .filter(entity::api_key::Column::DeletedAt.is_null())
             .all(&self.conn)
             .await?;
@@ -830,7 +830,7 @@ impl Database for RailscaleDb {
     }
 
     async fn get_node_key_signature(&self, node_id: NodeId) -> Result<Option<Vec<u8>>> {
-        let result = entity::node::Entity::find_by_id(node_id.0 as i64)
+        let result = entity::node::Entity::find_by_id(node_id.as_i64())
             .filter(entity::node::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -845,7 +845,7 @@ impl Database for RailscaleDb {
             return Ok(std::collections::HashMap::new());
         }
 
-        let ids: Vec<i64> = node_ids.iter().map(|id| id.0 as i64).collect();
+        let ids: Vec<i64> = node_ids.iter().map(|id| id.as_i64()).collect();
 
         let results = entity::node::Entity::find()
             .filter(entity::node::Column::Id.is_in(ids))
@@ -859,7 +859,7 @@ impl Database for RailscaleDb {
             if let Some(sig) = model.key_signature
                 && !sig.is_empty()
             {
-                map.insert(NodeId(model.id as u64), sig);
+                map.insert(NodeId::from(model.id), sig);
             }
         }
 
@@ -876,7 +876,7 @@ impl Database for RailscaleDb {
                 entity::node::Column::UpdatedAt,
                 sea_orm::sea_query::Expr::value(Utc::now()),
             )
-            .filter(entity::node::Column::Id.eq(node_id.0 as i64))
+            .filter(entity::node::Column::Id.eq(node_id.as_i64()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .exec(&self.conn)
             .await?;
@@ -977,7 +977,7 @@ impl Database for RailscaleDb {
         node_id: NodeId,
     ) -> Result<Vec<DnsChallengeRecord>> {
         let results = entity::dns_challenge_record::Entity::find()
-            .filter(entity::dns_challenge_record::Column::NodeId.eq(node_id.0 as i64))
+            .filter(entity::dns_challenge_record::Column::NodeId.eq(node_id.as_i64()))
             .all(&self.conn)
             .await?;
         Ok(results.into_iter().map(Into::into).collect())

@@ -18,11 +18,27 @@ impl UserId {
     /// tagged nodes don't belong to a real user - the tag is their identity.
     /// this id is used when rendering tagged nodes in the tailscale protocol.
     pub const TAGGED_DEVICES: UserId = UserId(2147455555);
+
+    /// get the raw u64 value.
+    pub fn as_u64(self) -> u64 {
+        self.0
+    }
+
+    /// convert to i64 for database storage.
+    pub fn as_i64(self) -> i64 {
+        self.0 as i64
+    }
 }
 
 impl From<u64> for UserId {
     fn from(id: u64) -> Self {
         Self(id)
+    }
+}
+
+impl From<i64> for UserId {
+    fn from(id: i64) -> Self {
+        Self(id as u64)
     }
 }
 

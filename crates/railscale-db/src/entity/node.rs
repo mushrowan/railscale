@@ -178,7 +178,7 @@ impl From<Model> for Node {
             .unwrap_or_default();
 
         Node {
-            id: NodeId(model.id as u64),
+            id: NodeId::from(model.id),
             machine_key: MachineKey::from_bytes(model.machine_key),
             node_key: NodeKey::from_bytes(model.node_key),
             disco_key: DiscoKey::from_bytes(model.disco_key),
@@ -189,7 +189,7 @@ impl From<Model> for Node {
             hostname: model.hostname,
             given_name: railscale_types::NodeName::sanitise(&model.given_name)
                 .unwrap_or_else(|| "node".parse().unwrap()),
-            user_id: model.user_id.map(|id| UserId(id as u64)),
+            user_id: model.user_id.map(|id| UserId::from(id)),
             register_method,
             tags,
             auth_key_id: model.auth_key_id.map(|id| id as u64),
@@ -231,10 +231,10 @@ impl From<&Node> for ActiveModel {
         };
 
         ActiveModel {
-            id: if node.id.0 == 0 {
+            id: if node.id.as_u64() == 0 {
                 NotSet
             } else {
-                Set(node.id.0 as i64)
+                Set(node.id.as_i64())
             },
             machine_key: Set(node.machine_key.as_bytes().to_vec()),
             node_key: Set(node.node_key.as_bytes().to_vec()),
@@ -245,7 +245,7 @@ impl From<&Node> for ActiveModel {
             ipv6: Set(node.ipv6.map(|ip| ip.to_string())),
             hostname: Set(node.hostname.clone()),
             given_name: Set(node.given_name.to_string()),
-            user_id: Set(node.user_id.map(|id| id.0 as i64)),
+            user_id: Set(node.user_id.map(|id| id.as_i64())),
             register_method: Set(register_method.to_string()),
             tags: Set(tags_json),
             auth_key_id: Set(node.auth_key_id.map(|id| id as i64)),

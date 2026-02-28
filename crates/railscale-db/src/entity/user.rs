@@ -57,7 +57,7 @@ impl From<Model> for User {
             .unwrap_or_default();
 
         User {
-            id: UserId(model.id as u64),
+            id: UserId::from(model.id),
             name: model.name,
             display_name: model.display_name,
             email: model.email,
@@ -81,10 +81,10 @@ impl From<&User> for ActiveModel {
         };
 
         ActiveModel {
-            id: if user.id.0 == 0 {
+            id: if user.id.as_u64() == 0 {
                 NotSet
             } else {
-                Set(user.id.0 as i64)
+                Set(user.id.as_i64())
             },
             name: Set(user.name.clone()),
             display_name: Set(user.display_name.clone()),

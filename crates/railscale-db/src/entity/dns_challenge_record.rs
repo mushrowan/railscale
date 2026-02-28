@@ -42,7 +42,7 @@ impl From<Model> for DnsChallengeRecord {
     fn from(model: Model) -> Self {
         DnsChallengeRecord {
             id: model.id as u64,
-            node_id: NodeId(model.node_id as u64),
+            node_id: NodeId::from(model.node_id),
             record_name: model.record_name,
             record_id: model.record_id,
             created_at: model.created_at,
@@ -58,7 +58,7 @@ impl From<&DnsChallengeRecord> for ActiveModel {
             } else {
                 Set(record.id as i64)
             },
-            node_id: Set(record.node_id.0 as i64),
+            node_id: Set(record.node_id.as_i64()),
             record_name: Set(record.record_name.clone()),
             record_id: Set(record.record_id.clone()),
             created_at: Set(record.created_at),
