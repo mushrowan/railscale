@@ -5,7 +5,6 @@
 //! - Contain only lowercase alphanumeric characters and hyphens
 //! - Not start or end with a hyphen
 
-use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -27,7 +26,10 @@ pub const MAX_USERNAME_LEN: usize = 63;
 /// let username: Username = "alicja".parse().unwrap();
 /// assert_eq!(username.as_str(), "alicja");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, derive_more::Display, derive_more::AsRef,
+)]
+#[as_ref(str)]
 pub struct Username(String);
 
 impl Username {
@@ -74,12 +76,6 @@ impl Username {
     }
 }
 
-impl AsRef<str> for Username {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
 impl PartialEq<str> for Username {
     fn eq(&self, other: &str) -> bool {
         self.0 == other
@@ -89,12 +85,6 @@ impl PartialEq<str> for Username {
 impl PartialEq<&str> for Username {
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other
-    }
-}
-
-impl fmt::Display for Username {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

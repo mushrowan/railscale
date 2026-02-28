@@ -4,7 +4,6 @@
 //! - Start with "tag:"
 //! - Have a name of 1-50 lowercase alphanumeric characters (hyphens/underscores allowed)
 
-use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -29,7 +28,10 @@ pub const MAX_TAGS: usize = 100;
 /// assert_eq!(tag.name(), "server");
 /// assert_eq!(tag.as_str(), "tag:server");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, derive_more::Display, derive_more::AsRef,
+)]
+#[as_ref(str)]
 pub struct Tag(String);
 
 impl Tag {
@@ -81,12 +83,6 @@ impl Tag {
     }
 }
 
-impl AsRef<str> for Tag {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
 impl PartialEq<str> for Tag {
     fn eq(&self, other: &str) -> bool {
         self.0 == other
@@ -96,12 +92,6 @@ impl PartialEq<str> for Tag {
 impl PartialEq<&str> for Tag {
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other
-    }
-}
-
-impl fmt::Display for Tag {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

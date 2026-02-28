@@ -4,7 +4,6 @@
 //! - Start with "tskey-auth-"
 //! - Have exactly 48 hex characters (24 random bytes)
 
-use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -30,7 +29,8 @@ pub const PREAUTH_KEY_PREFIX: &str = "tskey-auth-";
 /// let token: PreAuthKeyToken = "tskey-auth-0123456789abcdef0123456789abcdef0123456789abcdef".parse().unwrap();
 /// assert_eq!(token.hex_part(), "0123456789abcdef0123456789abcdef0123456789abcdef");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display, derive_more::AsRef)]
+#[as_ref(str)]
 pub struct PreAuthKeyToken(String);
 
 impl PreAuthKeyToken {
@@ -105,23 +105,11 @@ impl PreAuthKeyToken {
     }
 }
 
-impl fmt::Display for PreAuthKeyToken {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
 impl FromStr for PreAuthKeyToken {
     type Err = PreAuthKeyTokenError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::new(s)
-    }
-}
-
-impl AsRef<str> for PreAuthKeyToken {
-    fn as_ref(&self) -> &str {
-        &self.0
     }
 }
 

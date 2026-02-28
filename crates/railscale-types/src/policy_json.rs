@@ -2,8 +2,6 @@
 //!
 //! policy json must not exceed the maximum size to prevent DoS attacks
 
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 /// maximum size for policy json in bytes (1MB)
@@ -16,7 +14,8 @@ pub const MAX_POLICY_SIZE: usize = 1024 * 1024;
 ///
 /// the actual json parsing and policy validation happens separately;
 /// this type only enforces size limits at the transport layer
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::Display, derive_more::AsRef)]
+#[as_ref(str)]
 pub struct PolicyJson(String);
 
 impl PolicyJson {
@@ -37,18 +36,6 @@ impl PolicyJson {
     /// consume the PolicyJson and return the inner string
     pub fn into_inner(self) -> String {
         self.0
-    }
-}
-
-impl AsRef<str> for PolicyJson {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for PolicyJson {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 

@@ -9,7 +9,6 @@
 //! - Not contain colons (reserved for selector syntax like `group:`)
 //! - Contain only alphanumeric characters, hyphens, or underscores
 
-use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -29,7 +28,8 @@ pub const MAX_OIDC_GROUP_PREFIX_LEN: usize = 50;
 /// let prefix: OidcGroupPrefix = "oidc-".parse().unwrap();
 /// assert_eq!(prefix.apply("engineering"), "oidc-engineering");
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::Display, derive_more::AsRef)]
+#[as_ref(str)]
 pub struct OidcGroupPrefix(String);
 
 impl OidcGroupPrefix {
@@ -85,18 +85,6 @@ impl OidcGroupPrefix {
         }
 
         Ok(())
-    }
-}
-
-impl AsRef<str> for OidcGroupPrefix {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for OidcGroupPrefix {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
     }
 }
 
