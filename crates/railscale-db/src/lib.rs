@@ -19,8 +19,6 @@ mod migration;
 pub use error::Error;
 pub use ip_allocator::IpAllocator;
 
-use std::future::Future;
-
 use chrono::{DateTime, Utc};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::NotSet, ColumnTrait, Database as SeaOrmDatabase,
@@ -132,225 +130,189 @@ pub trait Database: Send + Sync {
     ///
     /// returns `ok(())` if the database is reachable, `err` otherwise.
     /// used for health checks with a recommended timeout of 1 second.
-    fn ping(&self) -> impl Future<Output = Result<()>> + Send;
+    async fn ping(&self) -> Result<()>;
 
     // ─── User Operations ─────────────────────────────────────────────────────
 
     /// create a new user. Returns the created user with its assigned ID.
-    fn create_user(&self, user: &User) -> impl Future<Output = Result<User>> + Send;
+    async fn create_user(&self, user: &User) -> Result<User>;
 
     /// get a user by id. Returns `None` if not found or soft-deleted.
-    fn get_user(&self, id: UserId) -> impl Future<Output = Result<Option<User>>> + Send;
+    async fn get_user(&self, id: UserId) -> Result<Option<User>>;
 
     /// get a user by username. returns `none` if not found or soft-deleted.
-    fn get_user_by_name(&self, name: &str) -> impl Future<Output = Result<Option<User>>> + Send;
+    async fn get_user_by_name(&self, name: &str) -> Result<Option<User>>;
 
     /// get a user by oidc provider identifier (issuer + subject claim).
-    fn get_user_by_oidc_identifier(
-        &self,
-        identifier: &str,
-    ) -> impl Future<Output = Result<Option<User>>> + Send;
+    async fn get_user_by_oidc_identifier(&self, identifier: &str) -> Result<Option<User>>;
 
     /// list all non-deleted users.
-    fn list_users(&self) -> impl Future<Output = Result<Vec<User>>> + Send;
+    async fn list_users(&self) -> Result<Vec<User>>;
 
     /// update an existing user. returns the updated user.
-    fn update_user(&self, user: &User) -> impl Future<Output = Result<User>> + Send;
+    async fn update_user(&self, user: &User) -> Result<User>;
 
     /// soft-delete a user by setting `deleted_at` timestamp.
-    fn delete_user(&self, id: UserId) -> impl Future<Output = Result<()>> + Send;
+    async fn delete_user(&self, id: UserId) -> Result<()>;
 
     // ─── Node Operations ─────────────────────────────────────────────────────
 
     /// create a new node. returns the created node with its assigned id.
-    fn create_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
+    async fn create_node(&self, node: &Node) -> Result<Node>;
 
     /// get a node by id. Returns `None` if not found or soft-deleted.
-    fn get_node(&self, id: NodeId) -> impl Future<Output = Result<Option<Node>>> + Send;
+    async fn get_node(&self, id: NodeId) -> Result<Option<Node>>;
 
     /// get a node by its current node key (session key).
-    fn get_node_by_node_key(
+    async fn get_node_by_node_key(
         &self,
         node_key: &railscale_types::NodeKey,
-    ) -> impl Future<Output = Result<Option<Node>>> + Send;
+    ) -> Result<Option<Node>>;
 
     /// get a node by its machine key (stable hardware identity).
-    fn get_node_by_machine_key(
+    async fn get_node_by_machine_key(
         &self,
         machine_key: &railscale_types::MachineKey,
-    ) -> impl Future<Output = Result<Option<Node>>> + Send;
+    ) -> Result<Option<Node>>;
 
     /// list all non-deleted nodes.
-    fn list_nodes(&self) -> impl Future<Output = Result<Vec<Node>>> + Send;
+    async fn list_nodes(&self) -> Result<Vec<Node>>;
 
     /// list all non-deleted nodes belonging to a specific user.
-    fn list_nodes_for_user(
-        &self,
-        user_id: UserId,
-    ) -> impl Future<Output = Result<Vec<Node>>> + Send;
+    async fn list_nodes_for_user(&self, user_id: UserId) -> Result<Vec<Node>>;
 
     /// update an existing node. also updates `updated_at` timestamp.
-    fn update_node(&self, node: &Node) -> impl Future<Output = Result<Node>> + Send;
+    async fn update_node(&self, node: &Node) -> Result<Node>;
 
     /// set posture attributes for a node
-    fn set_node_posture_attributes(
+    async fn set_node_posture_attributes(
         &self,
         id: NodeId,
         attrs: &std::collections::HashMap<String, serde_json::Value>,
-    ) -> impl Future<Output = Result<()>> + Send;
+    ) -> Result<()>;
 
     /// soft-delete a node by setting `deleted_at` timestamp.
-    fn delete_node(&self, id: NodeId) -> impl Future<Output = Result<()>> + Send;
+    async fn delete_node(&self, id: NodeId) -> Result<()>;
 
     /// soft-delete all nodes belonging to a user.
-    fn delete_nodes_for_user(&self, user_id: UserId) -> impl Future<Output = Result<u64>> + Send;
+    async fn delete_nodes_for_user(&self, user_id: UserId) -> Result<u64>;
 
     // ─── PreAuthKey Operations ───────────────────────────────────────────────
 
     /// create a new pre-authentication key. returns the key with its assigned id.
-    fn create_preauth_key(
-        &self,
-        key: &PreAuthKey,
-    ) -> impl Future<Output = Result<PreAuthKey>> + Send;
+    async fn create_preauth_key(&self, key: &PreAuthKey) -> Result<PreAuthKey>;
 
     /// get a pre-auth key by its token (lookup by hash).
-    fn get_preauth_key(
-        &self,
-        token: &PreAuthKeyToken,
-    ) -> impl Future<Output = Result<Option<PreAuthKey>>> + Send;
+    async fn get_preauth_key(&self, token: &PreAuthKeyToken) -> Result<Option<PreAuthKey>>;
 
     /// list all pre-auth keys created by a specific user.
-    fn list_preauth_keys(
-        &self,
-        user_id: UserId,
-    ) -> impl Future<Output = Result<Vec<PreAuthKey>>> + Send;
+    async fn list_preauth_keys(&self, user_id: UserId) -> Result<Vec<PreAuthKey>>;
 
     /// list all pre-auth keys across all users.
-    fn get_all_preauth_keys(&self) -> impl Future<Output = Result<Vec<PreAuthKey>>> + Send;
+    async fn get_all_preauth_keys(&self) -> Result<Vec<PreAuthKey>>;
 
     /// mark a non-reusable pre-auth key as used.
-    fn mark_preauth_key_used(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    async fn mark_preauth_key_used(&self, id: u64) -> Result<()>;
 
     /// soft-delete a pre-auth key.
-    fn delete_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    async fn delete_preauth_key(&self, id: u64) -> Result<()>;
 
     /// soft-delete all pre-auth keys belonging to a user.
-    fn delete_preauth_keys_for_user(
-        &self,
-        user_id: UserId,
-    ) -> impl Future<Output = Result<u64>> + Send;
+    async fn delete_preauth_keys_for_user(&self, user_id: UserId) -> Result<u64>;
 
     /// expire a pre-auth key by setting its expiration to now.
-    fn expire_preauth_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    async fn expire_preauth_key(&self, id: u64) -> Result<()>;
 
     // ─── ApiKey Operations ───────────────────────────────────────────────────
 
     /// create a new api key. Returns the key with its assigned ID.
-    fn create_api_key(&self, key: &ApiKey) -> impl Future<Output = Result<ApiKey>> + Send;
+    async fn create_api_key(&self, key: &ApiKey) -> Result<ApiKey>;
 
     /// get an api key by its selector (for split-token lookup).
-    fn get_api_key_by_selector(
-        &self,
-        selector: &str,
-    ) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+    async fn get_api_key_by_selector(&self, selector: &str) -> Result<Option<ApiKey>>;
 
     /// get all api keys matching a prefix of its selector
     /// returns all matches to allow callers to detect ambiguous prefixes
-    fn get_api_keys_by_selector_prefix(
-        &self,
-        prefix: &str,
-    ) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
+    async fn get_api_keys_by_selector_prefix(&self, prefix: &str) -> Result<Vec<ApiKey>>;
 
     /// get an api key by its numeric id.
-    fn get_api_key_by_id(&self, id: u64) -> impl Future<Output = Result<Option<ApiKey>>> + Send;
+    async fn get_api_key_by_id(&self, id: u64) -> Result<Option<ApiKey>>;
 
     /// list all api keys belonging to a specific user.
-    fn list_api_keys(&self, user_id: UserId) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
+    async fn list_api_keys(&self, user_id: UserId) -> Result<Vec<ApiKey>>;
 
     /// list all api keys across all users.
-    fn get_all_api_keys(&self) -> impl Future<Output = Result<Vec<ApiKey>>> + Send;
+    async fn get_all_api_keys(&self) -> Result<Vec<ApiKey>>;
 
     /// soft-delete an api key.
-    fn delete_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    async fn delete_api_key(&self, id: u64) -> Result<()>;
 
     /// expire an api key by setting its expiration to now.
-    fn expire_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    async fn expire_api_key(&self, id: u64) -> Result<()>;
 
     /// update the `last_used_at` timestamp for an api key.
-    fn touch_api_key(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    async fn touch_api_key(&self, id: u64) -> Result<()>;
 
     // ─── TKA Operations ────────────────────────────────────────────────────────
 
     /// get the current tka state, or none if not initialised.
-    fn get_tka_state(&self) -> impl Future<Output = Result<Option<TkaState>>> + Send;
+    async fn get_tka_state(&self) -> Result<Option<TkaState>>;
 
     /// create or update the tka state.
-    fn upsert_tka_state(&self, state: &TkaState) -> impl Future<Output = Result<TkaState>> + Send;
+    async fn upsert_tka_state(&self, state: &TkaState) -> Result<TkaState>;
 
     /// get a node's key signature.
-    fn get_node_key_signature(
-        &self,
-        node_id: NodeId,
-    ) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+    async fn get_node_key_signature(&self, node_id: NodeId) -> Result<Option<Vec<u8>>>;
 
     /// batch-fetch key signatures for multiple nodes.
     ///
     /// returns a map of node_id -> signature bytes for nodes that have signatures.
     /// nodes without signatures are omitted from the result.
-    fn get_node_key_signatures_batch(
+    async fn get_node_key_signatures_batch(
         &self,
         node_ids: &[NodeId],
-    ) -> impl Future<Output = Result<std::collections::HashMap<NodeId, Vec<u8>>>> + Send;
+    ) -> Result<std::collections::HashMap<NodeId, Vec<u8>>>;
 
     /// set a node's key signature.
-    fn set_node_key_signature(
-        &self,
-        node_id: NodeId,
-        signature: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send;
+    async fn set_node_key_signature(&self, node_id: NodeId, signature: &[u8]) -> Result<()>;
 
     /// store an AUM in the chain.
-    fn store_aum(
-        &self,
-        hash: &str,
-        prev_hash: Option<&str>,
-        data: &[u8],
-    ) -> impl Future<Output = Result<()>> + Send;
+    async fn store_aum(&self, hash: &str, prev_hash: Option<&str>, data: &[u8]) -> Result<()>;
 
     /// get an AUM by its hash.
-    fn get_aum(&self, hash: &str) -> impl Future<Output = Result<Option<Vec<u8>>>> + Send;
+    async fn get_aum(&self, hash: &str) -> Result<Option<Vec<u8>>>;
 
     /// get all AUMs from a given hash to the current head.
     /// returns AUMs in order from oldest to newest.
-    fn get_aums_after(&self, hash: &str) -> impl Future<Output = Result<Vec<Vec<u8>>>> + Send;
+    async fn get_aums_after(&self, hash: &str) -> Result<Vec<Vec<u8>>>;
 
     // ─── DNS Challenge Records ──────────────────────────────────────────────
 
     /// store a dns challenge record created via set-dns
-    fn create_dns_challenge_record(
+    async fn create_dns_challenge_record(
         &self,
         record: &DnsChallengeRecord,
-    ) -> impl Future<Output = Result<DnsChallengeRecord>> + Send;
+    ) -> Result<DnsChallengeRecord>;
 
     /// list all challenge records for a node
-    fn list_dns_challenge_records_for_node(
+    async fn list_dns_challenge_records_for_node(
         &self,
         node_id: NodeId,
-    ) -> impl Future<Output = Result<Vec<DnsChallengeRecord>>> + Send;
+    ) -> Result<Vec<DnsChallengeRecord>>;
 
     /// find challenge records older than the given duration
-    fn list_stale_dns_challenge_records(
+    async fn list_stale_dns_challenge_records(
         &self,
         max_age: chrono::Duration,
-    ) -> impl Future<Output = Result<Vec<DnsChallengeRecord>>> + Send;
+    ) -> Result<Vec<DnsChallengeRecord>>;
 
     /// hard-delete a challenge record by id
-    fn delete_dns_challenge_record(&self, id: u64) -> impl Future<Output = Result<()>> + Send;
+    async fn delete_dns_challenge_record(&self, id: u64) -> Result<()>;
 
     // ─── Audit Log Operations ──────────────────────────────────────────────
 
     /// create a new audit log entry
-    fn create_audit_log(&self, log: &AuditLog) -> impl Future<Output = Result<AuditLog>> + Send;
+    async fn create_audit_log(&self, log: &AuditLog) -> Result<AuditLog>;
 }
 
 /// the main database implementation using sea-orm.
