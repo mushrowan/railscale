@@ -153,7 +153,7 @@ impl TestNodeBuilder {
         // for tagged nodes, user_id should be none
         // for user-owned nodes, default to userid(self.id) if not specified
         let user_id = if self.tags.is_empty() {
-            self.user_id.or(Some(UserId(self.id)))
+            self.user_id.or(Some(UserId::new(self.id)))
         } else {
             None
         };
@@ -161,7 +161,7 @@ impl TestNodeBuilder {
         let now = Utc::now();
 
         Node {
-            id: NodeId(self.id),
+            id: NodeId::new(self.id),
             machine_key: self.machine_key.unwrap_or_default(),
             node_key: self.node_key.unwrap_or_default(),
             disco_key: self.disco_key.unwrap_or_default(),
@@ -196,10 +196,10 @@ mod tests {
     #[test]
     fn test_builder_basic() {
         let node = TestNodeBuilder::new(1).build();
-        assert_eq!(node.id.0, 1);
+        assert_eq!(node.id.as_u64(), 1);
         assert_eq!(node.hostname, "node-1");
         assert!(!node.is_tagged());
-        assert_eq!(node.user_id, Some(UserId(1)));
+        assert_eq!(node.user_id, Some(UserId::new(1)));
     }
 
     #[test]
@@ -214,8 +214,10 @@ mod tests {
 
     #[test]
     fn test_builder_with_custom_user() {
-        let node = TestNodeBuilder::new(3).with_user_id(UserId(100)).build();
-        assert_eq!(node.user_id, Some(UserId(100)));
+        let node = TestNodeBuilder::new(3)
+            .with_user_id(UserId::new(100))
+            .build();
+        assert_eq!(node.user_id, Some(UserId::new(100)));
     }
 
     #[test]

@@ -30,7 +30,7 @@ impl MapTestFixture {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
-        let user = User::new(UserId(1), "test-user".to_string());
+        let user = User::new(UserId::new(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let node_key = NodeKey::from_bytes(vec![2u8; 32]);
@@ -38,7 +38,7 @@ impl MapTestFixture {
 
         let now = chrono::Utc::now();
         let node = Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![1u8; 32]),
             node_key: node_key.clone(),
             disco_key: disco_key.clone(),

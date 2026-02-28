@@ -17,9 +17,13 @@ use crate::user::UserId;
 
 /// unique identifier for a node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct NodeId(pub u64);
+pub struct NodeId(u64);
 
 impl NodeId {
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
     /// convert to a stable id string (used in tailscale protocol).
     pub fn stable_id(&self) -> String {
         self.0.to_string()

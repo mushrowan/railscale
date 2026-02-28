@@ -1034,9 +1034,9 @@ mod tests {
         let db = setup_test_db().await;
 
         // create
-        let user = User::new(UserId(0), "testuser".to_string());
+        let user = User::new(UserId::new(0), "testuser".to_string());
         let created = db.create_user(&user).await.unwrap();
-        assert!(created.id.0 > 0);
+        assert!(created.id.as_u64() > 0);
         assert_eq!(created.name, "testuser");
 
         // get by ID
@@ -1063,7 +1063,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user first
-        let user = User::new(UserId(0), "keyowner".to_string());
+        let user = User::new(UserId::new(0), "keyowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // create key using token
@@ -1098,13 +1098,13 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user with OIDC identifier
-        let mut user = User::new(UserId(0), "oidc-user".to_string());
+        let mut user = User::new(UserId::new(0), "oidc-user".to_string());
         user.provider = Some("oidc".to_string());
         user.provider_identifier = Some("https://accounts.google.com:12345678".to_string());
         user.email = Some("test@example.com".to_string());
 
         let created = db.create_user(&user).await.unwrap();
-        assert!(created.id.0 > 0);
+        assert!(created.id.as_u64() > 0);
 
         // get by OIDC identifier
         let fetched = db
@@ -1139,7 +1139,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user first
-        let user = User::new(UserId(0), "apikeyowner".to_string());
+        let user = User::new(UserId::new(0), "apikeyowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let secret = ApiKeySecret::generate();
@@ -1200,7 +1200,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user
-        let user = User::new(UserId(0), "apiuser".to_string());
+        let user = User::new(UserId::new(0), "apiuser".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // generate api key
@@ -1229,12 +1229,12 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user first
-        let user = User::new(UserId(0), "nodeowner".to_string());
+        let user = User::new(UserId::new(0), "nodeowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // create node
         let node = Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![1, 2, 3, 4]),
             node_key: NodeKey::from_bytes(vec![5, 6, 7, 8]),
             disco_key: DiscoKey::from_bytes(vec![9, 10, 11, 12]),
@@ -1261,7 +1261,7 @@ mod tests {
         };
 
         let created = db.create_node(&node).await.unwrap();
-        assert!(created.id.0 > 0);
+        assert!(created.id.as_u64() > 0);
 
         // get
         let fetched = db.get_node(created.id).await.unwrap().unwrap();
@@ -1329,11 +1329,11 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user and node
-        let user = User::new(UserId(0), "sigowner".to_string());
+        let user = User::new(UserId::new(0), "sigowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let node = Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![1, 2, 3, 4]),
             node_key: NodeKey::from_bytes(vec![5, 6, 7, 8]),
             disco_key: DiscoKey::from_bytes(vec![9, 10, 11, 12]),
@@ -1380,14 +1380,14 @@ mod tests {
         use railscale_types::{DiscoKey, MachineKey, NodeKey, RegisterMethod};
 
         let db = setup_test_db().await;
-        let user = User::new(UserId(0), "batchowner".to_string());
+        let user = User::new(UserId::new(0), "batchowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // create 3 nodes
         let mut nodes = vec![];
         for i in 0..3u8 {
             let node = Node {
-                id: NodeId(0),
+                id: NodeId::new(0),
                 machine_key: MachineKey::from_bytes(vec![i + 1; 4]),
                 node_key: NodeKey::from_bytes(vec![i + 10; 4]),
                 disco_key: DiscoKey::from_bytes(vec![i + 20; 4]),
@@ -1473,7 +1473,7 @@ mod tests {
     async fn test_delete_nodes_for_user() {
         let db = setup_test_db().await;
 
-        let user = User::new(UserId(0), "alicja".to_string());
+        let user = User::new(UserId::new(0), "alicja".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // create two nodes for this user
@@ -1499,7 +1499,7 @@ mod tests {
     async fn test_delete_preauth_keys_for_user() {
         let db = setup_test_db().await;
 
-        let user = User::new(UserId(0), "ro".to_string());
+        let user = User::new(UserId::new(0), "ro".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         // create two preauth keys
@@ -1523,11 +1523,11 @@ mod tests {
     async fn test_duplicate_username_rejected() {
         let db = setup_test_db().await;
 
-        let user1 = User::new(UserId(0), "alicja".to_string());
+        let user1 = User::new(UserId::new(0), "alicja".to_string());
         db.create_user(&user1).await.unwrap();
 
         // second user with same name should fail
-        let user2 = User::new(UserId(0), "alicja".to_string());
+        let user2 = User::new(UserId::new(0), "alicja".to_string());
         let result = db.create_user(&user2).await;
         assert!(result.is_err(), "duplicate username should be rejected");
     }
@@ -1537,7 +1537,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user and node
-        let user = User::new(UserId(0), "dnsowner".to_string());
+        let user = User::new(UserId::new(0), "dnsowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let node = railscale_types::test_utils::TestNodeBuilder::new(0)

@@ -45,7 +45,7 @@ impl MapTestFixture {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
-        let user = User::new(UserId(1), "test-user".to_string());
+        let user = User::new(UserId::new(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let node_key = NodeKey::from_bytes(vec![2u8; 32]);
@@ -53,7 +53,7 @@ impl MapTestFixture {
 
         let now = chrono::Utc::now();
         let node = Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![1u8; 32]),
             node_key: node_key.clone(),
             disco_key: disco_key.clone(),
@@ -177,7 +177,7 @@ async fn test_streaming_map_request_returns_length_prefixed_response() {
     // should have node info
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
-    assert_eq!(response_node.id, fixture.node.id.0);
+    assert_eq!(response_node.id, fixture.node.id.as_u64());
     assert_eq!(response_node.node_key, fixture.node_key);
 
     // first streaming response must have keep_alive=false so client processes node data.
@@ -221,7 +221,7 @@ async fn test_non_streaming_map_request_returns_length_prefixed() {
 
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
-    assert_eq!(response_node.id, fixture.node.id.0);
+    assert_eq!(response_node.id, fixture.node.id.as_u64());
 
     // keep_alive should be false for non-streaming
     assert!(!map_response.keep_alive);
@@ -280,7 +280,7 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     let second_disco_key = DiscoKey::from_bytes(vec![5u8; 32]);
     let now = chrono::Utc::now();
     let second_node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![6u8; 32]),
         node_key: second_node_key.clone(),
         disco_key: second_disco_key.clone(),

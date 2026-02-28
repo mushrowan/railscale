@@ -111,7 +111,7 @@ mod tests {
     use super::*;
 
     fn make_user(id: u64, name: &str, email: Option<&str>) -> User {
-        let mut user = User::new(UserId(id), name.to_string());
+        let mut user = User::new(UserId::new(id), name.to_string());
         user.email = email.map(String::from);
         user
     }
@@ -151,19 +151,19 @@ mod tests {
         let resolver = MapUserResolver::with_groups(users, groups, None);
 
         // alicja is in both groups
-        let alice_groups = resolver.resolve_groups(&UserId(1));
+        let alice_groups = resolver.resolve_groups(&UserId::new(1));
         assert!(alice_groups.contains(&"engineering".to_string()));
         assert!(alice_groups.contains(&"admins".to_string()));
         assert_eq!(alice_groups.len(), 2);
 
         // ro is only in engineering
-        let bob_groups = resolver.resolve_groups(&UserId(2));
+        let bob_groups = resolver.resolve_groups(&UserId::new(2));
         assert!(bob_groups.contains(&"engineering".to_string()));
         assert!(!bob_groups.contains(&"admins".to_string()));
         assert_eq!(bob_groups.len(), 1);
 
         // valerie is in no groups
-        let eve_groups = resolver.resolve_groups(&UserId(3));
+        let eve_groups = resolver.resolve_groups(&UserId::new(3));
         assert!(eve_groups.is_empty());
     }
 
@@ -178,7 +178,7 @@ mod tests {
         );
 
         let resolver = MapUserResolver::with_groups(users, groups, None);
-        let alice_groups = resolver.resolve_groups(&UserId(1));
+        let alice_groups = resolver.resolve_groups(&UserId::new(1));
         assert_eq!(alice_groups, vec!["team".to_string()]);
     }
 
@@ -193,14 +193,14 @@ mod tests {
         );
 
         let resolver = MapUserResolver::with_groups(users, groups, None);
-        let groups = resolver.resolve_groups(&UserId(1));
+        let groups = resolver.resolve_groups(&UserId::new(1));
         assert!(groups.is_empty());
     }
 
     #[test]
     fn test_resolve_groups_unknown_user() {
         let resolver = MapUserResolver::new(vec![]);
-        let groups = resolver.resolve_groups(&UserId(999));
+        let groups = resolver.resolve_groups(&UserId::new(999));
         assert!(groups.is_empty());
     }
 
@@ -214,7 +214,7 @@ mod tests {
         )];
 
         let resolver = MapUserResolver::with_groups(users, HashMap::new(), None);
-        let alice_groups = resolver.resolve_groups(&UserId(1));
+        let alice_groups = resolver.resolve_groups(&UserId::new(1));
 
         assert!(alice_groups.contains(&"engineering".to_string()));
         assert!(alice_groups.contains(&"devops".to_string()));
@@ -232,7 +232,7 @@ mod tests {
 
         let prefix = OidcGroupPrefix::new("oidc-").unwrap();
         let resolver = MapUserResolver::with_groups(users, HashMap::new(), Some(prefix));
-        let alice_groups = resolver.resolve_groups(&UserId(1));
+        let alice_groups = resolver.resolve_groups(&UserId::new(1));
 
         assert!(alice_groups.contains(&"oidc-engineering".to_string()));
         assert!(alice_groups.contains(&"oidc-devops".to_string()));
@@ -255,7 +255,7 @@ mod tests {
         );
 
         let resolver = MapUserResolver::with_groups(users, policy_groups, None);
-        let alice_groups = resolver.resolve_groups(&UserId(1));
+        let alice_groups = resolver.resolve_groups(&UserId::new(1));
 
         // should have both oidc and policy groups
         assert!(alice_groups.contains(&"engineering".to_string())); // OIDC
@@ -280,7 +280,7 @@ mod tests {
         );
 
         let resolver = MapUserResolver::with_groups(users, policy_groups, None);
-        let alice_groups = resolver.resolve_groups(&UserId(1));
+        let alice_groups = resolver.resolve_groups(&UserId::new(1));
 
         // should only appear once
         assert_eq!(

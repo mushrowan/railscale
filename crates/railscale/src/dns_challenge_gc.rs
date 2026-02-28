@@ -153,7 +153,7 @@ mod tests {
         let db = RailscaleDb::new_in_memory().await.unwrap();
 
         // create user + node
-        let user = User::new(UserId(0), "alicja".into());
+        let user = User::new(UserId::new(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)

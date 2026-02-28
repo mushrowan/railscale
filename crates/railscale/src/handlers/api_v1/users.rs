@@ -45,7 +45,7 @@ pub struct UserResponse {
 impl From<User> for UserResponse {
     fn from(user: User) -> Self {
         Self {
-            id: user.id.0.to_string(),
+            id: user.id.to_string(),
             name: user.name,
             display_name: user.display_name,
             email: user.email,
@@ -148,7 +148,7 @@ async fn create_user(
         )));
     }
 
-    let mut user = User::new(UserId(0), name);
+    let mut user = User::new(UserId::new(0), name);
     user.display_name = req.display_name;
     user.email = req.email.map(|e| e.into_inner());
 
@@ -158,7 +158,7 @@ async fn create_user(
         .await
         .map_err(ApiError::internal)?;
 
-    info!(user_id = user.id.0, name = %user.name, "user created");
+    info!(user_id = user.id.as_u64(), name = %user.name, "user created");
     Ok((
         StatusCode::CREATED,
         Json(CreateUserResponse {
@@ -175,7 +175,7 @@ async fn delete_user(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<Json<DeleteUserResponse>, ApiError> {
-    let user_id = UserId(id);
+    let user_id = UserId::new(id);
 
     if state
         .db
@@ -241,7 +241,7 @@ async fn rename_user(
 ) -> Result<Json<RenameUserResponse>, ApiError> {
     let new_name = Username::new(&new_name).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    let user_id = UserId(old_id);
+    let user_id = UserId::new(old_id);
 
     let mut user = state
         .db
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_user_response_from_user() {
-        let user = User::new(UserId(42), "alicja".to_string());
+        let user = User::new(UserId::new(42), "alicja".to_string());
         let response = UserResponse::from(user);
 
         assert_eq!(response.id, "42");
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_user_response_with_oidc_groups() {
-        let mut user = User::new(UserId(42), "alicja".to_string());
+        let mut user = User::new(UserId::new(42), "alicja".to_string());
         user.oidc_groups = vec!["engineering".to_string(), "devops".to_string()];
 
         let response = UserResponse::from(user);

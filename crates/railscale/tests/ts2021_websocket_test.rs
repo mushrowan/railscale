@@ -255,12 +255,12 @@ async fn test_ts2021_machine_key_from_noise_context() {
         .expect("failed to create in-memory database");
 
     // create user first (foreign key constraint)
-    let user = User::new(UserId(1), "test".to_string());
+    let user = User::new(UserId::new(1), "test".to_string());
     db.create_user(&user).await.expect("failed to create user");
 
     // create preauth key using token
     let token = PreAuthKeyToken::generate();
-    let mut preauth_key = PreAuthKey::from_token(0, &token, UserId(1));
+    let mut preauth_key = PreAuthKey::from_token(0, &token, UserId::new(1));
     preauth_key.reusable = true;
     preauth_key.expiration = Some(chrono::Utc::now() + chrono::Duration::hours(1));
 

@@ -40,12 +40,12 @@ async fn test_verify_allows_registered_node() {
         .expect("failed to create in-memory database");
 
     // create a user and node
-    let user = User::new(UserId(0), "testuser".to_string());
+    let user = User::new(UserId::new(0), "testuser".to_string());
     let user = db.create_user(&user).await.expect("failed to create user");
 
     let node_key = NodeKey::from_bytes(vec![1u8; 32]);
     let node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![2u8; 32]),
         node_key: node_key.clone(),
         disco_key: DiscoKey::from_bytes(vec![3u8; 32]),

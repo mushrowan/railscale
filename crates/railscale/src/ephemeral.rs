@@ -216,18 +216,18 @@ mod tests {
         assert_eq!(gc.scheduled_count().await, 0);
 
         // schedule deletion
-        gc.schedule_deletion(NodeId(1)).await;
+        gc.schedule_deletion(NodeId::new(1)).await;
         assert_eq!(gc.scheduled_count().await, 1);
 
-        gc.schedule_deletion(NodeId(2)).await;
+        gc.schedule_deletion(NodeId::new(2)).await;
         assert_eq!(gc.scheduled_count().await, 2);
 
         // cancel one
-        gc.cancel_deletion(NodeId(1)).await;
+        gc.cancel_deletion(NodeId::new(1)).await;
         assert_eq!(gc.scheduled_count().await, 1);
 
         // cancel non-existent (should be no-op)
-        gc.cancel_deletion(NodeId(999)).await;
+        gc.cancel_deletion(NodeId::new(999)).await;
         assert_eq!(gc.scheduled_count().await, 1);
     }
 
@@ -239,7 +239,7 @@ mod tests {
         assert!(!gc.is_enabled());
 
         // schedule should be no-op when disabled
-        gc.schedule_deletion(NodeId(1)).await;
+        gc.schedule_deletion(NodeId::new(1)).await;
         assert_eq!(gc.scheduled_count().await, 0);
 
         // collect should return 0 when disabled
@@ -251,7 +251,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user and ephemeral node
-        let user = User::new(UserId(0), "test@example.com".to_string());
+        let user = User::new(UserId::new(0), "test@example.com".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let node = TestNodeBuilder::new(1)
@@ -290,7 +290,7 @@ mod tests {
         assert!(gc.is_enabled());
 
         // should not panic — must saturate instead of unwrapping
-        gc.schedule_deletion(NodeId(1)).await;
+        gc.schedule_deletion(NodeId::new(1)).await;
         assert_eq!(gc.scheduled_count().await, 1);
     }
 
@@ -299,7 +299,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // create user and ephemeral node
-        let user = User::new(UserId(0), "test@example.com".to_string());
+        let user = User::new(UserId::new(0), "test@example.com".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let node = TestNodeBuilder::new(1)

@@ -118,7 +118,7 @@ pub async fn map(
             && node.last_seen_country.as_ref() != Some(&country)
         {
             tracing::debug!(
-                node_id = node.id.0,
+                node_id = node.id.as_u64(),
                 old_country = ?node.last_seen_country,
                 new_country = %country,
                 "node country changed"
@@ -135,7 +135,7 @@ pub async fn map(
         // country changes affect other nodes' filter rules, so always notify
         if country_changed {
             tracing::debug!(
-                node_id = node.id.0,
+                node_id = node.id.as_u64(),
                 "notifying state change due to country update"
             );
         }
@@ -273,7 +273,7 @@ async fn streaming_response(
     };
 
     // generate a unique session handle from node id + random bytes
-    let session_handle = format!("{}-{:016x}", node_id.0, rand::random::<u64>());
+    let session_handle = format!("{}-{:016x}", node_id.as_u64(), rand::random::<u64>());
     let session = crate::map_session::MapSession::new(session_handle);
 
     // create a stream that yields length-prefixed responses
@@ -500,17 +500,17 @@ async fn build_map_response(
     // collect user IDs from visible peers + self node, then filter profiles
     let mut visible_user_ids: std::collections::HashSet<u64> = visible_peers
         .iter()
-        .filter_map(|n| n.user_id.map(|id| id.0))
+        .filter_map(|n| n.user_id.map(|id| id.as_u64()))
         .collect();
     if let Some(self_uid) = node.user_id {
-        visible_user_ids.insert(self_uid.0);
+        visible_user_ids.insert(self_uid.as_u64());
     }
 
     let user_profiles: Vec<UserProfile> = users
         .iter()
-        .filter(|u| visible_user_ids.contains(&u.id.0))
+        .filter(|u| visible_user_ids.contains(&u.id.as_u64()))
         .map(|u| UserProfile {
-            id: u.id.0,
+            id: u.id.as_u64(),
             login_name: u.username().to_string(),
             display_name: u.display().to_string(),
             profile_pic_url: u.profile_pic_url.clone(),
@@ -681,7 +681,7 @@ fn node_to_map_response_node(
     allowed_ips.extend(node.approved_routes.iter().map(|r| r.to_string()));
 
     MapResponseNode {
-        id: node.id.0,
+        id: node.id.as_u64(),
         stable_id: node.id.stable_id(),
         name: {
             let hostname = node.display_hostname();
@@ -710,7 +710,7 @@ fn node_to_map_response_node(
             .map(|s| railscale_tka::MarshaledSignature::from(s.to_vec()))
             .unwrap_or_default(),
         expired: node.is_expired(),
-        user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).0,
+        user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).as_u64(),
         // nodes in the database that respond to map requests are authorized
         machine_authorized: true,
         cap: railscale_proto::CapabilityVersion::CURRENT.0,

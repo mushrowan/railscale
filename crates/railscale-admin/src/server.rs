@@ -166,7 +166,7 @@ impl AdminService for AdminServiceImpl {
             .map(|u| u.into_inner())
             .ok_or_else(|| Status::invalid_argument("invalid email/username format"))?;
 
-        let mut user = railscale_types::User::new(railscale_types::UserId(0), name);
+        let mut user = railscale_types::User::new(railscale_types::UserId::new(0), name);
         user.email = Some(req.email.clone());
 
         let created = self
@@ -182,7 +182,7 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<pb::GetUserRequest>,
     ) -> Result<Response<pb::User>, Status> {
-        let id = railscale_types::UserId(request.into_inner().id);
+        let id = railscale_types::UserId::new(request.into_inner().id);
 
         let user = self
             .db
@@ -213,7 +213,7 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<pb::DeleteUserRequest>,
     ) -> Result<Response<pb::DeleteUserResponse>, Status> {
-        let id = railscale_types::UserId(request.into_inner().id);
+        let id = railscale_types::UserId::new(request.into_inner().id);
 
         // check if user exists
         let _user = self
@@ -279,7 +279,7 @@ impl AdminService for AdminServiceImpl {
         request: Request<pb::RenameUserRequest>,
     ) -> Result<Response<pb::User>, Status> {
         let req = request.into_inner();
-        let id = railscale_types::UserId(req.id);
+        let id = railscale_types::UserId::new(req.id);
 
         // sanitise new username, preserving original as email
         let sanitised_name = Username::sanitise(&req.new_name)
@@ -311,7 +311,7 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<pb::GetNodeRequest>,
     ) -> Result<Response<pb::Node>, Status> {
-        let id = railscale_types::NodeId(request.into_inner().id);
+        let id = railscale_types::NodeId::new(request.into_inner().id);
 
         let node = self
             .db
@@ -331,7 +331,7 @@ impl AdminService for AdminServiceImpl {
 
         let nodes = if let Some(user_id) = req.user_id {
             self.db
-                .list_nodes_for_user(railscale_types::UserId(user_id))
+                .list_nodes_for_user(railscale_types::UserId::new(user_id))
                 .await
                 .map_err(|e| Status::internal(format!("Failed to list nodes: {}", e)))?
         } else {
@@ -360,7 +360,7 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<pb::DeleteNodeRequest>,
     ) -> Result<Response<pb::DeleteNodeResponse>, Status> {
-        let id = railscale_types::NodeId(request.into_inner().id);
+        let id = railscale_types::NodeId::new(request.into_inner().id);
 
         self.db
             .delete_node(id)
@@ -374,7 +374,7 @@ impl AdminService for AdminServiceImpl {
         &self,
         request: Request<pb::ExpireNodeRequest>,
     ) -> Result<Response<pb::Node>, Status> {
-        let id = railscale_types::NodeId(request.into_inner().id);
+        let id = railscale_types::NodeId::new(request.into_inner().id);
 
         let mut node = self
             .db
@@ -399,7 +399,7 @@ impl AdminService for AdminServiceImpl {
         request: Request<pb::RenameNodeRequest>,
     ) -> Result<Response<pb::Node>, Status> {
         let req = request.into_inner();
-        let id = railscale_types::NodeId(req.id);
+        let id = railscale_types::NodeId::new(req.id);
 
         // validate new node name
         let validated_name = NodeName::new(&req.new_name)
@@ -428,7 +428,7 @@ impl AdminService for AdminServiceImpl {
         request: Request<pb::SetTagsRequest>,
     ) -> Result<Response<pb::Node>, Status> {
         let req = request.into_inner();
-        let id = railscale_types::NodeId(req.id);
+        let id = railscale_types::NodeId::new(req.id);
 
         // check tag count limit
         if req.tags.len() > MAX_TAGS {
@@ -470,7 +470,7 @@ impl AdminService for AdminServiceImpl {
         request: Request<pb::SetApprovedRoutesRequest>,
     ) -> Result<Response<pb::Node>, Status> {
         let req = request.into_inner();
-        let id = railscale_types::NodeId(req.id);
+        let id = railscale_types::NodeId::new(req.id);
 
         let mut node = self
             .db
@@ -537,7 +537,7 @@ impl AdminService for AdminServiceImpl {
         let mut key = railscale_types::PreAuthKey::from_token(
             0, // Will be assigned by DB
             &token,
-            railscale_types::UserId(req.user_id),
+            railscale_types::UserId::new(req.user_id),
         );
         key.reusable = req.reusable;
         key.ephemeral = req.ephemeral;
@@ -565,7 +565,7 @@ impl AdminService for AdminServiceImpl {
 
         let keys = if let Some(user_id) = req.user_id {
             self.db
-                .list_preauth_keys(railscale_types::UserId(user_id))
+                .list_preauth_keys(railscale_types::UserId::new(user_id))
                 .await
                 .map_err(|e| Status::internal(format!("Failed to list preauth keys: {}", e)))?
         } else {
@@ -633,7 +633,7 @@ impl AdminService for AdminServiceImpl {
             0, // Will be assigned by DB
             &secret,
             req.name,
-            railscale_types::UserId(req.user_id),
+            railscale_types::UserId::new(req.user_id),
         );
         key.expiration = expiration;
 
@@ -647,7 +647,7 @@ impl AdminService for AdminServiceImpl {
             id: created.id,
             key: secret.full_key.clone(), // Full key shown only on create (cloned for zeroize)
             name: created.name,
-            user_id: created.user_id.0,
+            user_id: created.user_id.as_u64(),
             expiration: created.expiration.map(|e| e.to_rfc3339()),
             created_at: created.created_at.to_rfc3339(),
         }))
@@ -661,7 +661,7 @@ impl AdminService for AdminServiceImpl {
 
         let keys = if let Some(user_id) = req.user_id {
             self.db
-                .list_api_keys(railscale_types::UserId(user_id))
+                .list_api_keys(railscale_types::UserId::new(user_id))
                 .await
                 .map_err(|e| Status::internal(format!("Failed to list API keys: {}", e)))?
         } else {
@@ -804,7 +804,7 @@ impl AdminService for AdminServiceImpl {
         // process node signatures
         let mut nodes_signed = 0u32;
         for sig in req.signatures {
-            let node_id = railscale_types::NodeId(sig.node_id);
+            let node_id = railscale_types::NodeId::new(sig.node_id);
 
             // check node exists
             match self.db.get_node(node_id).await {
@@ -861,7 +861,7 @@ impl AdminService for AdminServiceImpl {
         request: Request<pb::TkaSignNodeRequest>,
     ) -> Result<Response<pb::TkaSignNodeResponse>, Status> {
         let req = request.into_inner();
-        let node_id = railscale_types::NodeId(req.node_id);
+        let node_id = railscale_types::NodeId::new(req.node_id);
 
         // check TKA is enabled
         let tka_state = self
@@ -974,7 +974,7 @@ impl AdminService for AdminServiceImpl {
 
 fn user_to_pb(user: &railscale_types::User) -> pb::User {
     pb::User {
-        id: user.id.0,
+        id: user.id.as_u64(),
         email: user.email.clone().unwrap_or_else(|| user.name.clone()),
         display_name: user.display_name.clone().unwrap_or_default(),
         created_at: user.created_at.to_rfc3339(),
@@ -984,14 +984,14 @@ fn user_to_pb(user: &railscale_types::User) -> pb::User {
 
 fn node_to_pb(node: &railscale_types::Node) -> pb::Node {
     pb::Node {
-        id: node.id.0,
+        id: node.id.as_u64(),
         machine_key: hex::encode(node.machine_key.as_bytes()),
         node_key: hex::encode(node.node_key.as_bytes()),
         hostname: node.hostname.clone(),
         given_name: node.given_name.to_string(),
         ipv4: node.ipv4.map(|ip| ip.to_string()),
         ipv6: node.ipv6.map(|ip| ip.to_string()),
-        user_id: node.user_id.map(|id| id.0),
+        user_id: node.user_id.map(|id| id.as_u64()),
         tags: node.tags.iter().map(|t| t.to_string()).collect(),
         last_seen: node.last_seen.map(|t| t.to_rfc3339()),
         expiry: node.expiry.map(|t| t.to_rfc3339()),
@@ -1006,7 +1006,7 @@ fn preauth_key_to_pb(key: &railscale_types::PreAuthKey) -> pb::PreauthKey {
     pb::PreauthKey {
         id: key.id,
         key: key.key_prefix.clone(), // Only show prefix, not full key
-        user_id: key.user_id.0,
+        user_id: key.user_id.as_u64(),
         reusable: key.reusable,
         ephemeral: key.ephemeral,
         tags: key.tags.iter().map(|t| t.to_string()).collect(),
@@ -1024,7 +1024,7 @@ fn preauth_key_to_pb_with_full_key(
     pb::PreauthKey {
         id: key.id,
         key: full_key.to_string(), // Full key returned only at creation
-        user_id: key.user_id.0,
+        user_id: key.user_id.as_u64(),
         reusable: key.reusable,
         ephemeral: key.ephemeral,
         tags: key.tags.iter().map(|t| t.to_string()).collect(),
@@ -1039,7 +1039,7 @@ fn api_key_to_pb(key: &railscale_types::ApiKey) -> pb::ApiKey {
         id: key.id,
         prefix: key.prefix().to_string(),
         name: key.name.clone(),
-        user_id: key.user_id.0,
+        user_id: key.user_id.as_u64(),
         expiration: key.expiration.map(|e| e.to_rfc3339()),
         last_used_at: key.last_used_at.map(|t| t.to_rfc3339()),
         created_at: key.created_at.to_rfc3339(),

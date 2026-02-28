@@ -206,7 +206,7 @@ pub async fn tka_init_finish(
     let parsed = parse_genesis(genesis_bytes, "tka init finish")?;
 
     for (node_id, sig_bytes) in &req.signatures {
-        let node_id = railscale_types::NodeId(*node_id);
+        let node_id = railscale_types::NodeId::new(*node_id);
 
         let sig =
             railscale_tka::NodeKeySignature::from_cbor(sig_bytes.as_bytes()).map_err(|e| {
@@ -600,7 +600,7 @@ mod tests {
     async fn setup_db_with_node(key_byte: u8) -> (RailscaleDb, NodeKey, railscale_types::Node) {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
-        let user = User::new(UserId(1), "test-user".to_string());
+        let user = User::new(UserId::new(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
         let node_key = NodeKey::from_bytes(vec![key_byte; 32]);
         let node = TestNodeBuilder::new(0)
@@ -777,7 +777,7 @@ mod tests {
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 
         let mut signatures = HashMap::new();
-        signatures.insert(node.id.0, node_sig_bytes.clone().into());
+        signatures.insert(node.id.as_u64(), node_sig_bytes.clone().into());
 
         // step 3: init_finish (recreate app to clear cached tka key)
         let app = test_app(&db).await;
@@ -1168,7 +1168,7 @@ mod tests {
     #[tokio::test]
     async fn tka_init_begin_returns_rotation_pubkey_from_nl_key() {
         let db = setup_db().await;
-        let user = User::new(UserId(1), "test-user".to_string());
+        let user = User::new(UserId::new(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
 
         let node_nl_private = NlPrivateKey::generate();

@@ -141,7 +141,7 @@ mod tests {
         db.migrate().await.unwrap();
 
         // create a user and node
-        let user = User::new(railscale_types::UserId(1), "test-user".to_string());
+        let user = User::new(railscale_types::UserId::new(1), "test-user".to_string());
         db.create_user(&user).await.unwrap();
 
         let node = railscale_types::test_utils::TestNodeBuilder::new(1)
@@ -162,7 +162,7 @@ mod tests {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
-        let user = User::new(railscale_types::UserId(1), "test-user".to_string());
+        let user = User::new(railscale_types::UserId::new(1), "test-user".to_string());
         db.create_user(&user).await.unwrap();
 
         let cache = MapCache::new(None);
@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(users1.len(), 1);
 
         // add another user directly to DB (without invalidating cache)
-        let user2 = User::new(railscale_types::UserId(2), "second-user".to_string());
+        let user2 = User::new(railscale_types::UserId::new(2), "second-user".to_string());
         db.create_user(&user2).await.unwrap();
 
         // second read should return cached data (still 1 user)
@@ -189,7 +189,7 @@ mod tests {
         let db = RailscaleDb::new_in_memory().await.unwrap();
         db.migrate().await.unwrap();
 
-        let user = User::new(railscale_types::UserId(1), "test-user".to_string());
+        let user = User::new(railscale_types::UserId::new(1), "test-user".to_string());
         db.create_user(&user).await.unwrap();
 
         let cache = MapCache::new(None);
@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(users1.len(), 1);
 
         // add another user and invalidate
-        let user2 = User::new(railscale_types::UserId(2), "second-user".to_string());
+        let user2 = User::new(railscale_types::UserId::new(2), "second-user".to_string());
         db.create_user(&user2).await.unwrap();
         cache.invalidate();
 

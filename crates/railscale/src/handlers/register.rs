@@ -298,7 +298,7 @@ async fn handle_preauth_registration(
         // re-registration: update existing node's key and metadata in place
         // this preserves the node's IP allocation and identity
         tracing::info!(
-            node_id = existing.id.0,
+            node_id = existing.id.as_u64(),
             old_key = ?existing.node_key,
             new_key = ?req.node_key,
             "node re-registering (key rotation)"
@@ -336,7 +336,7 @@ async fn handle_preauth_registration(
         };
 
         let mut node = Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key,
             node_key: req.node_key,
             disco_key: Default::default(),
@@ -398,11 +398,11 @@ async fn handle_preauth_registration(
     let (user_info, login_info) = match user {
         Some(u) => (
             TailcfgUser {
-                id: u.id.0 as i64,
+                id: u.id.as_i64(),
                 display_name: u.name.clone(),
             },
             TailcfgLogin {
-                id: u.id.0 as i64,
+                id: u.id.as_i64(),
                 provider: "authkey".to_string(),
                 login_name: u.name.clone(),
                 display_name: u.name,
@@ -535,12 +535,12 @@ fn build_success_response(
     completed: crate::oidc::CompletedRegistration,
 ) -> Result<Json<RegisterResponse>, ApiError> {
     let user_info = TailcfgUser {
-        id: completed.user.id.0 as i64,
+        id: completed.user.id.as_i64(),
         display_name: completed.user.display_name.clone().unwrap_or_default(),
     };
 
     let login_info = TailcfgLogin {
-        id: completed.user.id.0 as i64,
+        id: completed.user.id.as_i64(),
         provider: "oidc".to_string(),
         login_name: completed.user.name.clone(),
         display_name: completed.user.display_name.unwrap_or(completed.user.name),
@@ -855,7 +855,7 @@ mod tests {
         db.migrate().await.unwrap();
 
         // create a preauth key so registration can complete
-        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
+        let user = railscale_types::User::new(railscale_types::UserId::new(1), "test".to_string());
         let user = db.create_user(&user).await.unwrap();
         let token = railscale_types::PreAuthKeyToken::generate();
         let mut preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
@@ -936,7 +936,7 @@ mod tests {
         db.migrate().await.unwrap();
 
         // create a preauth key
-        let user = railscale_types::User::new(railscale_types::UserId(1), "test".to_string());
+        let user = railscale_types::User::new(railscale_types::UserId::new(1), "test".to_string());
         let user = db.create_user(&user).await.unwrap();
         let token = railscale_types::PreAuthKeyToken::generate();
         let preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);

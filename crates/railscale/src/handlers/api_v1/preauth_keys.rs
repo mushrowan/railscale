@@ -43,7 +43,7 @@ impl PreAuthKeyResponse {
         Self {
             id: key.id.to_string(),
             key: key.key_prefix,
-            user_id: key.user_id.0.to_string(),
+            user_id: key.user_id.to_string(),
             reusable: key.reusable,
             ephemeral: key.ephemeral,
             used: key.used,
@@ -57,7 +57,7 @@ impl PreAuthKeyResponse {
         Self {
             id: key.id.to_string(),
             key: full_key.to_string(),
-            user_id: key.user_id.0.to_string(),
+            user_id: key.user_id.to_string(),
             reusable: key.reusable,
             ephemeral: key.ephemeral,
             used: key.used,
@@ -158,7 +158,7 @@ async fn create_preauth_key(
     State(state): State<AppState>,
     JsonBody(req): JsonBody<CreatePreAuthKeyRequest>,
 ) -> Result<(StatusCode, Json<CreatePreAuthKeyResponse>), ApiError> {
-    let user_id = UserId(req.user);
+    let user_id = UserId::new(req.user);
     if state
         .db
         .get_user(user_id)
@@ -195,7 +195,7 @@ async fn create_preauth_key(
 
     info!(
         key_id = key.id,
-        user_id = user_id.0,
+        user_id = user_id.as_u64(),
         reusable = key.reusable,
         ephemeral = key.ephemeral,
         "preauth key created"
@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn test_preauth_key_response_prefix_only() {
         let token = PreAuthKeyToken::generate();
-        let key = PreAuthKey::from_token(1, &token, UserId(42));
+        let key = PreAuthKey::from_token(1, &token, UserId::new(42));
         let response = PreAuthKeyResponse::from_key_prefix_only(key);
 
         assert_eq!(response.id, "1");
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn test_preauth_key_response_with_full_token() {
         let token = PreAuthKeyToken::generate();
-        let key = PreAuthKey::from_token(1, &token, UserId(42));
+        let key = PreAuthKey::from_token(1, &token, UserId::new(42));
         let response = PreAuthKeyResponse::from_key_with_full_token(key, token.as_str());
 
         assert_eq!(response.id, "1");
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn test_preauth_key_response_serialization() {
         let token = PreAuthKeyToken::generate();
-        let mut key = PreAuthKey::from_token(1, &token, UserId(42));
+        let mut key = PreAuthKey::from_token(1, &token, UserId::new(42));
         key.tags = vec!["tag:server".parse().unwrap()];
         let response = PreAuthKeyResponse::from_key_prefix_only(key);
 

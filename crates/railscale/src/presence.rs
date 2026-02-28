@@ -108,7 +108,7 @@ mod tests {
     #[tokio::test]
     async fn test_connect_disconnect() {
         let tracker = PresenceTracker::new();
-        let node_id = NodeId(1);
+        let node_id = NodeId::new(1);
         let node_key = test_node_key();
 
         // initially offline
@@ -131,22 +131,22 @@ mod tests {
         let tracker = PresenceTracker::new();
         let node_key = test_node_key();
 
-        tracker.connect(NodeId(1), node_key.clone()).await;
-        tracker.connect(NodeId(2), node_key.clone()).await;
-        tracker.connect(NodeId(3), node_key.clone()).await;
+        tracker.connect(NodeId::new(1), node_key.clone()).await;
+        tracker.connect(NodeId::new(2), node_key.clone()).await;
+        tracker.connect(NodeId::new(3), node_key.clone()).await;
 
         assert_eq!(tracker.connected_count().await, 3);
-        assert!(tracker.is_online(NodeId(1)).await);
-        assert!(tracker.is_online(NodeId(2)).await);
-        assert!(tracker.is_online(NodeId(3)).await);
-        assert!(!tracker.is_online(NodeId(4)).await);
+        assert!(tracker.is_online(NodeId::new(1)).await);
+        assert!(tracker.is_online(NodeId::new(2)).await);
+        assert!(tracker.is_online(NodeId::new(3)).await);
+        assert!(!tracker.is_online(NodeId::new(4)).await);
 
         // disconnect one
-        tracker.disconnect(NodeId(2)).await;
+        tracker.disconnect(NodeId::new(2)).await;
         assert_eq!(tracker.connected_count().await, 2);
-        assert!(tracker.is_online(NodeId(1)).await);
-        assert!(!tracker.is_online(NodeId(2)).await);
-        assert!(tracker.is_online(NodeId(3)).await);
+        assert!(tracker.is_online(NodeId::new(1)).await);
+        assert!(!tracker.is_online(NodeId::new(2)).await);
+        assert!(tracker.is_online(NodeId::new(3)).await);
     }
 
     #[tokio::test]
@@ -154,23 +154,28 @@ mod tests {
         let tracker = PresenceTracker::new();
         let node_key = test_node_key();
 
-        tracker.connect(NodeId(1), node_key.clone()).await;
-        tracker.connect(NodeId(3), node_key.clone()).await;
+        tracker.connect(NodeId::new(1), node_key.clone()).await;
+        tracker.connect(NodeId::new(3), node_key.clone()).await;
 
         let statuses = tracker
-            .get_online_statuses(&[NodeId(1), NodeId(2), NodeId(3), NodeId(4)])
+            .get_online_statuses(&[
+                NodeId::new(1),
+                NodeId::new(2),
+                NodeId::new(3),
+                NodeId::new(4),
+            ])
             .await;
 
-        assert_eq!(statuses.get(&NodeId(1)), Some(&true));
-        assert_eq!(statuses.get(&NodeId(2)), Some(&false));
-        assert_eq!(statuses.get(&NodeId(3)), Some(&true));
-        assert_eq!(statuses.get(&NodeId(4)), Some(&false));
+        assert_eq!(statuses.get(&NodeId::new(1)), Some(&true));
+        assert_eq!(statuses.get(&NodeId::new(2)), Some(&false));
+        assert_eq!(statuses.get(&NodeId::new(3)), Some(&true));
+        assert_eq!(statuses.get(&NodeId::new(4)), Some(&false));
     }
 
     #[tokio::test]
     async fn test_get_connection_info() {
         let tracker = PresenceTracker::new();
-        let node_id = NodeId(1);
+        let node_id = NodeId::new(1);
         let node_key = test_node_key();
 
         // not connected
@@ -191,11 +196,11 @@ mod tests {
         let tracker = PresenceTracker::new();
         let node_key = test_node_key();
 
-        tracker.connect(NodeId(5), node_key.clone()).await;
-        tracker.connect(NodeId(10), node_key.clone()).await;
+        tracker.connect(NodeId::new(5), node_key.clone()).await;
+        tracker.connect(NodeId::new(10), node_key.clone()).await;
 
         let mut nodes = tracker.connected_nodes().await;
-        nodes.sort_by_key(|n| n.0);
-        assert_eq!(nodes, vec![NodeId(5), NodeId(10)]);
+        nodes.sort_by_key(|n| n.as_u64());
+        assert_eq!(nodes, vec![NodeId::new(5), NodeId::new(10)]);
     }
 }

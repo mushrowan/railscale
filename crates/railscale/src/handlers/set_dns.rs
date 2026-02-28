@@ -55,7 +55,7 @@ pub async fn set_dns(
     );
     if req.name != expected_name {
         info!(
-            node_id = node.id.0,
+            node_id = node.id.as_u64(),
             requested = %req.name,
             expected = %expected_name,
             "set-dns: name mismatch"
@@ -85,7 +85,7 @@ pub async fn set_dns(
         .await
         .map_internal()?;
 
-    info!(node_id = node.id.0, "set-dns: TXT record created");
+    info!(node_id = node.id.as_u64(), "set-dns: TXT record created");
 
     Ok(Json(railscale_proto::SetDNSResponse {}))
 }
@@ -139,7 +139,7 @@ mod tests {
         .await;
 
         // create a user and node
-        let user = railscale_types::User::new(railscale_types::UserId(0), "alicja".into());
+        let user = railscale_types::User::new(railscale_types::UserId::new(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)
@@ -219,7 +219,7 @@ mod tests {
         )
         .await;
 
-        let user = railscale_types::User::new(railscale_types::UserId(0), "alicja".into());
+        let user = railscale_types::User::new(railscale_types::UserId::new(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)
@@ -265,7 +265,7 @@ mod tests {
         )
         .await;
 
-        let user = railscale_types::User::new(railscale_types::UserId(0), "alicja".into());
+        let user = railscale_types::User::new(railscale_types::UserId::new(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)
@@ -326,7 +326,7 @@ mod tests {
         )
         .await;
 
-        let user = railscale_types::User::new(railscale_types::UserId(0), "alicja".into());
+        let user = railscale_types::User::new(railscale_types::UserId::new(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)

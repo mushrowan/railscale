@@ -43,7 +43,7 @@ async fn test_map_request_returns_node() {
     // should include the node's own information
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
-    assert_eq!(response_node.id, fixture.node.id.0);
+    assert_eq!(response_node.id, fixture.node.id.as_u64());
     assert_eq!(response_node.node_key, fixture.node_key);
 
     // should have addresses in CIDR notation
@@ -60,7 +60,7 @@ async fn test_map_request_returns_peers() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     let node1_key = NodeKey::from_bytes(vec![1u8; 32]);
@@ -69,7 +69,7 @@ async fn test_map_request_returns_peers() {
     let now = chrono::Utc::now();
 
     let node1 = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![10u8; 32]),
         node_key: node1_key.clone(),
         disco_key: DiscoKey::from_bytes(vec![11u8; 32]),
@@ -96,7 +96,7 @@ async fn test_map_request_returns_peers() {
     };
 
     let node2 = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![20u8; 32]),
         node_key: node2_key.clone(),
         disco_key: DiscoKey::from_bytes(vec![21u8; 32]),

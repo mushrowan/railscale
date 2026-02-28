@@ -50,7 +50,7 @@ pub async fn set_device_attr(
     }
 
     debug!(
-        node_id = node.id.0,
+        node_id = node.id.as_u64(),
         updated_keys = ?req.update.keys().collect::<Vec<_>>(),
         "set-device-attr: updating posture attributes"
     );
@@ -98,7 +98,7 @@ mod tests {
         )
         .await;
 
-        let user = railscale_types::User::new(UserId(0), "alicja".into());
+        let user = railscale_types::User::new(UserId::new(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)

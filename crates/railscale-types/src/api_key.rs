@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn test_api_key_valid() {
         let secret = ApiKeySecret::generate();
-        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
+        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId::new(1));
         assert!(key.is_valid());
         assert!(!key.is_expired());
     }
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn test_api_key_expired() {
         let secret = ApiKeySecret::generate();
-        let mut key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
+        let mut key = ApiKey::new(1, &secret, "My Key".to_string(), UserId::new(1));
         key.expiration = Some(Utc::now() - chrono::Duration::hours(1));
         assert!(key.is_expired());
         assert!(!key.is_valid());
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn test_api_key_not_expired_with_future_expiration() {
         let secret = ApiKeySecret::generate();
-        let mut key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
+        let mut key = ApiKey::new(1, &secret, "My Key".to_string(), UserId::new(1));
         key.expiration = Some(Utc::now() + chrono::Duration::hours(1));
         assert!(!key.is_expired());
         assert!(key.is_valid());
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn test_api_key_prefix() {
         let secret = ApiKeySecret::generate();
-        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
+        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId::new(1));
         // prefix is "rsapi_" + first 8 hex chars = 14 chars total
         let prefix = key.prefix();
         assert!(prefix.starts_with("rsapi_"));
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn test_api_key_verify() {
         let secret = ApiKeySecret::generate();
-        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId(1));
+        let key = ApiKey::new(1, &secret, "My Key".to_string(), UserId::new(1));
 
         // should verify with the correct full key
         assert!(key.verify(&secret.full_key));

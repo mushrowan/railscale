@@ -134,7 +134,7 @@ pub async fn oidc_callback(
             .unwrap_or_else(|| "user".to_string());
 
         let new_user = User {
-            id: UserId(0), // Will be assigned by database
+            id: UserId::new(0), // Will be assigned by database
             name: sanitised_name,
             display_name: Some(claims.display_name().to_string()),
             email: Some(claims.email.clone()),
@@ -176,7 +176,7 @@ pub async fn oidc_callback(
 
         let now = chrono::Utc::now();
         let node = railscale_types::Node {
-            id: railscale_types::NodeId(0),
+            id: railscale_types::NodeId::new(0),
             machine_key: pending.machine_key.clone(),
             node_key: pending.node_key.clone(),
             disco_key: Default::default(),

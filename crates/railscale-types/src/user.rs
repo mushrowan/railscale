@@ -10,14 +10,18 @@ use serde::{Deserialize, Serialize};
 
 /// unique identifier for a user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct UserId(pub u64);
+pub struct UserId(u64);
 
 impl UserId {
     /// the special user id for tagged devices.
     ///
     /// tagged nodes don't belong to a real user - the tag is their identity.
     /// this id is used when rendering tagged nodes in the tailscale protocol.
-    pub const TAGGED_DEVICES: UserId = UserId(2147455555);
+    pub const TAGGED_DEVICES: UserId = UserId::new(2147455555);
+
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
 
     /// get the raw u64 value.
     pub fn as_u64(self) -> u64 {
@@ -155,7 +159,7 @@ impl User {
 
 impl Default for User {
     fn default() -> Self {
-        Self::new(UserId(0), String::new())
+        Self::new(UserId::new(0), String::new())
     }
 }
 
@@ -165,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_user_username_priority() {
-        let mut user = User::new(UserId(1), "testuser".to_string());
+        let mut user = User::new(UserId::new(1), "testuser".to_string());
 
         // name only
         assert_eq!(user.username(), "testuser");
@@ -178,27 +182,27 @@ mod tests {
     #[test]
     fn test_user_username_fallback_to_id() {
         // empty name, no email, no provider - should fall back to id
-        let user = User::new(UserId(42), String::new());
+        let user = User::new(UserId::new(42), String::new());
         assert_eq!(&*user.username(), "42");
     }
 
     #[test]
     fn test_user_username_provider_identifier_fallback() {
-        let mut user = User::new(UserId(1), String::new());
+        let mut user = User::new(UserId::new(1), String::new());
         user.provider_identifier = Some("https://issuer:sub123".to_string());
         assert_eq!(&*user.username(), "https://issuer:sub123");
     }
 
     #[test]
     fn test_user_display_falls_back_to_username_cow() {
-        let user = User::new(UserId(99), String::new());
+        let user = User::new(UserId::new(99), String::new());
         // display() should work even when username() returns owned variant
         assert_eq!(user.display(), "99");
     }
 
     #[test]
     fn test_user_display() {
-        let mut user = User::new(UserId(1), "testuser".to_string());
+        let mut user = User::new(UserId::new(1), "testuser".to_string());
         assert_eq!(user.display(), "testuser");
 
         user.display_name = Some("Test User".to_string());
@@ -212,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_user_oidc_groups() {
-        let mut user = User::new(UserId(1), "testuser".to_string());
+        let mut user = User::new(UserId::new(1), "testuser".to_string());
         assert!(user.oidc_groups.is_empty());
 
         user.oidc_groups = vec!["engineering".to_string(), "admins".to_string()];
@@ -222,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_user_serde_with_oidc_groups() {
-        let mut user = User::new(UserId(1), "testuser".to_string());
+        let mut user = User::new(UserId::new(1), "testuser".to_string());
         user.oidc_groups = vec!["group1".to_string()];
 
         let json = serde_json::to_string(&user).unwrap();

@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn tka_sign_info_serde() {
         let info = TkaSignInfo {
-            node_id: NodeId(42),
+            node_id: NodeId::new(42),
             node_public: NodeKey::from_bytes(vec![0u8; 32]),
             rotation_pubkey: vec![1, 2, 3, 4],
         };
@@ -358,7 +358,7 @@ mod tests {
         assert!(json.contains("\"NodeID\":42"));
         assert!(json.contains("\"RotationPubkey\"")); // base64 encoded
         let parsed: TkaSignInfo = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.node_id.0, 42);
+        assert_eq!(parsed.node_id.as_u64(), 42);
         assert_eq!(parsed.rotation_pubkey, vec![1, 2, 3, 4]);
     }
 

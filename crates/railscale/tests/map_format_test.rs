@@ -58,7 +58,7 @@ async fn test_map_request_updates_disco_key() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     // create a node with empty disco_key (simulating registration)
@@ -67,7 +67,7 @@ async fn test_map_request_updates_disco_key() {
 
     let now = chrono::Utc::now();
     let node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: machine_key.clone(),
         node_key: node_key.clone(),
         disco_key: DiscoKey::default(), // empty disco key!
@@ -163,7 +163,7 @@ async fn test_map_request_updates_hostinfo() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     // create a node with NO hostinfo (simulating initial registration)
@@ -173,7 +173,7 @@ async fn test_map_request_updates_hostinfo() {
 
     let now = chrono::Utc::now();
     let node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: machine_key.clone(),
         node_key: node_key.clone(),
         disco_key: disco_key.clone(),
@@ -296,7 +296,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     let now = chrono::Utc::now();
@@ -310,7 +310,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
     };
 
     let peer_node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![10u8; 32]),
         node_key: NodeKey::from_bytes(vec![20u8; 32]),
         disco_key: DiscoKey::from_bytes(vec![30u8; 32]),
@@ -340,7 +340,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
     // create requesting node (node a)
     let node_key = NodeKey::from_bytes(vec![2u8; 32]);
     let node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![1u8; 32]),
         node_key: node_key.clone(),
         disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
@@ -440,7 +440,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     let now = chrono::Utc::now();
@@ -448,7 +448,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
     // create peer node (node b) without hostinfo - simulates a freshly registered node
     // that hasn't sent its first MapRequest yet
     let peer_node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![10u8; 32]),
         node_key: NodeKey::from_bytes(vec![20u8; 32]),
         disco_key: DiscoKey::from_bytes(vec![30u8; 32]),
@@ -478,7 +478,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
     // create requesting node (node a)
     let node_key = NodeKey::from_bytes(vec![2u8; 32]);
     let node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![1u8; 32]),
         node_key: node_key.clone(),
         disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
@@ -672,7 +672,7 @@ async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
     let db = RailscaleDb::new_in_memory().await.unwrap();
     db.migrate().await.unwrap();
 
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     let node_key = NodeKey::from_bytes(vec![2u8; 32]);
@@ -680,7 +680,7 @@ async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
 
     let now = chrono::Utc::now();
     let node = Node {
-        id: NodeId(0),
+        id: NodeId::new(0),
         machine_key: MachineKey::from_bytes(vec![1u8; 32]),
         node_key: node_key.clone(),
         disco_key: disco_key.clone(),

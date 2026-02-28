@@ -125,14 +125,14 @@ mod tests {
     #[test]
     fn test_preauth_key_valid() {
         let token = PreAuthKeyToken::generate();
-        let key = PreAuthKey::from_token(1, &token, UserId(1));
+        let key = PreAuthKey::from_token(1, &token, UserId::new(1));
         assert!(key.is_valid());
     }
 
     #[test]
     fn test_preauth_key_used_non_reusable() {
         let token = PreAuthKeyToken::generate();
-        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
+        let mut key = PreAuthKey::from_token(1, &token, UserId::new(1));
         key.used = true;
         assert!(!key.is_valid());
     }
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn test_preauth_key_used_reusable() {
         let token = PreAuthKeyToken::generate();
-        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
+        let mut key = PreAuthKey::from_token(1, &token, UserId::new(1));
         key.used = true;
         key.reusable = true;
         assert!(key.is_valid());
@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn test_preauth_key_expired() {
         let token = PreAuthKeyToken::generate();
-        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
+        let mut key = PreAuthKey::from_token(1, &token, UserId::new(1));
         key.expiration = Some(Utc::now() - chrono::Duration::hours(1));
         assert!(key.is_expired());
         assert!(!key.is_valid());
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn test_preauth_key_creates_tagged_nodes() {
         let token = PreAuthKeyToken::generate();
-        let mut key = PreAuthKey::from_token(1, &token, UserId(1));
+        let mut key = PreAuthKey::from_token(1, &token, UserId::new(1));
         assert!(!key.creates_tagged_nodes());
 
         key.tags = vec!["tag:server".parse().unwrap()];
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn test_preauth_key_verify() {
         let token = PreAuthKeyToken::generate();
-        let key = PreAuthKey::from_token(1, &token, UserId(1));
+        let key = PreAuthKey::from_token(1, &token, UserId::new(1));
         // verification should succeed with the same token
         assert!(key.verify(&token));
         // verification should fail with a different token
@@ -179,7 +179,7 @@ mod tests {
     #[test]
     fn test_preauth_key_prefix() {
         let token = PreAuthKeyToken::generate();
-        let key = PreAuthKey::from_token(1, &token, UserId(1));
+        let key = PreAuthKey::from_token(1, &token, UserId::new(1));
         // key_prefix should match the token's prefix
         assert_eq!(key.key_prefix, token.prefix());
     }

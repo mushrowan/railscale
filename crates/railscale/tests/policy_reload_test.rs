@@ -20,11 +20,11 @@ async fn test_policy_hot_reload_changes_visibility() {
 
     // create users
     let alicja = db
-        .create_user(&User::new(UserId(1), "alicja@example.com".to_string()))
+        .create_user(&User::new(UserId::new(1), "alicja@example.com".to_string()))
         .await
         .unwrap();
     let ro = db
-        .create_user(&User::new(UserId(2), "ro@example.com".to_string()))
+        .create_user(&User::new(UserId::new(2), "ro@example.com".to_string()))
         .await
         .unwrap();
 
@@ -32,7 +32,7 @@ async fn test_policy_hot_reload_changes_visibility() {
     let now = chrono::Utc::now();
     let alicja_node = db
         .create_node(&Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![1u8; 32]),
             node_key: NodeKey::from_bytes(vec![11u8; 32]),
             disco_key: DiscoKey::from_bytes(vec![21u8; 32]),
@@ -62,7 +62,7 @@ async fn test_policy_hot_reload_changes_visibility() {
 
     let ro_node = db
         .create_node(&Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![2u8; 32]),
             node_key: NodeKey::from_bytes(vec![12u8; 32]),
             disco_key: DiscoKey::from_bytes(vec![22u8; 32]),
@@ -165,7 +165,7 @@ async fn test_policy_hot_reload_changes_visibility() {
         1,
         "After policy reload, Alicja should see Ro"
     );
-    assert_eq!(alice_map.peers[0].id, ro_node.id.0);
+    assert_eq!(alice_map.peers[0].id, ro_node.id.as_u64());
 
     // reload back to empty policy
     policy_handle.reload(Policy::empty()).await;

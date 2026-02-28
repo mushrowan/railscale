@@ -53,7 +53,7 @@ pub async fn audit_log(
     state.db.create_audit_log(&log).await.map_internal()?;
 
     debug!(
-        node_id = node.id.0,
+        node_id = node.id.as_u64(),
         action = %req.action,
         "audit-log: recorded"
     );
@@ -92,7 +92,7 @@ mod tests {
         )
         .await;
 
-        let user = railscale_types::User::new(UserId(0), "alicja".into());
+        let user = railscale_types::User::new(UserId::new(0), "alicja".into());
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)

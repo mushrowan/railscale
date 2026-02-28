@@ -88,7 +88,7 @@ fn format_key(prefix: &str, bytes: &[u8]) -> String {
 impl From<Node> for NodeResponse {
     fn from(node: Node) -> Self {
         Self {
-            id: node.id.0.to_string(),
+            id: node.id.to_string(),
             machine_key: format_key("mkey", node.machine_key.as_bytes()),
             node_key: format_key("nodekey", node.node_key.as_bytes()),
             disco_key: format_key("discokey", node.disco_key.as_bytes()),
@@ -96,7 +96,7 @@ impl From<Node> for NodeResponse {
             ipv6: node.ipv6.map(|ip| ip.to_string()),
             hostname: node.hostname,
             given_name: node.given_name.to_string(),
-            user_id: node.user_id.map(|id| id.0.to_string()),
+            user_id: node.user_id.map(|id| id.to_string()),
             register_method: format!("{:?}", node.register_method).to_lowercase(),
             tags: node.tags.iter().map(|t| t.to_string()).collect(),
             expiry: node.expiry.map(|dt| dt.to_rfc3339()),
@@ -206,7 +206,7 @@ async fn get_node(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<Json<GetNodeResponse>, ApiError> {
-    let node_id = NodeId(id);
+    let node_id = NodeId::new(id);
 
     let node = state
         .db
@@ -230,7 +230,7 @@ async fn delete_node(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<Json<EmptyResponse>, ApiError> {
-    let node_id = NodeId(id);
+    let node_id = NodeId::new(id);
 
     // fetch node before deleting so we can release its IPs
     let node = state
@@ -269,7 +269,7 @@ async fn expire_node(
     Path(id): Path<u64>,
     JsonBody(req): JsonBody<ExpireNodeRequest>,
 ) -> Result<Json<GetNodeResponse>, ApiError> {
-    let node_id = NodeId(id);
+    let node_id = NodeId::new(id);
 
     let mut node = state
         .db
@@ -312,7 +312,7 @@ async fn rename_node(
 ) -> Result<Json<RenameNodeResponse>, ApiError> {
     let new_name = NodeName::new(&new_name).map_err(|e| ApiError::bad_request(e.to_string()))?;
 
-    let node_id = NodeId(id);
+    let node_id = NodeId::new(id);
 
     let mut node = state
         .db
@@ -348,7 +348,7 @@ async fn set_tags(
     Path(id): Path<u64>,
     JsonBody(req): JsonBody<SetTagsRequest>,
 ) -> Result<Json<SetTagsResponse>, ApiError> {
-    let node_id = NodeId(id);
+    let node_id = NodeId::new(id);
 
     let mut node = state
         .db
@@ -388,7 +388,7 @@ async fn set_routes(
     Path(id): Path<u64>,
     JsonBody(req): JsonBody<SetRoutesRequest>,
 ) -> Result<Json<SetRoutesResponse>, ApiError> {
-    let node_id = NodeId(id);
+    let node_id = NodeId::new(id);
 
     let mut node = state
         .db
@@ -441,7 +441,7 @@ async fn set_posture_attributes(
     Path(id): Path<u64>,
     JsonBody(req): JsonBody<SetPostureAttributesRequest>,
 ) -> Result<Json<SetPostureAttributesResponse>, ApiError> {
-    let node_id = NodeId(id);
+    let node_id = NodeId::new(id);
 
     let mut node = state
         .db

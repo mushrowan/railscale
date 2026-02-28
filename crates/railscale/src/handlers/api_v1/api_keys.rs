@@ -44,7 +44,7 @@ impl From<ApiKey> for ApiKeyResponse {
             id: key.id.to_string(),
             prefix: key.prefix(),
             name: key.name,
-            user_id: key.user_id.0.to_string(),
+            user_id: key.user_id.to_string(),
             expiration: key.expiration.map(|dt| dt.to_rfc3339()),
             created_at: key.created_at.to_rfc3339(),
             last_used_at: key.last_used_at.map(|dt| dt.to_rfc3339()),
@@ -128,7 +128,7 @@ async fn create_api_key(
     State(state): State<AppState>,
     JsonBody(req): JsonBody<CreateApiKeyRequest>,
 ) -> Result<(StatusCode, Json<CreateApiKeyResponse>), ApiError> {
-    let user_id = UserId(req.user);
+    let user_id = UserId::new(req.user);
     if state
         .db
         .get_user(user_id)
@@ -163,7 +163,7 @@ async fn create_api_key(
         .await
         .map_err(ApiError::internal)?;
 
-    info!(key_id = key.id, user_id = user_id.0, name = %key.name, "api key created");
+    info!(key_id = key.id, user_id = user_id.as_u64(), name = %key.name, "api key created");
 
     Ok((
         StatusCode::CREATED,
@@ -273,7 +273,7 @@ mod tests {
     #[test]
     fn test_api_key_response_from() {
         let secret = ApiKeySecret::generate();
-        let key = ApiKey::new(1, &secret, "Test Key".to_string(), UserId(42));
+        let key = ApiKey::new(1, &secret, "Test Key".to_string(), UserId::new(42));
         let response = ApiKeyResponse::from(key);
 
         assert_eq!(response.id, "1");
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_api_key_response_serialization() {
         let secret = ApiKeySecret::generate();
-        let key = ApiKey::new(1, &secret, "Test Key".to_string(), UserId(42));
+        let key = ApiKey::new(1, &secret, "Test Key".to_string(), UserId::new(42));
         let response = ApiKeyResponse::from(key);
 
         let json = serde_json::to_string(&response).unwrap();

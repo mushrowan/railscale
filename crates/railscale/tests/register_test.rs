@@ -16,7 +16,7 @@ async fn test_register_with_preauth_key() {
     db.migrate().await.unwrap();
 
     // create a user
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     // create a preauth key using token
@@ -103,7 +103,7 @@ async fn test_register_with_tailscale_format() {
     db.migrate().await.unwrap();
 
     // create a user
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     // create a preauth key using token
@@ -203,7 +203,7 @@ async fn test_register_allocates_ip_addresses() {
     db.migrate().await.unwrap();
 
     // create a user
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     // create a preauth key using token
@@ -325,7 +325,7 @@ async fn test_register_without_content_type_header() {
     db.migrate().await.unwrap();
 
     // create a user
-    let user = User::new(UserId(1), "test-user".to_string());
+    let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
     // create a preauth key using token

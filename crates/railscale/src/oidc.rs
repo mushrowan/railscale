@@ -376,7 +376,7 @@ mod tests {
         // complete the registration
         let node = TestNodeBuilder::new(1).build();
         let user = User {
-            id: UserId(1),
+            id: UserId::new(1),
             name: "alicja".to_string(),
             display_name: Some("Alicja".to_string()),
             email: Some("alicja@example.com".to_string()),
@@ -408,7 +408,7 @@ mod tests {
 
         let node = TestNodeBuilder::new(1).build();
         let user = User {
-            id: UserId(1),
+            id: UserId::new(1),
             name: "alicja".to_string(),
             display_name: Some("Alicja".to_string()),
             email: Some("alicja@example.com".to_string()),

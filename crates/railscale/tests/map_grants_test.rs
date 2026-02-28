@@ -18,15 +18,15 @@ async fn test_map_request_respects_user_grants() {
 
     // create users
     let alicja = db
-        .create_user(&User::new(UserId(1), "alicja@example.com".to_string()))
+        .create_user(&User::new(UserId::new(1), "alicja@example.com".to_string()))
         .await
         .unwrap();
     let ro = db
-        .create_user(&User::new(UserId(2), "ro@example.com".to_string()))
+        .create_user(&User::new(UserId::new(2), "ro@example.com".to_string()))
         .await
         .unwrap();
     let esme = db
-        .create_user(&User::new(UserId(3), "esme@example.com".to_string()))
+        .create_user(&User::new(UserId::new(3), "esme@example.com".to_string()))
         .await
         .unwrap();
 
@@ -34,7 +34,7 @@ async fn test_map_request_respects_user_grants() {
     let now = chrono::Utc::now();
     let alicja_node = db
         .create_node(&Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![1u8; 32]),
             node_key: NodeKey::from_bytes(vec![11u8; 32]),
             disco_key: DiscoKey::from_bytes(vec![21u8; 32]),
@@ -64,7 +64,7 @@ async fn test_map_request_respects_user_grants() {
 
     let ro_node = db
         .create_node(&Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![2u8; 32]),
             node_key: NodeKey::from_bytes(vec![12u8; 32]),
             disco_key: DiscoKey::from_bytes(vec![22u8; 32]),
@@ -94,7 +94,7 @@ async fn test_map_request_respects_user_grants() {
 
     let _esme_node = db
         .create_node(&Node {
-            id: NodeId(0),
+            id: NodeId::new(0),
             machine_key: MachineKey::from_bytes(vec![3u8; 32]),
             node_key: NodeKey::from_bytes(vec![13u8; 32]),
             disco_key: DiscoKey::from_bytes(vec![23u8; 32]),
@@ -177,21 +177,21 @@ async fn test_map_request_respects_user_grants() {
     // alicja should see Ro
     let alice_map = request_map(alicja_node.node_key).await;
     assert_eq!(alice_map.peers.len(), 1);
-    assert_eq!(alice_map.peers[0].id, ro_node.id.0);
+    assert_eq!(alice_map.peers[0].id, ro_node.id.as_u64());
 
     // alicja's user_profiles should contain alicja + ro, but NOT esme
     let alice_profile_ids: std::collections::HashSet<u64> =
         alice_map.user_profiles.iter().map(|p| p.id).collect();
     assert!(
-        alice_profile_ids.contains(&alicja.id.0),
+        alice_profile_ids.contains(&alicja.id.as_u64()),
         "alicja should see her own profile"
     );
     assert!(
-        alice_profile_ids.contains(&ro.id.0),
+        alice_profile_ids.contains(&ro.id.as_u64()),
         "alicja should see ro's profile (visible peer)"
     );
     assert!(
-        !alice_profile_ids.contains(&esme.id.0),
+        !alice_profile_ids.contains(&esme.id.as_u64()),
         "alicja should NOT see esme's profile (not a visible peer)"
     );
     assert_eq!(
@@ -208,15 +208,15 @@ async fn test_map_request_respects_user_grants() {
     let bob_profile_ids: std::collections::HashSet<u64> =
         bob_map.user_profiles.iter().map(|p| p.id).collect();
     assert!(
-        bob_profile_ids.contains(&ro.id.0),
+        bob_profile_ids.contains(&ro.id.as_u64()),
         "ro should see his own profile"
     );
     assert!(
-        !bob_profile_ids.contains(&alicja.id.0),
+        !bob_profile_ids.contains(&alicja.id.as_u64()),
         "ro should NOT see alicja's profile"
     );
     assert!(
-        !bob_profile_ids.contains(&esme.id.0),
+        !bob_profile_ids.contains(&esme.id.as_u64()),
         "ro should NOT see esme's profile"
     );
     assert_eq!(
