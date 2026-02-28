@@ -3,6 +3,8 @@
 //! in railscale (like headscale), users are "bubbles" or namespaces
 //! that contain nodes. Users can be created via CLI or OIDC.
 
+use std::borrow::Cow;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -94,23 +96,25 @@ impl User {
     /// returns the username to use for display and policy evaluation.
     ///
     /// priority: email > name > provider_identifier > id
-    pub fn username(&self) -> &str {
-        self.email
-            .as_deref()
-            .or(Some(&self.name))
-            .filter(|s| !s.is_empty())
-            .or(self.provider_identifier.as_deref())
-            .unwrap_or_else(|| {
-                // fallback to id string - this is a bit awkward but matches go behavior
-                Box::leak(self.id.to_string().into_boxed_str())
-            })
+    pub fn username(&self) -> Cow<'_, str> {
+        if let Some(ref email) = self.email {
+            return Cow::Borrowed(email);
+        }
+        if !self.name.is_empty() {
+            return Cow::Borrowed(&self.name);
+        }
+        if let Some(ref pi) = self.provider_identifier {
+            return Cow::Borrowed(pi);
+        }
+        Cow::Owned(self.id.to_string())
     }
 
     /// returns the display name or falls back to username.
-    pub fn display(&self) -> &str {
+    pub fn display(&self) -> Cow<'_, str> {
         self.display_name
             .as_deref()
             .filter(|s| !s.is_empty())
+            .map(Cow::Borrowed)
             .unwrap_or_else(|| self.username())
     }
 
@@ -153,6 +157,27 @@ mod tests {
         // email takes priority
         user.email = Some("test@example.com".to_string());
         assert_eq!(user.username(), "test@example.com");
+    }
+
+    #[test]
+    fn test_user_username_fallback_to_id() {
+        // empty name, no email, no provider - should fall back to id
+        let user = User::new(UserId(42), String::new());
+        assert_eq!(&*user.username(), "42");
+    }
+
+    #[test]
+    fn test_user_username_provider_identifier_fallback() {
+        let mut user = User::new(UserId(1), String::new());
+        user.provider_identifier = Some("https://issuer:sub123".to_string());
+        assert_eq!(&*user.username(), "https://issuer:sub123");
+    }
+
+    #[test]
+    fn test_user_display_falls_back_to_username_cow() {
+        let user = User::new(UserId(99), String::new());
+        // display() should work even when username() returns owned variant
+        assert_eq!(user.display(), "99");
     }
 
     #[test]
