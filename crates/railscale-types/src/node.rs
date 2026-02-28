@@ -175,15 +175,8 @@ impl Node {
     }
 
     /// returns all ip addresses assigned to this node.
-    pub fn ips(&self) -> Vec<IpAddr> {
-        let mut ips = Vec::with_capacity(2);
-        if let Some(ip) = self.ipv4 {
-            ips.push(ip);
-        }
-        if let Some(ip) = self.ipv6 {
-            ips.push(ip);
-        }
-        ips
+    pub fn ips(&self) -> impl Iterator<Item = IpAddr> + '_ {
+        self.ipv4.into_iter().chain(self.ipv6)
     }
 
     /// returns the routes this node is currently announcing.
@@ -195,31 +188,27 @@ impl Node {
     }
 
     /// returns the subnet routes (excluding exit routes) that are approved.
-    pub fn subnet_routes(&self) -> Vec<IpNet> {
+    pub fn subnet_routes(&self) -> impl Iterator<Item = &IpNet> {
         self.announced_routes()
             .iter()
             .filter(|route| !is_exit_route(route) && self.approved_routes.contains(route))
-            .cloned()
-            .collect()
     }
 
     /// returns the exit routes if enabled.
-    pub fn exit_routes(&self) -> Vec<IpNet> {
+    pub fn exit_routes(&self) -> impl Iterator<Item = &IpNet> {
         self.announced_routes()
             .iter()
             .filter(|route| is_exit_route(route) && self.approved_routes.contains(route))
-            .cloned()
-            .collect()
     }
 
     /// returns whether this node is an exit node.
     pub fn is_exit_node(&self) -> bool {
-        !self.exit_routes().is_empty()
+        self.exit_routes().next().is_some()
     }
 
     /// returns whether this node is a subnet router.
     pub fn is_subnet_router(&self) -> bool {
-        !self.subnet_routes().is_empty()
+        self.subnet_routes().next().is_some()
     }
 }
 
@@ -511,8 +500,7 @@ mod tests {
     #[test]
     fn test_node_ips() {
         let node = test_node();
-        let ips = node.ips();
-        assert_eq!(ips.len(), 2);
+        assert_eq!(node.ips().count(), 2);
     }
 
     #[test]

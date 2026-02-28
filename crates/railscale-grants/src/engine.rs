@@ -257,13 +257,14 @@ impl GrantsEngine {
             }
 
             // get source ips from peer
-            let src_ips: Vec<String> = peer.ips().iter().map(|ip| ip.to_string()).collect();
+            let src_ips: Vec<String> = peer.ips().map(|ip| ip.to_string()).collect();
             if src_ips.is_empty() {
                 continue;
             }
 
             // group capabilities by protocol signature
-            let grouped = self.group_capabilities_by_protocol(&caps, &node.ips());
+            let node_ips: Vec<IpAddr> = node.ips().collect();
+            let grouped = self.group_capabilities_by_protocol(&caps, &node_ips);
             for (ip_proto, dst_ports) in grouped {
                 if dst_ports.is_empty() {
                     continue;
@@ -299,7 +300,7 @@ impl GrantsEngine {
                 continue;
             }
 
-            let src_ips: Vec<String> = peer.ips().iter().map(|ip| ip.to_string()).collect();
+            let src_ips: Vec<String> = peer.ips().map(|ip| ip.to_string()).collect();
             if src_ips.is_empty() {
                 continue;
             }
@@ -307,7 +308,6 @@ impl GrantsEngine {
             // build dst prefixes from node's IPs
             let dsts: Vec<String> = node
                 .ips()
-                .iter()
                 .map(|ip| match ip {
                     std::net::IpAddr::V4(_) => format!("{}/32", ip),
                     std::net::IpAddr::V6(_) => format!("{}/128", ip),
@@ -373,7 +373,6 @@ impl GrantsEngine {
         // build dst prefixes from node's IPs
         let dsts: Vec<String> = node
             .ips()
-            .iter()
             .map(|ip| match ip {
                 std::net::IpAddr::V4(_) => format!("{}/32", ip),
                 std::net::IpAddr::V6(_) => format!("{}/128", ip),
@@ -651,7 +650,7 @@ impl GrantsEngine {
             }
             Selector::Cidr(net) => {
                 // check if any of node's ips are in the cidr
-                node.ips().iter().any(|ip| net.contains(ip))
+                node.ips().any(|ip| net.contains(&ip))
             }
             Selector::User(email) => node
                 .user_id
@@ -1908,9 +1907,10 @@ mod tests {
         let bob_rule = rules
             .iter()
             .find(|r| {
-                r.src_ips
-                    .iter()
-                    .any(|ip| ro.ips().contains(&ip.parse().unwrap()))
+                r.src_ips.iter().any(|ip| {
+                    ro.ips()
+                        .any(|node_ip| node_ip == ip.parse::<std::net::IpAddr>().unwrap())
+                })
             })
             .expect("should have a rule with ro's IP as src");
 
