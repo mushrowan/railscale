@@ -70,6 +70,7 @@ in
 
       environment.variables.RAILSCALE_DATABASE_URL = "sqlite:///var/lib/railscale/db.sqlite";
       systemd.services.railscale.environment.RAILSCALE_LOG_LEVEL = "debug";
+      boot.kernel.sysctl = common.serverSysctl;
       networking.firewall = common.serverFirewall;
     };
 

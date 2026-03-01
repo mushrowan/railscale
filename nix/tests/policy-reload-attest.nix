@@ -70,6 +70,7 @@ makeTest {
         '';
 
         systemd.services.railscale.environment.RAILSCALE_LOG_LEVEL = "debug";
+        boot.kernel.sysctl = common.serverSysctl;
         networking.firewall = common.serverFirewall;
       };
   };

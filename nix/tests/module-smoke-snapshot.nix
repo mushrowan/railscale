@@ -39,6 +39,7 @@ let
         // extraSettings;
       };
 
+      boot.kernel.sysctl = common.serverSysctl;
       networking.firewall = common.serverFirewall;
     };
 

@@ -78,6 +78,11 @@ in
     };
   };
 
+  # Kernel tuning for server VMs (same as clients)
+  serverSysctl = {
+    "net.netfilter.nf_conntrack_max" = 16384;
+  };
+
   # Common server firewall rules for DERP
   serverFirewall = {
     allowedTCPPorts = [
