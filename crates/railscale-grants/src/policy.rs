@@ -610,7 +610,7 @@ mod tests {
         assert_eq!(policy.node_attrs.len(), 1);
         assert_eq!(
             policy.node_attrs[0].target,
-            vec![Selector::Tag("connector".to_string())]
+            vec![Selector::Tag("tag:connector".parse().unwrap())]
         );
         assert!(
             policy.node_attrs[0]

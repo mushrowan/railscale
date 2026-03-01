@@ -3,6 +3,8 @@
 use ipnet::IpNet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
+use railscale_types::Tag;
+
 use crate::error::ParseError;
 
 /// a selector that can match nodes in src or dst fields.
@@ -14,8 +16,8 @@ pub enum Selector {
     User(String),
     /// group reference (e.g., "group:engineering").
     Group(String),
-    /// tag reference (e.g., "tag:server").
-    Tag(String),
+    /// tag reference (e.g., "tag:server"), validated via `Tag` newtype.
+    Tag(Tag),
     /// autogroup (e.g., "autogroup:admin", "autogroup:tagged").
     Autogroup(Autogroup),
     /// cidr range (e.g., "192.168.1.0/24").
@@ -31,7 +33,7 @@ impl Serialize for Selector {
             Selector::Wildcard => serializer.serialize_str("*"),
             Selector::User(u) => serializer.serialize_str(u),
             Selector::Group(g) => serializer.serialize_str(&format!("group:{}", g)),
-            Selector::Tag(t) => serializer.serialize_str(&format!("tag:{}", t)),
+            Selector::Tag(t) => serializer.serialize_str(t.as_str()),
             Selector::Autogroup(ag) => {
                 serializer.serialize_str(&format!("autogroup:{}", autogroup_name(*ag)))
             }
@@ -93,8 +95,9 @@ impl Selector {
         if s == "*" {
             return Ok(Selector::Wildcard);
         }
-        if let Some(name) = s.strip_prefix("tag:") {
-            return Ok(Selector::Tag(name.to_string()));
+        if s.starts_with("tag:") {
+            let tag: Tag = s.parse().map_err(|e| ParseError::InvalidTag(e))?;
+            return Ok(Selector::Tag(tag));
         }
         if let Some(name) = s.strip_prefix("group:") {
             return Ok(Selector::Group(name.to_string()));
@@ -138,8 +141,15 @@ mod tests {
 
     #[test]
     fn test_parse_tag() {
+        let tag: railscale_types::Tag = "tag:web".parse().unwrap();
         let selector = Selector::parse("tag:web").unwrap();
-        assert_eq!(selector, Selector::Tag("web".to_string()));
+        assert_eq!(selector, Selector::Tag(tag));
+    }
+
+    #[test]
+    fn test_parse_invalid_tag_rejected() {
+        // uppercase tag name should be rejected at parse time
+        assert!(Selector::parse("tag:INVALID").is_err());
     }
 
     #[test]
@@ -247,7 +257,8 @@ mod proptests {
         fn tag_roundtrips(name in tag_name_strategy()) {
             let input = format!("tag:{}", name);
             let selector = Selector::parse(&input).unwrap();
-            prop_assert_eq!(&selector, &Selector::Tag(name.clone()));
+            let expected_tag: railscale_types::Tag = input.parse().unwrap();
+            prop_assert_eq!(&selector, &Selector::Tag(expected_tag));
             // roundtrip through serde
             let json = serde_json::to_string(&selector).unwrap();
             let parsed: Selector = serde_json::from_str(&json).unwrap();

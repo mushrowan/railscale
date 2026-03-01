@@ -82,6 +82,10 @@ pub enum ParseError {
     #[error("invalid CIDR: {0}")]
     InvalidCidr(String),
 
+    /// invalid tag format.
+    #[error("invalid tag: {0}")]
+    InvalidTag(#[from] railscale_types::TagError),
+
     /// selector string doesn't match any known format.
     #[error("unknown selector format: {0}")]
     UnknownSelector(String),

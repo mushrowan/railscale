@@ -193,7 +193,7 @@ pub async fn oidc_callback(
             builder = builder.hostinfo(hostinfo);
         }
 
-        let mut node = builder.build();
+        let node = builder.build();
 
         // auto-approve routes based on policy
         let grants = state.grants.read().await;

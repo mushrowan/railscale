@@ -902,7 +902,7 @@ mod tests {
 
         let mut policy = Policy::empty();
         policy.node_attrs.push(NodeAttr {
-            target: vec![Selector::Tag("connector".to_string())],
+            target: vec![Selector::Tag("tag:connector".parse().unwrap())],
             app: {
                 let mut app = HashMap::new();
                 app.insert(
@@ -1058,7 +1058,7 @@ mod tests {
 
         let mut policy = Policy::empty();
         policy.node_attrs.push(NodeAttr {
-            target: vec![Selector::Tag("webserver".to_string())],
+            target: vec![Selector::Tag("tag:webserver".parse().unwrap())],
             app: {
                 let mut app = HashMap::new();
                 app.insert(

@@ -633,7 +633,7 @@ impl GrantsEngine {
     ) -> bool {
         match selector {
             Selector::Wildcard => true,
-            Selector::Tag(tag) => node.has_tag(&format!("tag:{}", tag)),
+            Selector::Tag(tag) => node.has_tag(tag.as_str()),
             Selector::Autogroup(Autogroup::Tagged) => node.is_tagged(),
             Selector::Autogroup(Autogroup::Member) => !node.is_tagged(),
             Selector::Autogroup(Autogroup::SelfDevices) => {
@@ -874,8 +874,8 @@ mod tests {
     fn test_tag_grant_selective_access() {
         let mut policy = Policy::empty();
         policy.grants.push(Grant {
-            src: vec![Selector::Tag("web".to_string())],
-            dst: vec![Selector::Tag("database".to_string())],
+            src: vec![Selector::Tag("tag:web".parse().unwrap())],
+            dst: vec![Selector::Tag("tag:database".parse().unwrap())],
             ip: vec![NetworkCapability::Wildcard],
             app: vec![],
             src_posture: vec![],
@@ -982,8 +982,8 @@ mod tests {
     fn test_get_visible_peers() {
         let mut policy = Policy::empty();
         policy.grants.push(Grant {
-            src: vec![Selector::Tag("web".to_string())],
-            dst: vec![Selector::Tag("database".to_string())],
+            src: vec![Selector::Tag("tag:web".parse().unwrap())],
+            dst: vec![Selector::Tag("tag:database".parse().unwrap())],
             ip: vec![NetworkCapability::Wildcard],
             app: vec![],
             src_posture: vec![],
@@ -1078,7 +1078,7 @@ mod tests {
         let mut policy = Policy::empty();
         policy.grants.push(Grant {
             src: vec![Selector::Autogroup(Autogroup::Member)],
-            dst: vec![Selector::Tag("server".to_string())],
+            dst: vec![Selector::Tag("tag:server".parse().unwrap())],
             ip: vec![NetworkCapability::Wildcard],
             app: vec![],
             src_posture: vec![],
@@ -1931,7 +1931,7 @@ mod tests {
 
         let mut policy = Policy::empty();
         policy.node_attrs.push(NodeAttr {
-            target: vec![Selector::Tag("connector".to_string())],
+            target: vec![Selector::Tag("tag:connector".parse().unwrap())],
             app: {
                 let mut app = HashMap::new();
                 app.insert(
@@ -1999,7 +1999,7 @@ mod tests {
         let mut policy = Policy::empty();
         // two nodeAttrs both targeting the same tag
         policy.node_attrs.push(NodeAttr {
-            target: vec![Selector::Tag("connector".to_string())],
+            target: vec![Selector::Tag("tag:connector".parse().unwrap())],
             app: {
                 let mut app = HashMap::new();
                 app.insert(
@@ -2010,7 +2010,7 @@ mod tests {
             },
         });
         policy.node_attrs.push(NodeAttr {
-            target: vec![Selector::Tag("connector".to_string())],
+            target: vec![Selector::Tag("tag:connector".parse().unwrap())],
             app: {
                 let mut app = HashMap::new();
                 app.insert(
@@ -2184,7 +2184,7 @@ mod tests {
                 let mut m = HashMap::new();
                 m.insert(
                     "10.0.0.0/8".to_string(),
-                    vec![Selector::Tag("infra".to_string())],
+                    vec![Selector::Tag("tag:infra".parse().unwrap())],
                 );
                 m
             },
@@ -2227,7 +2227,7 @@ mod tests {
                 let mut m = HashMap::new();
                 m.insert(
                     "10.0.0.0/8".to_string(),
-                    vec![Selector::Tag("infra".to_string())],
+                    vec![Selector::Tag("tag:infra".parse().unwrap())],
                 );
                 m
             },
@@ -2255,7 +2255,7 @@ mod tests {
         let mut policy = Policy::empty();
         policy.auto_approvers = AutoApproverPolicy {
             routes: HashMap::new(),
-            exit_node: vec![Selector::Tag("exit".to_string())],
+            exit_node: vec![Selector::Tag("tag:exit".parse().unwrap())],
         };
 
         let engine = GrantsEngine::new(policy);
@@ -2284,7 +2284,7 @@ mod tests {
                 let mut m = HashMap::new();
                 m.insert(
                     "10.0.0.0/8".to_string(),
-                    vec![Selector::Tag("infra".to_string())],
+                    vec![Selector::Tag("tag:infra".parse().unwrap())],
                 );
                 m
             },
