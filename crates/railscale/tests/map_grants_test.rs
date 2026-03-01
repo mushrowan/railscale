@@ -8,7 +8,7 @@ use railscale::StateNotifier;
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use railscale_proto::MapRequest;
-use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
+use railscale_types::{DiscoKey, MachineKey, NodeKey, User, UserId, test_utils::TestNodeBuilder};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -31,94 +31,45 @@ async fn test_map_request_respects_user_grants() {
         .unwrap();
 
     // create nodes
-    let now = chrono::Utc::now();
     let alicja_node = db
-        .create_node(&Node {
-            id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes([1u8; 32]),
-            node_key: NodeKey::from_bytes([11u8; 32]),
-            disco_key: DiscoKey::from_bytes([21u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "alicja-node".to_string(),
-            given_name: "alicja-node".parse().unwrap(),
-            user_id: Some(alicja.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        })
+        .create_node(
+            &TestNodeBuilder::new(0)
+                .with_machine_key(MachineKey::from_bytes([1u8; 32]))
+                .with_node_key(NodeKey::from_bytes([11u8; 32]))
+                .with_disco_key(DiscoKey::from_bytes([21u8; 32]))
+                .with_ipv4("100.64.0.1".parse().unwrap())
+                .with_hostname("alicja-node")
+                .with_user_id(alicja.id)
+                .build(),
+        )
         .await
         .unwrap();
 
     let ro_node = db
-        .create_node(&Node {
-            id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes([2u8; 32]),
-            node_key: NodeKey::from_bytes([12u8; 32]),
-            disco_key: DiscoKey::from_bytes([22u8; 32]),
-            ipv4: Some("100.64.0.2".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "ro-node".to_string(),
-            given_name: "ro-node".parse().unwrap(),
-            user_id: Some(ro.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        })
+        .create_node(
+            &TestNodeBuilder::new(0)
+                .with_machine_key(MachineKey::from_bytes([2u8; 32]))
+                .with_node_key(NodeKey::from_bytes([12u8; 32]))
+                .with_disco_key(DiscoKey::from_bytes([22u8; 32]))
+                .with_ipv4("100.64.0.2".parse().unwrap())
+                .with_hostname("ro-node")
+                .with_user_id(ro.id)
+                .build(),
+        )
         .await
         .unwrap();
 
     let _esme_node = db
-        .create_node(&Node {
-            id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes([3u8; 32]),
-            node_key: NodeKey::from_bytes([13u8; 32]),
-            disco_key: DiscoKey::from_bytes([23u8; 32]),
-            ipv4: Some("100.64.0.3".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "esme-node".to_string(),
-            given_name: "esme-node".parse().unwrap(),
-            user_id: Some(esme.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        })
+        .create_node(
+            &TestNodeBuilder::new(0)
+                .with_machine_key(MachineKey::from_bytes([3u8; 32]))
+                .with_node_key(NodeKey::from_bytes([13u8; 32]))
+                .with_disco_key(DiscoKey::from_bytes([23u8; 32]))
+                .with_ipv4("100.64.0.3".parse().unwrap())
+                .with_hostname("esme-node")
+                .with_user_id(esme.id)
+                .build(),
+        )
         .await
         .unwrap();
 

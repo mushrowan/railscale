@@ -7,12 +7,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use chrono::Utc;
 use railscale::{StateNotifier, create_app};
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{GrantsEngine, Policy};
 use railscale_types::{
-    Config, DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId,
+    Config, DiscoKey, MachineKey, NodeKey, User, UserId, test_utils::TestNodeBuilder,
 };
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
@@ -44,32 +43,14 @@ async fn test_verify_allows_registered_node() {
     let user = db.create_user(&user).await.expect("failed to create user");
 
     let node_key = NodeKey::from_bytes([1u8; 32]);
-    let node = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([2u8; 32]),
-        node_key: node_key.clone(),
-        disco_key: DiscoKey::from_bytes([3u8; 32]),
-        endpoints: vec![],
-        hostinfo: None,
-        ipv4: Some("100.64.0.1".parse().unwrap()),
-        ipv6: None,
-        hostname: "test-node".to_string(),
-        given_name: "test-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        expiry: None,
-        last_seen: None,
-        approved_routes: vec![],
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let node = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([2u8; 32]))
+        .with_node_key(node_key.clone())
+        .with_disco_key(DiscoKey::from_bytes([3u8; 32]))
+        .with_ipv4("100.64.0.1".parse().unwrap())
+        .with_hostname("test-node")
+        .with_user_id(user.id)
+        .build();
     db.create_node(&node).await.expect("failed to create node");
 
     let grants = GrantsEngine::new(Policy::empty());

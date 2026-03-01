@@ -10,7 +10,7 @@ use railscale::StateNotifier;
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{GrantsEngine, Policy};
 use railscale_proto::MapRequest;
-use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
+use railscale_types::{DiscoKey, MachineKey, NodeKey, User, UserId, test_utils::TestNodeBuilder};
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -66,61 +66,23 @@ async fn test_map_request_returns_peers() {
     let node1_key = NodeKey::from_bytes([1u8; 32]);
     let node2_key = NodeKey::from_bytes([2u8; 32]);
 
-    let now = chrono::Utc::now();
+    let node1 = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([10u8; 32]))
+        .with_node_key(node1_key.clone())
+        .with_disco_key(DiscoKey::from_bytes([11u8; 32]))
+        .with_ipv4("100.64.0.1".parse().unwrap())
+        .with_hostname("node1")
+        .with_user_id(user.id)
+        .build();
 
-    let node1 = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([10u8; 32]),
-        node_key: node1_key.clone(),
-        disco_key: DiscoKey::from_bytes([11u8; 32]),
-        ipv4: Some("100.64.0.1".parse().unwrap()),
-        ipv6: None,
-        endpoints: vec![],
-        hostinfo: None,
-        hostname: "node1".to_string(),
-        given_name: "node1".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
-
-    let node2 = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([20u8; 32]),
-        node_key: node2_key.clone(),
-        disco_key: DiscoKey::from_bytes([21u8; 32]),
-        ipv4: Some("100.64.0.2".parse().unwrap()),
-        ipv6: None,
-        endpoints: vec![],
-        hostinfo: None,
-        hostname: "node2".to_string(),
-        given_name: "node2".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let node2 = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([20u8; 32]))
+        .with_node_key(node2_key.clone())
+        .with_disco_key(DiscoKey::from_bytes([21u8; 32]))
+        .with_ipv4("100.64.0.2".parse().unwrap())
+        .with_hostname("node2")
+        .with_user_id(user.id)
+        .build();
 
     db.create_node(&node1).await.unwrap();
     db.create_node(&node2).await.unwrap();

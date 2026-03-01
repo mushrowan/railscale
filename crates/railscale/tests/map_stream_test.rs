@@ -19,7 +19,9 @@ use railscale::StateNotifier;
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::{Grant, GrantsEngine, NetworkCapability, Policy, Selector};
 use railscale_proto::{MapRequest, MapResponse};
-use railscale_types::{DiscoKey, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId};
+use railscale_types::{
+    DiscoKey, MachineKey, Node, NodeKey, User, UserId, test_utils::TestNodeBuilder,
+};
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tower::ServiceExt;
@@ -51,33 +53,15 @@ impl MapTestFixture {
         let node_key = NodeKey::from_bytes([2u8; 32]);
         let disco_key = DiscoKey::from_bytes([3u8; 32]);
 
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes([1u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: disco_key.clone(),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".parse().unwrap(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
+        let node = TestNodeBuilder::new(0)
+            .with_machine_key(MachineKey::from_bytes([1u8; 32]))
+            .with_node_key(node_key.clone())
+            .with_disco_key(disco_key.clone())
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .with_ipv6("fd7a:115c:a1e0::1".parse().unwrap())
+            .with_hostname("test-node")
+            .with_user_id(user.id)
+            .build();
 
         let node = db.create_node(&node).await.unwrap();
 
@@ -278,33 +262,15 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     // now add a second node to trigger a state update
     let second_node_key = NodeKey::from_bytes([4u8; 32]);
     let second_disco_key = DiscoKey::from_bytes([5u8; 32]);
-    let now = chrono::Utc::now();
-    let second_node = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([6u8; 32]),
-        node_key: second_node_key.clone(),
-        disco_key: second_disco_key.clone(),
-        ipv4: Some("100.64.0.2".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::2".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: None,
-        hostname: "second-node".to_string(),
-        given_name: "second-node".parse().unwrap(),
-        user_id: Some(fixture.node.user_id.unwrap()),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let second_node = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([6u8; 32]))
+        .with_node_key(second_node_key.clone())
+        .with_disco_key(second_disco_key.clone())
+        .with_ipv4("100.64.0.2".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::2".parse().unwrap())
+        .with_hostname("second-node")
+        .with_user_id(fixture.node.user_id.unwrap())
+        .build();
     fixture.db.create_node(&second_node).await.unwrap();
 
     // notify subscribers that state has changed

@@ -11,7 +11,7 @@ use railscale_db::{Database, RailscaleDb};
 use railscale_grants::GrantsEngine;
 use railscale_proto::MapRequest;
 use railscale_types::{
-    DiscoKey, HostInfo, MachineKey, Node, NodeId, NodeKey, RegisterMethod, User, UserId,
+    DiscoKey, HostInfo, MachineKey, NodeKey, User, UserId, test_utils::TestNodeBuilder,
 };
 use tower::ServiceExt;
 
@@ -65,33 +65,14 @@ async fn test_map_request_updates_disco_key() {
     let machine_key = MachineKey::from_bytes([1u8; 32]);
     let node_key = NodeKey::from_bytes([2u8; 32]);
 
-    let now = chrono::Utc::now();
-    let node = Node {
-        id: NodeId::new(0),
-        machine_key: machine_key.clone(),
-        node_key: node_key.clone(),
-        disco_key: DiscoKey::default(), // empty disco key!
-        ipv4: Some("100.64.0.1".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: None,
-        hostname: "test-node".to_string(),
-        given_name: "test-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let node = TestNodeBuilder::new(0)
+        .with_machine_key(machine_key.clone())
+        .with_node_key(node_key.clone())
+        .with_ipv4("100.64.0.1".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::1".parse().unwrap())
+        .with_hostname("test-node")
+        .with_user_id(user.id)
+        .build();
 
     db.create_node(&node).await.unwrap();
 
@@ -171,33 +152,15 @@ async fn test_map_request_updates_hostinfo() {
     let node_key = NodeKey::from_bytes([2u8; 32]);
     let disco_key = DiscoKey::from_bytes([3u8; 32]);
 
-    let now = chrono::Utc::now();
-    let node = Node {
-        id: NodeId::new(0),
-        machine_key: machine_key.clone(),
-        node_key: node_key.clone(),
-        disco_key: disco_key.clone(),
-        ipv4: Some("100.64.0.1".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: None, // No hostinfo!
-        hostname: "test-node".to_string(),
-        given_name: "test-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let node = TestNodeBuilder::new(0)
+        .with_machine_key(machine_key.clone())
+        .with_node_key(node_key.clone())
+        .with_disco_key(disco_key.clone())
+        .with_ipv4("100.64.0.1".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::1".parse().unwrap())
+        .with_hostname("test-node")
+        .with_user_id(user.id)
+        .build();
 
     db.create_node(&node).await.unwrap();
 
@@ -299,8 +262,6 @@ async fn test_peer_hostinfo_included_in_map_response() {
     let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    let now = chrono::Utc::now();
-
     // create peer node (node b) with hostinfo
     let peer_hostinfo = HostInfo {
         os: Some("linux".to_string()),
@@ -309,62 +270,29 @@ async fn test_peer_hostinfo_included_in_map_response() {
         ..Default::default()
     };
 
-    let peer_node = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([10u8; 32]),
-        node_key: NodeKey::from_bytes([20u8; 32]),
-        disco_key: DiscoKey::from_bytes([30u8; 32]),
-        ipv4: Some("100.64.0.2".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::2".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: Some(peer_hostinfo.clone()), // Peer has hostinfo
-        hostname: "peer-node".to_string(),
-        given_name: "peer-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let peer_node = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([10u8; 32]))
+        .with_node_key(NodeKey::from_bytes([20u8; 32]))
+        .with_disco_key(DiscoKey::from_bytes([30u8; 32]))
+        .with_ipv4("100.64.0.2".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::2".parse().unwrap())
+        .with_hostname("peer-node")
+        .with_hostinfo(peer_hostinfo.clone())
+        .with_user_id(user.id)
+        .build();
     db.create_node(&peer_node).await.unwrap();
 
     // create requesting node (node a)
     let node_key = NodeKey::from_bytes([2u8; 32]);
-    let node = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([1u8; 32]),
-        node_key: node_key.clone(),
-        disco_key: DiscoKey::from_bytes([3u8; 32]),
-        ipv4: Some("100.64.0.1".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: None,
-        hostname: "test-node".to_string(),
-        given_name: "test-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let node = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([1u8; 32]))
+        .with_node_key(node_key.clone())
+        .with_disco_key(DiscoKey::from_bytes([3u8; 32]))
+        .with_ipv4("100.64.0.1".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::1".parse().unwrap())
+        .with_hostname("test-node")
+        .with_user_id(user.id)
+        .build();
     db.create_node(&node).await.unwrap();
 
     let map_request = MapRequest {
@@ -443,66 +371,30 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
     let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    let now = chrono::Utc::now();
-
     // create peer node (node b) without hostinfo - simulates a freshly registered node
     // that hasn't sent its first MapRequest yet
-    let peer_node = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([10u8; 32]),
-        node_key: NodeKey::from_bytes([20u8; 32]),
-        disco_key: DiscoKey::from_bytes([30u8; 32]),
-        ipv4: Some("100.64.0.2".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::2".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: None, // NO hostinfo!
-        hostname: "peer-node".to_string(),
-        given_name: "peer-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let peer_node = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([10u8; 32]))
+        .with_node_key(NodeKey::from_bytes([20u8; 32]))
+        .with_disco_key(DiscoKey::from_bytes([30u8; 32]))
+        .with_ipv4("100.64.0.2".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::2".parse().unwrap())
+        .with_hostname("peer-node")
+        .with_user_id(user.id)
+        .build();
     db.create_node(&peer_node).await.unwrap();
 
     // create requesting node (node a)
     let node_key = NodeKey::from_bytes([2u8; 32]);
-    let node = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([1u8; 32]),
-        node_key: node_key.clone(),
-        disco_key: DiscoKey::from_bytes([3u8; 32]),
-        ipv4: Some("100.64.0.1".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: None,
-        hostname: "test-node".to_string(),
-        given_name: "test-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let node = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([1u8; 32]))
+        .with_node_key(node_key.clone())
+        .with_disco_key(DiscoKey::from_bytes([3u8; 32]))
+        .with_ipv4("100.64.0.1".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::1".parse().unwrap())
+        .with_hostname("test-node")
+        .with_user_id(user.id)
+        .build();
     db.create_node(&node).await.unwrap();
 
     let map_request = MapRequest {
@@ -678,33 +570,15 @@ async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
     let node_key = NodeKey::from_bytes([2u8; 32]);
     let disco_key = DiscoKey::from_bytes([3u8; 32]);
 
-    let now = chrono::Utc::now();
-    let node = Node {
-        id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes([1u8; 32]),
-        node_key: node_key.clone(),
-        disco_key: disco_key.clone(),
-        ipv4: Some("100.64.0.1".parse().unwrap()),
-        ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
-        endpoints: vec![],
-        hostinfo: None,
-        hostname: "test-node".to_string(),
-        given_name: "test-node".parse().unwrap(),
-        user_id: Some(user.id),
-        register_method: RegisterMethod::AuthKey,
-        tags: vec![],
-        auth_key_id: None,
-        last_seen: Some(now),
-        expiry: None,
-        approved_routes: vec![],
-        created_at: now,
-        updated_at: now,
-        is_online: None,
-        posture_attributes: std::collections::HashMap::new(),
-        nl_public_key: None,
-        last_seen_country: None,
-        ephemeral: false,
-    };
+    let node = TestNodeBuilder::new(0)
+        .with_machine_key(MachineKey::from_bytes([1u8; 32]))
+        .with_node_key(node_key.clone())
+        .with_disco_key(disco_key.clone())
+        .with_ipv4("100.64.0.1".parse().unwrap())
+        .with_ipv6("fd7a:115c:a1e0::1".parse().unwrap())
+        .with_hostname("test-node")
+        .with_user_id(user.id)
+        .build();
 
     db.create_node(&node).await.unwrap();
 

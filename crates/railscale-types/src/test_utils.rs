@@ -34,6 +34,9 @@ pub struct TestNodeBuilder {
     ephemeral: bool,
     nl_public_key: Option<Vec<u8>>,
     expiry: Option<chrono::DateTime<chrono::Utc>>,
+    endpoints: Vec<std::net::SocketAddr>,
+    approved_routes: Vec<ipnet::IpNet>,
+    posture_attributes: std::collections::HashMap<String, serde_json::Value>,
 }
 
 impl TestNodeBuilder {
@@ -54,6 +57,9 @@ impl TestNodeBuilder {
             ephemeral: false,
             nl_public_key: None,
             expiry: None,
+            endpoints: vec![],
+            approved_routes: vec![],
+            posture_attributes: std::collections::HashMap::new(),
         }
     }
 
@@ -144,6 +150,27 @@ impl TestNodeBuilder {
         self
     }
 
+    /// set network endpoints.
+    pub fn with_endpoints(mut self, endpoints: Vec<std::net::SocketAddr>) -> Self {
+        self.endpoints = endpoints;
+        self
+    }
+
+    /// set approved routes.
+    pub fn with_approved_routes(mut self, routes: Vec<ipnet::IpNet>) -> Self {
+        self.approved_routes = routes;
+        self
+    }
+
+    /// set posture attributes.
+    pub fn with_posture_attributes(
+        mut self,
+        attrs: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Self {
+        self.posture_attributes = attrs;
+        self
+    }
+
     /// build the [`node`].
     pub fn build(self) -> Node {
         let raw_hostname = self.hostname.unwrap_or_else(|| format!("node-{}", self.id));
@@ -165,7 +192,7 @@ impl TestNodeBuilder {
             machine_key: self.machine_key.unwrap_or_default(),
             node_key: self.node_key.unwrap_or_default(),
             disco_key: self.disco_key.unwrap_or_default(),
-            endpoints: vec![],
+            endpoints: self.endpoints,
             hostinfo: self.hostinfo,
             ipv4: self.ipv4.or_else(|| Some("100.64.0.1".parse().unwrap())),
             ipv6: self.ipv6,
@@ -179,11 +206,11 @@ impl TestNodeBuilder {
             expiry: self.expiry,
             last_seen: Some(now),
             last_seen_country: self.last_seen_country,
-            approved_routes: vec![],
+            approved_routes: self.approved_routes,
             created_at: now,
             updated_at: now,
             is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
+            posture_attributes: self.posture_attributes,
             nl_public_key: self.nl_public_key,
         }
     }

@@ -1224,7 +1224,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_node_crud() {
-        use railscale_types::{DiscoKey, MachineKey, NodeKey, RegisterMethod};
+        use railscale_types::test_utils::TestNodeBuilder;
+        use railscale_types::{DiscoKey, MachineKey, NodeKey};
 
         let db = setup_test_db().await;
 
@@ -1233,32 +1234,16 @@ mod tests {
         let user = db.create_user(&user).await.unwrap();
 
         // create node
-        let node = Node {
-            id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes([1u8; 32]),
-            node_key: NodeKey::from_bytes([5u8; 32]),
-            disco_key: DiscoKey::from_bytes([9u8; 32]),
-            endpoints: vec!["192.168.1.1:41641".parse().unwrap()],
-            hostinfo: None,
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".parse().unwrap(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec!["tag:server".parse().unwrap()],
-            auth_key_id: None,
-            expiry: None,
-            last_seen: None,
-            last_seen_country: None,
-            approved_routes: vec![],
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            ephemeral: false,
-        };
+        let node = TestNodeBuilder::new(0)
+            .with_machine_key(MachineKey::from_bytes([1u8; 32]))
+            .with_node_key(NodeKey::from_bytes([5u8; 32]))
+            .with_disco_key(DiscoKey::from_bytes([9u8; 32]))
+            .with_endpoints(vec!["192.168.1.1:41641".parse().unwrap()])
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .with_hostname("test-node")
+            .with_user_id(user.id)
+            .with_tags(vec!["tag:server".parse().unwrap()])
+            .build();
 
         let created = db.create_node(&node).await.unwrap();
         assert!(created.id.as_u64() > 0);
@@ -1324,7 +1309,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_node_key_signature() {
-        use railscale_types::{DiscoKey, MachineKey, NodeKey, RegisterMethod};
+        use railscale_types::test_utils::TestNodeBuilder;
+        use railscale_types::{DiscoKey, MachineKey, NodeKey};
 
         let db = setup_test_db().await;
 
@@ -1332,32 +1318,14 @@ mod tests {
         let user = User::new(UserId::new(0), "sigowner".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        let node = Node {
-            id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes([1u8; 32]),
-            node_key: NodeKey::from_bytes([5u8; 32]),
-            disco_key: DiscoKey::from_bytes([9u8; 32]),
-            endpoints: vec![],
-            hostinfo: None,
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            hostname: "sig-node".to_string(),
-            given_name: "sig-node".parse().unwrap(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            expiry: None,
-            last_seen: None,
-            last_seen_country: None,
-            approved_routes: vec![],
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            ephemeral: false,
-        };
+        let node = TestNodeBuilder::new(0)
+            .with_machine_key(MachineKey::from_bytes([1u8; 32]))
+            .with_node_key(NodeKey::from_bytes([5u8; 32]))
+            .with_disco_key(DiscoKey::from_bytes([9u8; 32]))
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .with_hostname("sig-node")
+            .with_user_id(user.id)
+            .build();
         let created = db.create_node(&node).await.unwrap();
 
         // initially no signature
@@ -1377,7 +1345,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_node_key_signatures_batch() {
-        use railscale_types::{DiscoKey, MachineKey, NodeKey, RegisterMethod};
+        use railscale_types::test_utils::TestNodeBuilder;
+        use railscale_types::{DiscoKey, MachineKey, NodeKey};
 
         let db = setup_test_db().await;
         let user = User::new(UserId::new(0), "batchowner".to_string());
@@ -1386,32 +1355,14 @@ mod tests {
         // create 3 nodes
         let mut nodes = vec![];
         for i in 0..3u8 {
-            let node = Node {
-                id: NodeId::new(0),
-                machine_key: MachineKey::from_bytes([i + 1; 32]),
-                node_key: NodeKey::from_bytes([i + 10; 32]),
-                disco_key: DiscoKey::from_bytes([i + 20; 32]),
-                endpoints: vec![],
-                hostinfo: None,
-                ipv4: Some(format!("100.64.0.{}", i + 1).parse().unwrap()),
-                ipv6: None,
-                hostname: format!("node-{}", i),
-                given_name: format!("node-{}", i).parse().unwrap(),
-                user_id: Some(user.id),
-                register_method: RegisterMethod::AuthKey,
-                tags: vec![],
-                auth_key_id: None,
-                expiry: None,
-                last_seen: None,
-                last_seen_country: None,
-                approved_routes: vec![],
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                is_online: None,
-                posture_attributes: std::collections::HashMap::new(),
-                nl_public_key: None,
-                ephemeral: false,
-            };
+            let node = TestNodeBuilder::new(0)
+                .with_machine_key(MachineKey::from_bytes([i + 1; 32]))
+                .with_node_key(NodeKey::from_bytes([i + 10; 32]))
+                .with_disco_key(DiscoKey::from_bytes([i + 20; 32]))
+                .with_ipv4(format!("100.64.0.{}", i + 1).parse().unwrap())
+                .with_hostname(&format!("node-{}", i))
+                .with_user_id(user.id)
+                .build();
             nodes.push(db.create_node(&node).await.unwrap());
         }
 
