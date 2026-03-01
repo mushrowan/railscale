@@ -554,7 +554,8 @@ pub async fn tka_sign(
         .as_ref()
         .ok_or_else(|| ApiError::bad_request("signature has no pubkey"))?;
 
-    let signed_node_key = railscale_types::NodeKey::from_bytes(signed_pubkey.clone());
+    let signed_node_key = railscale_types::NodeKey::try_from_bytes(signed_pubkey)
+        .map_err(|_| ApiError::bad_request("invalid node key length in signature"))?;
     let node = state
         .db
         .get_node_by_node_key(&signed_node_key)
@@ -602,7 +603,7 @@ mod tests {
         db.migrate().await.unwrap();
         let user = User::new(UserId::new(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
-        let node_key = NodeKey::from_bytes(vec![key_byte; 32]);
+        let node_key = NodeKey::from_bytes([key_byte; 32]);
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)
             .with_node_key(node_key.clone())
@@ -949,7 +950,7 @@ mod tests {
 
         let req = TkaBootstrapRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0xdeu8; 32]),
+            node_key: NodeKey::from_bytes([0xDEu8; 32]),
             head: String::new(),
         };
         let (status, _) = post_json(app, "/machine/tka/bootstrap", &req).await;
@@ -963,7 +964,7 @@ mod tests {
 
         let req = TkaSyncOfferRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0xdeu8; 32]),
+            node_key: NodeKey::from_bytes([0xDEu8; 32]),
             head: String::new(),
             ancestors: vec![],
         };
@@ -978,7 +979,7 @@ mod tests {
 
         let req = TkaSyncSendRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0xdeu8; 32]),
+            node_key: NodeKey::from_bytes([0xDEu8; 32]),
             head: "abc".to_string(),
             missing_aums: vec![],
             interactive: false,
@@ -996,7 +997,7 @@ mod tests {
 
         let req = TkaDisableRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0xdeu8; 32]),
+            node_key: NodeKey::from_bytes([0xDEu8; 32]),
             head: "abc".to_string(),
             disablement_secret: vec![0xab; 32],
         };
@@ -1013,7 +1014,7 @@ mod tests {
 
         let req = TkaSubmitSignatureRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0xdeu8; 32]),
+            node_key: NodeKey::from_bytes([0xDEu8; 32]),
             signature: vec![0u8; 10].into(),
         };
         let (status, _) = post_json(app, "/machine/tka/sign", &req).await;
@@ -1174,7 +1175,7 @@ mod tests {
         let node_nl_private = NlPrivateKey::generate();
         let nl_public_bytes = node_nl_private.public_key().as_bytes().to_vec();
 
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let node_key = NodeKey::from_bytes([1u8; 32]);
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)
             .with_node_key(node_key.clone())

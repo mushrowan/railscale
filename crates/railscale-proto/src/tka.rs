@@ -336,7 +336,7 @@ mod tests {
     fn tka_init_begin_request_serde() {
         let req = TkaInitBeginRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0u8; 32]),
+            node_key: NodeKey::from_bytes([0u8; 32]),
             genesis_aum: MarshaledAum::from(vec![1, 2, 3]),
         };
         let json = serde_json::to_string(&req).unwrap();
@@ -351,7 +351,7 @@ mod tests {
     fn tka_sign_info_serde() {
         let info = TkaSignInfo {
             node_id: NodeId::new(42),
-            node_public: NodeKey::from_bytes(vec![0u8; 32]),
+            node_public: NodeKey::from_bytes([0u8; 32]),
             rotation_pubkey: vec![1, 2, 3, 4],
         };
         let json = serde_json::to_string(&info).unwrap();
@@ -368,7 +368,7 @@ mod tests {
         signatures.insert(1, MarshaledSignature::from(vec![0xaa, 0xbb]));
         let req = TkaInitFinishRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0u8; 32]),
+            node_key: NodeKey::from_bytes([0u8; 32]),
             signatures,
             support_disablement: vec![],
         };
@@ -382,7 +382,7 @@ mod tests {
     fn tka_sync_offer_request_serde() {
         let req = TkaSyncOfferRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0u8; 32]),
+            node_key: NodeKey::from_bytes([0u8; 32]),
             head: "abc123".to_string(),
             ancestors: vec!["def456".to_string()],
         };
@@ -395,7 +395,7 @@ mod tests {
     fn tka_disable_request_serde() {
         let req = TkaDisableRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![0u8; 32]),
+            node_key: NodeKey::from_bytes([0u8; 32]),
             head: "abc123".to_string(),
             disablement_secret: vec![0xde, 0xad, 0xbe, 0xef],
         };

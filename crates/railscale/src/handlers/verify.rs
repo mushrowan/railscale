@@ -136,13 +136,13 @@ mod tests {
         let user = User::new(UserId::new(1), "test".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+        let node_key = NodeKey::from_bytes([1u8; 32]);
         let now = chrono::Utc::now();
         let node = Node {
             id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+            machine_key: MachineKey::from_bytes([2u8; 32]),
             node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            disco_key: DiscoKey::from_bytes([3u8; 32]),
             ipv4: Some("100.64.0.1".parse().unwrap()),
             ipv6: None,
             endpoints: vec![],
@@ -266,7 +266,7 @@ mod tests {
         .await;
 
         let req_body = serde_json::json!({
-            "NodePublic": NodeKey::from_bytes(vec![0xdeu8; 32]),
+            "NodePublic": NodeKey::from_bytes([0xDEu8; 32]),
             "Source": "1.2.3.4:1234"
         });
 

@@ -48,13 +48,13 @@ impl MapTestFixture {
         let user = User::new(UserId::new(1), "test-user".to_string());
         let user = db.create_user(&user).await.unwrap();
 
-        let node_key = NodeKey::from_bytes(vec![2u8; 32]);
-        let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+        let node_key = NodeKey::from_bytes([2u8; 32]);
+        let disco_key = DiscoKey::from_bytes([3u8; 32]);
 
         let now = chrono::Utc::now();
         let node = Node {
             id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes(vec![1u8; 32]),
+            machine_key: MachineKey::from_bytes([1u8; 32]),
             node_key: node_key.clone(),
             disco_key: disco_key.clone(),
             ipv4: Some("100.64.0.1".parse().unwrap()),
@@ -276,12 +276,12 @@ async fn test_streaming_map_receives_updates_on_state_change() {
     );
 
     // now add a second node to trigger a state update
-    let second_node_key = NodeKey::from_bytes(vec![4u8; 32]);
-    let second_disco_key = DiscoKey::from_bytes(vec![5u8; 32]);
+    let second_node_key = NodeKey::from_bytes([4u8; 32]);
+    let second_disco_key = DiscoKey::from_bytes([5u8; 32]);
     let now = chrono::Utc::now();
     let second_node = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![6u8; 32]),
+        machine_key: MachineKey::from_bytes([6u8; 32]),
         node_key: second_node_key.clone(),
         disco_key: second_disco_key.clone(),
         ipv4: Some("100.64.0.2".parse().unwrap()),

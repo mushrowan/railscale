@@ -43,12 +43,12 @@ async fn test_verify_allows_registered_node() {
     let user = User::new(UserId::new(0), "testuser".to_string());
     let user = db.create_user(&user).await.expect("failed to create user");
 
-    let node_key = NodeKey::from_bytes(vec![1u8; 32]);
+    let node_key = NodeKey::from_bytes([1u8; 32]);
     let node = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![2u8; 32]),
+        machine_key: MachineKey::from_bytes([2u8; 32]),
         node_key: node_key.clone(),
-        disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+        disco_key: DiscoKey::from_bytes([3u8; 32]),
         endpoints: vec![],
         hostinfo: None,
         ipv4: Some("100.64.0.1".parse().unwrap()),
@@ -116,7 +116,7 @@ async fn test_verify_denies_unknown_node() {
     let app = create_app(db, grants, config, None, notifier, None).await;
 
     // use a node key that doesn't exist
-    let unknown_key = NodeKey::from_bytes(vec![99u8; 32]);
+    let unknown_key = NodeKey::from_bytes([99u8; 32]);
     let request_body = VerifyRequest {
         node_public: unknown_key,
         source: "192.168.1.1".to_string(),

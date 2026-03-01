@@ -33,9 +33,9 @@ async fn test_policy_hot_reload_changes_visibility() {
     let alicja_node = db
         .create_node(&Node {
             id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes(vec![1u8; 32]),
-            node_key: NodeKey::from_bytes(vec![11u8; 32]),
-            disco_key: DiscoKey::from_bytes(vec![21u8; 32]),
+            machine_key: MachineKey::from_bytes([1u8; 32]),
+            node_key: NodeKey::from_bytes([11u8; 32]),
+            disco_key: DiscoKey::from_bytes([21u8; 32]),
             ipv4: Some("100.64.0.1".parse().unwrap()),
             ipv6: None,
             endpoints: vec![],
@@ -63,9 +63,9 @@ async fn test_policy_hot_reload_changes_visibility() {
     let ro_node = db
         .create_node(&Node {
             id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            node_key: NodeKey::from_bytes(vec![12u8; 32]),
-            disco_key: DiscoKey::from_bytes(vec![22u8; 32]),
+            machine_key: MachineKey::from_bytes([2u8; 32]),
+            node_key: NodeKey::from_bytes([12u8; 32]),
+            disco_key: DiscoKey::from_bytes([22u8; 32]),
             ipv4: Some("100.64.0.2".parse().unwrap()),
             ipv6: None,
             endpoints: vec![],

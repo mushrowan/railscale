@@ -145,7 +145,7 @@ mod tests {
         db.create_user(&user).await.unwrap();
 
         let node = railscale_types::test_utils::TestNodeBuilder::new(1)
-            .with_node_key(railscale_types::NodeKey::from_bytes(vec![1u8; 32]))
+            .with_node_key(railscale_types::NodeKey::from_bytes([1u8; 32]))
             .build();
         db.create_node(&node).await.unwrap();
 

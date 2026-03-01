@@ -73,7 +73,7 @@ mod tests {
     use tower::ServiceExt;
 
     fn test_node_key(seed: u8) -> NodeKey {
-        NodeKey::from_bytes(vec![seed; 32])
+        NodeKey::from_bytes([seed; 32])
     }
 
     async fn setup() -> (axum::Router, RailscaleDb, railscale_types::Node) {
@@ -133,7 +133,7 @@ mod tests {
     #[tokio::test]
     async fn audit_log_unknown_node_returns_401() {
         let (app, _db, _node) = setup().await;
-        let fake_key = NodeKey::from_bytes(vec![0xFF; 32]);
+        let fake_key = NodeKey::from_bytes([0xFF; 32]);
 
         let req_body = serde_json::json!({
             "Version": 106,

@@ -108,7 +108,7 @@ mod tests {
 
     /// generate a 32-byte node key with a unique seed
     fn test_node_key(seed: u8) -> NodeKey {
-        NodeKey::from_bytes(vec![seed; 32])
+        NodeKey::from_bytes([seed; 32])
     }
 
     fn test_config() -> Config {

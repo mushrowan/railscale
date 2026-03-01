@@ -264,9 +264,9 @@ mod tests {
             id,
             stable_id: format!("stable-{id}"),
             name: format!("node-{id}.example.com."),
-            node_key: NodeKey::from_bytes(vec![id as u8; 32]),
-            machine_key: MachineKey::from_bytes(vec![id as u8; 32]),
-            disco_key: DiscoKey::from_bytes(vec![id as u8; 32]),
+            node_key: NodeKey::from_bytes([id as u8; 32]),
+            machine_key: MachineKey::from_bytes([id as u8; 32]),
+            disco_key: DiscoKey::from_bytes([id as u8; 32]),
             addresses: vec![format!("100.64.0.{id}/32")],
             allowed_ips: vec![format!("100.64.0.{id}/32")],
             endpoints: vec!["1.2.3.4:5678".to_string()],
@@ -445,7 +445,7 @@ mod tests {
         });
 
         let mut changed = make_peer(1, true);
-        changed.node_key = NodeKey::from_bytes(vec![0xFF; 32]);
+        changed.node_key = NodeKey::from_bytes([0xFF; 32]);
         let result = session.compute_delta(vec![changed], MapResponse::default());
         assert_eq!(result.peers_changed_patch.len(), 1);
         assert!(result.peers_changed_patch[0].key.is_some());

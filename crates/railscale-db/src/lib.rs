@@ -530,7 +530,7 @@ impl Database for RailscaleDb {
         node_key: &railscale_types::NodeKey,
     ) -> Result<Option<Node>> {
         let result = entity::node::Entity::find()
-            .filter(entity::node::Column::NodeKey.eq(node_key.as_bytes()))
+            .filter(entity::node::Column::NodeKey.eq(node_key.as_bytes().as_slice()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -542,7 +542,7 @@ impl Database for RailscaleDb {
         machine_key: &railscale_types::MachineKey,
     ) -> Result<Option<Node>> {
         let result = entity::node::Entity::find()
-            .filter(entity::node::Column::MachineKey.eq(machine_key.as_bytes()))
+            .filter(entity::node::Column::MachineKey.eq(machine_key.as_bytes().as_slice()))
             .filter(entity::node::Column::DeletedAt.is_null())
             .one(&self.conn)
             .await?;
@@ -1235,9 +1235,9 @@ mod tests {
         // create node
         let node = Node {
             id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes(vec![1, 2, 3, 4]),
-            node_key: NodeKey::from_bytes(vec![5, 6, 7, 8]),
-            disco_key: DiscoKey::from_bytes(vec![9, 10, 11, 12]),
+            machine_key: MachineKey::from_bytes([1u8; 32]),
+            node_key: NodeKey::from_bytes([5u8; 32]),
+            disco_key: DiscoKey::from_bytes([9u8; 32]),
             endpoints: vec!["192.168.1.1:41641".parse().unwrap()],
             hostinfo: None,
             ipv4: Some("100.64.0.1".parse().unwrap()),
@@ -1334,9 +1334,9 @@ mod tests {
 
         let node = Node {
             id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes(vec![1, 2, 3, 4]),
-            node_key: NodeKey::from_bytes(vec![5, 6, 7, 8]),
-            disco_key: DiscoKey::from_bytes(vec![9, 10, 11, 12]),
+            machine_key: MachineKey::from_bytes([1u8; 32]),
+            node_key: NodeKey::from_bytes([5u8; 32]),
+            disco_key: DiscoKey::from_bytes([9u8; 32]),
             endpoints: vec![],
             hostinfo: None,
             ipv4: Some("100.64.0.1".parse().unwrap()),
@@ -1388,9 +1388,9 @@ mod tests {
         for i in 0..3u8 {
             let node = Node {
                 id: NodeId::new(0),
-                machine_key: MachineKey::from_bytes(vec![i + 1; 4]),
-                node_key: NodeKey::from_bytes(vec![i + 10; 4]),
-                disco_key: DiscoKey::from_bytes(vec![i + 20; 4]),
+                machine_key: MachineKey::from_bytes([i + 1; 32]),
+                node_key: NodeKey::from_bytes([i + 10; 32]),
+                disco_key: DiscoKey::from_bytes([i + 20; 32]),
                 endpoints: vec![],
                 hostinfo: None,
                 ipv4: Some(format!("100.64.0.{}", i + 1).parse().unwrap()),
@@ -1479,7 +1479,7 @@ mod tests {
         // create two nodes for this user
         for i in 0..2u8 {
             let node = railscale_types::test_utils::TestNodeBuilder::new(0)
-                .with_node_key(railscale_types::NodeKey::from_bytes(vec![i + 1; 32]))
+                .with_node_key(railscale_types::NodeKey::from_bytes([i + 1; 32]))
                 .with_user_id(user.id)
                 .build();
             db.create_node(&node).await.unwrap();

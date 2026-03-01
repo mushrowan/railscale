@@ -24,60 +24,63 @@ pub trait KeyPrefix: Clone + PartialEq + Eq + std::hash::Hash + Default {
 /// a tailscale protocol key with a typed prefix.
 ///
 /// generic over the prefix marker to avoid duplicating logic for
-/// machine keys, node keys, and disco keys.
+/// machine keys, node keys, and disco keys. internally stores
+/// exactly 32 bytes (curve25519 key length).
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct TailscaleKey<P: KeyPrefix> {
-    bytes: Vec<u8>,
+    bytes: [u8; KEY_LENGTH],
     _prefix: PhantomData<P>,
 }
 
 impl<P: KeyPrefix> Default for TailscaleKey<P> {
     fn default() -> Self {
         Self {
-            bytes: Vec::new(),
+            bytes: [0u8; KEY_LENGTH],
             _prefix: PhantomData,
         }
     }
 }
 
 impl<P: KeyPrefix> TailscaleKey<P> {
-    /// create a key from raw bytes.
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+    /// create a key from a fixed-size byte array.
+    pub fn from_bytes(bytes: [u8; KEY_LENGTH]) -> Self {
         Self {
             bytes,
             _prefix: PhantomData,
         }
     }
 
+    /// try to create a key from a byte slice, failing if length != 32.
+    pub fn try_from_bytes(bytes: &[u8]) -> Result<Self, KeyLengthError> {
+        let bytes: [u8; KEY_LENGTH] = bytes.try_into().map_err(|_| KeyLengthError(bytes.len()))?;
+        Ok(Self::from_bytes(bytes))
+    }
+
     /// get the raw bytes of the key.
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8; KEY_LENGTH] {
         &self.bytes
     }
 
     /// returns a short string representation for logging.
     pub fn short_string(&self) -> String {
-        if self.bytes.len() >= 4 {
-            format!(
-                "{}:{:02x}{:02x}...",
-                P::PREFIX,
-                self.bytes[0],
-                self.bytes[1]
-            )
-        } else {
-            format!("{}:???", P::PREFIX)
-        }
+        format!(
+            "{}:{:02x}{:02x}...",
+            P::PREFIX,
+            self.bytes[0],
+            self.bytes[1]
+        )
     }
 
-    /// check if the key is empty (not set).
-    pub fn is_empty(&self) -> bool {
-        self.bytes.is_empty()
-    }
-
-    /// check if this is a zero key (all bytes are 0).
+    /// check if this is a zero key (all bytes are 0, i.e. not set).
     pub fn is_zero(&self) -> bool {
         self.bytes.iter().all(|&b| b == 0)
     }
 }
+
+/// error when byte slice is not exactly 32 bytes.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("key must be exactly {KEY_LENGTH} bytes, got {0}")]
+pub struct KeyLengthError(pub usize);
 
 impl<P: KeyPrefix> fmt::Debug for TailscaleKey<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -116,14 +119,7 @@ impl<'de, P: KeyPrefix> Deserialize<'de> for TailscaleKey<P> {
         })?;
         let bytes = hex::decode(hex_str)
             .map_err(|e| de::Error::custom(format!("invalid hex in key: {}", e)))?;
-        if bytes.len() != KEY_LENGTH {
-            return Err(de::Error::custom(format!(
-                "key must be exactly {} bytes, got {}",
-                KEY_LENGTH,
-                bytes.len()
-            )));
-        }
-        Ok(Self::from_bytes(bytes))
+        Self::try_from_bytes(&bytes).map_err(de::Error::custom)
     }
 }
 
@@ -175,8 +171,8 @@ mod proptests {
     use super::*;
     use proptest::prelude::*;
 
-    fn valid_key_bytes() -> impl Strategy<Value = Vec<u8>> {
-        prop::collection::vec(any::<u8>(), KEY_LENGTH)
+    fn valid_key_bytes() -> impl Strategy<Value = [u8; KEY_LENGTH]> {
+        prop::collection::vec(any::<u8>(), KEY_LENGTH).prop_map(|v| v.try_into().unwrap())
     }
 
     fn invalid_key_length() -> impl Strategy<Value = usize> {
@@ -313,31 +309,40 @@ mod tests {
 
     #[test]
     fn test_machine_key_short_string() {
-        let key = MachineKey::from_bytes(vec![0xab, 0xcd, 0xef, 0x12]);
+        let mut bytes = [0u8; 32];
+        bytes[0] = 0xab;
+        bytes[1] = 0xcd;
+        let key = MachineKey::from_bytes(bytes);
         assert_eq!(key.short_string(), "mkey:abcd...");
     }
 
     #[test]
     fn test_node_key_short_string() {
-        let key = NodeKey::from_bytes(vec![0x12, 0x34, 0x56, 0x78]);
+        let mut bytes = [0u8; 32];
+        bytes[0] = 0x12;
+        bytes[1] = 0x34;
+        let key = NodeKey::from_bytes(bytes);
         assert_eq!(key.short_string(), "nodekey:1234...");
     }
 
     #[test]
     fn test_disco_key_short_string() {
-        let key = DiscoKey::from_bytes(vec![0xde, 0xad, 0xbe, 0xef]);
+        let mut bytes = [0u8; 32];
+        bytes[0] = 0xde;
+        bytes[1] = 0xad;
+        let key = DiscoKey::from_bytes(bytes);
         assert_eq!(key.short_string(), "discokey:dead...");
     }
 
     #[test]
-    fn test_empty_key_short_string() {
+    fn test_zero_key_short_string() {
         let key = MachineKey::default();
-        assert_eq!(key.short_string(), "mkey:???");
+        assert_eq!(key.short_string(), "mkey:0000...");
     }
 
     #[test]
     fn test_node_key_serialize() {
-        let key = NodeKey::from_bytes(vec![0x02; 32]);
+        let key = NodeKey::from_bytes([0x02; 32]);
         let json = serde_json::to_string(&key).unwrap();
         assert_eq!(
             json,
@@ -354,7 +359,7 @@ mod tests {
 
     #[test]
     fn test_machine_key_roundtrip() {
-        let original = MachineKey::from_bytes(vec![0xab; 32]);
+        let original = MachineKey::from_bytes([0xab; 32]);
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: MachineKey = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
@@ -362,10 +367,10 @@ mod tests {
 
     #[test]
     fn test_node_key_is_zero() {
-        let zero_key = NodeKey::from_bytes(vec![0; 32]);
+        let zero_key = NodeKey::from_bytes([0; 32]);
         assert!(zero_key.is_zero());
 
-        let non_zero_key = NodeKey::from_bytes(vec![0x02; 32]);
+        let non_zero_key = NodeKey::from_bytes([0x02; 32]);
         assert!(!non_zero_key.is_zero());
     }
 
@@ -377,20 +382,22 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_disco_key_serialize() {
+    fn test_zero_disco_key_serialize() {
         let key = DiscoKey::default();
         let json = serde_json::to_string(&key).unwrap();
-        assert_eq!(json, "\"discokey:\"");
-        assert!(key.is_empty());
+        assert_eq!(
+            json,
+            "\"discokey:0000000000000000000000000000000000000000000000000000000000000000\""
+        );
+        assert!(key.is_zero());
     }
 
     #[test]
-    fn test_disco_key_is_empty() {
-        let empty = DiscoKey::default();
-        assert!(empty.is_empty());
-
-        let non_empty = DiscoKey::from_bytes(vec![1, 2, 3]);
-        assert!(!non_empty.is_empty());
+    fn test_try_from_bytes() {
+        assert!(NodeKey::try_from_bytes(&[1u8; 32]).is_ok());
+        assert!(NodeKey::try_from_bytes(&[1u8; 31]).is_err());
+        assert!(NodeKey::try_from_bytes(&[1u8; 33]).is_err());
+        assert!(NodeKey::try_from_bytes(&[]).is_err());
     }
 
     #[test]

@@ -157,7 +157,7 @@ mod tests {
         let user = db.create_user(&user).await.unwrap();
         let node = TestNodeBuilder::new(0)
             .with_user_id(user.id)
-            .with_node_key(NodeKey::from_bytes(vec![1; 32]))
+            .with_node_key(NodeKey::from_bytes([1u8; 32]))
             .build();
         let node = db.create_node(&node).await.unwrap();
 

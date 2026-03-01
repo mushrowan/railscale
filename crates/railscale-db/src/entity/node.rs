@@ -179,9 +179,9 @@ impl From<Model> for Node {
 
         Node {
             id: NodeId::from(model.id),
-            machine_key: MachineKey::from_bytes(model.machine_key),
-            node_key: NodeKey::from_bytes(model.node_key),
-            disco_key: DiscoKey::from_bytes(model.disco_key),
+            machine_key: MachineKey::try_from_bytes(&model.machine_key).unwrap_or_default(),
+            node_key: NodeKey::try_from_bytes(&model.node_key).unwrap_or_default(),
+            disco_key: DiscoKey::try_from_bytes(&model.disco_key).unwrap_or_default(),
             endpoints,
             hostinfo,
             ipv4,

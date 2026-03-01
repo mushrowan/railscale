@@ -13,7 +13,7 @@ mod config;
 mod dns_label;
 mod email;
 mod error;
-mod keys;
+pub mod keys;
 mod node;
 mod node_name;
 mod oidc;

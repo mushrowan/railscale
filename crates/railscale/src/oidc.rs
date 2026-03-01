@@ -352,8 +352,8 @@ mod tests {
     fn test_pending_registration_stores_node_info() {
         use railscale_types::{MachineKey, NodeKey};
 
-        let node_key = NodeKey::from_bytes(vec![1; 32]);
-        let machine_key = MachineKey::from_bytes(vec![2; 32]);
+        let node_key = NodeKey::from_bytes([1u8; 32]);
+        let machine_key = MachineKey::from_bytes([2u8; 32]);
 
         let pending = PendingRegistration::new(node_key.clone(), machine_key.clone(), None);
 
@@ -366,8 +366,8 @@ mod tests {
         use railscale_types::test_utils::TestNodeBuilder;
         use railscale_types::{MachineKey, NodeKey, User, UserId};
 
-        let node_key = NodeKey::from_bytes(vec![1; 32]);
-        let machine_key = MachineKey::from_bytes(vec![2; 32]);
+        let node_key = NodeKey::from_bytes([1u8; 32]);
+        let machine_key = MachineKey::from_bytes([2u8; 32]);
         let pending = PendingRegistration::new(node_key, machine_key, None);
 
         // initially not completed

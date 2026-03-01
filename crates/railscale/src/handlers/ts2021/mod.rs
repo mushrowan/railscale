@@ -308,7 +308,8 @@ async fn handle_ts2021_connection(
     debug!("client machine key: {} bytes", client_key.len());
 
     // create machine key context from the noise handshake
-    let machine_key_context = MachineKeyContext::from_bytes(client_key);
+    let machine_key_context =
+        MachineKeyContext::try_from_bytes(&client_key).map_err(|e| e.to_string())?;
 
     let transport = handshake.into_transport()?;
 
@@ -459,7 +460,8 @@ async fn handle_ts2021_http_connection(
     );
 
     // create machine key context from the noise handshake
-    let machine_key_context = MachineKeyContext::from_bytes(client_key);
+    let machine_key_context =
+        MachineKeyContext::try_from_bytes(&client_key).map_err(|e| e.to_string())?;
 
     let transport = handshake.into_transport()?;
     info!("Starting HTTP/2 server over Noise transport");

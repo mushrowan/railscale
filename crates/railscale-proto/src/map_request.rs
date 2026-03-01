@@ -372,7 +372,7 @@ pub struct MapResponseNode {
 
     /// disco key (serialized as prefixed hex, e.g., "discokey:...").
     /// skipped if empty to avoid sending "discokey:" which clients can't parse.
-    #[serde(default, skip_serializing_if = "DiscoKey::is_empty")]
+    #[serde(default, skip_serializing_if = "DiscoKey::is_zero")]
     pub disco_key: DiscoKey,
 
     /// assigned addresses.
@@ -782,7 +782,7 @@ mod set_dns_tests {
     fn set_dns_request_serde_roundtrip() {
         let req = SetDNSRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            node_key: NodeKey::from_bytes([1u8; 32]),
             name: "_acme-challenge.mynode.tail.example.com".to_string(),
             record_type: "TXT".to_string(),
             value: "abc123-challenge-token".to_string(),
@@ -801,7 +801,7 @@ mod set_dns_tests {
     fn set_dns_request_uses_pascal_case() {
         let req = SetDNSRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            node_key: NodeKey::from_bytes([1u8; 32]),
             name: "_acme-challenge.test.example.com".to_string(),
             record_type: "TXT".to_string(),
             value: "token".to_string(),
@@ -901,8 +901,8 @@ mod proptests {
     use proptest::prelude::*;
 
     // strategy for valid 32-byte key data
-    fn valid_key_bytes() -> impl Strategy<Value = Vec<u8>> {
-        prop::collection::vec(any::<u8>(), 32)
+    fn valid_key_bytes() -> impl Strategy<Value = [u8; 32]> {
+        prop::collection::vec(any::<u8>(), 32).prop_map(|v| v.try_into().unwrap())
     }
 
     // strategy for maprequest
@@ -1127,9 +1127,9 @@ mod proptests {
             id: 123,
             stable_id: "stable123".to_string(),
             name: "test-node".to_string(),
-            node_key: NodeKey::from_bytes(vec![1u8; 32]),
-            machine_key: MachineKey::from_bytes(vec![2u8; 32]),
-            disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+            node_key: NodeKey::from_bytes([1u8; 32]),
+            machine_key: MachineKey::from_bytes([2u8; 32]),
+            disco_key: DiscoKey::from_bytes([3u8; 32]),
             addresses: vec!["100.64.0.1".to_string()],
             allowed_ips: vec!["100.64.0.1/32".to_string()],
             endpoints: vec![],
@@ -1407,8 +1407,8 @@ mod delta_tests {
             derp_region: Some(3),
             cap: Some(106),
             endpoints: Some(vec!["1.2.3.4:5678".parse().unwrap()]),
-            key: Some(NodeKey::from_bytes(vec![0xAA; 32])),
-            disco_key: Some(DiscoKey::from_bytes(vec![0xBB; 32])),
+            key: Some(NodeKey::from_bytes([0xAA; 32])),
+            disco_key: Some(DiscoKey::from_bytes([0xBB; 32])),
             online: Some(false),
             last_seen: Some("2026-01-01T00:00:00Z".to_string()),
             key_expiry: Some("2027-01-01T00:00:00Z".to_string()),
@@ -1647,7 +1647,7 @@ mod delta_tests {
     fn audit_log_request_roundtrips() {
         let req = AuditLogRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            node_key: NodeKey::from_bytes([1u8; 32]),
             action: "ssh-session-start".to_string(),
             details: "user=root src=100.64.0.2".to_string(),
             timestamp: Some("2026-01-15T12:00:00Z".to_string()),
@@ -1669,7 +1669,7 @@ mod delta_tests {
     fn audit_log_request_omits_empty_fields() {
         let req = AuditLogRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            node_key: NodeKey::from_bytes([1u8; 32]),
             action: "test".to_string(),
             details: String::new(),
             timestamp: None,
@@ -1695,7 +1695,7 @@ mod delta_tests {
 
         let req = SetDeviceAttributesRequest {
             version: CapabilityVersion(106),
-            node_key: NodeKey::from_bytes(vec![1u8; 32]),
+            node_key: NodeKey::from_bytes([1u8; 32]),
             update,
         };
         let json = serde_json::to_string(&req).unwrap();

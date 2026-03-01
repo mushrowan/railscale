@@ -102,7 +102,7 @@ mod tests {
     use railscale_types::NodeKey;
 
     fn test_node_key() -> NodeKey {
-        NodeKey::from_bytes(vec![1u8; 32])
+        NodeKey::from_bytes([1u8; 32])
     }
 
     #[tokio::test]

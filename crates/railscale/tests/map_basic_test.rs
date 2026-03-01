@@ -63,16 +63,16 @@ async fn test_map_request_returns_peers() {
     let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    let node1_key = NodeKey::from_bytes(vec![1u8; 32]);
-    let node2_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let node1_key = NodeKey::from_bytes([1u8; 32]);
+    let node2_key = NodeKey::from_bytes([2u8; 32]);
 
     let now = chrono::Utc::now();
 
     let node1 = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![10u8; 32]),
+        machine_key: MachineKey::from_bytes([10u8; 32]),
         node_key: node1_key.clone(),
-        disco_key: DiscoKey::from_bytes(vec![11u8; 32]),
+        disco_key: DiscoKey::from_bytes([11u8; 32]),
         ipv4: Some("100.64.0.1".parse().unwrap()),
         ipv6: None,
         endpoints: vec![],
@@ -97,9 +97,9 @@ async fn test_map_request_returns_peers() {
 
     let node2 = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![20u8; 32]),
+        machine_key: MachineKey::from_bytes([20u8; 32]),
         node_key: node2_key.clone(),
-        disco_key: DiscoKey::from_bytes(vec![21u8; 32]),
+        disco_key: DiscoKey::from_bytes([21u8; 32]),
         ipv4: Some("100.64.0.2".parse().unwrap()),
         ipv6: None,
         endpoints: vec![],

@@ -62,8 +62,8 @@ async fn test_map_request_updates_disco_key() {
     let user = db.create_user(&user).await.unwrap();
 
     // create a node with empty disco_key (simulating registration)
-    let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
-    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let machine_key = MachineKey::from_bytes([1u8; 32]);
+    let node_key = NodeKey::from_bytes([2u8; 32]);
 
     let now = chrono::Utc::now();
     let node = Node {
@@ -96,7 +96,7 @@ async fn test_map_request_updates_disco_key() {
     db.create_node(&node).await.unwrap();
 
     // the disco key that the client will send
-    let client_disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+    let client_disco_key = DiscoKey::from_bytes([3u8; 32]);
 
     let map_request = MapRequest {
         version: railscale_proto::CapabilityVersion(100),
@@ -167,9 +167,9 @@ async fn test_map_request_updates_hostinfo() {
     let user = db.create_user(&user).await.unwrap();
 
     // create a node with NO hostinfo (simulating initial registration)
-    let machine_key = MachineKey::from_bytes(vec![1u8; 32]);
-    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
-    let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+    let machine_key = MachineKey::from_bytes([1u8; 32]);
+    let node_key = NodeKey::from_bytes([2u8; 32]);
+    let disco_key = DiscoKey::from_bytes([3u8; 32]);
 
     let now = chrono::Utc::now();
     let node = Node {
@@ -311,9 +311,9 @@ async fn test_peer_hostinfo_included_in_map_response() {
 
     let peer_node = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![10u8; 32]),
-        node_key: NodeKey::from_bytes(vec![20u8; 32]),
-        disco_key: DiscoKey::from_bytes(vec![30u8; 32]),
+        machine_key: MachineKey::from_bytes([10u8; 32]),
+        node_key: NodeKey::from_bytes([20u8; 32]),
+        disco_key: DiscoKey::from_bytes([30u8; 32]),
         ipv4: Some("100.64.0.2".parse().unwrap()),
         ipv6: Some("fd7a:115c:a1e0::2".parse().unwrap()),
         endpoints: vec![],
@@ -338,12 +338,12 @@ async fn test_peer_hostinfo_included_in_map_response() {
     db.create_node(&peer_node).await.unwrap();
 
     // create requesting node (node a)
-    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let node_key = NodeKey::from_bytes([2u8; 32]);
     let node = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![1u8; 32]),
+        machine_key: MachineKey::from_bytes([1u8; 32]),
         node_key: node_key.clone(),
-        disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+        disco_key: DiscoKey::from_bytes([3u8; 32]),
         ipv4: Some("100.64.0.1".parse().unwrap()),
         ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
         endpoints: vec![],
@@ -370,7 +370,7 @@ async fn test_peer_hostinfo_included_in_map_response() {
     let map_request = MapRequest {
         version: railscale_proto::CapabilityVersion(100),
         node_key: node_key.clone(),
-        disco_key: Some(DiscoKey::from_bytes(vec![3u8; 32])),
+        disco_key: Some(DiscoKey::from_bytes([3u8; 32])),
         endpoints: vec![],
         hostinfo: None,
         omit_peers: false,
@@ -449,9 +449,9 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
     // that hasn't sent its first MapRequest yet
     let peer_node = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![10u8; 32]),
-        node_key: NodeKey::from_bytes(vec![20u8; 32]),
-        disco_key: DiscoKey::from_bytes(vec![30u8; 32]),
+        machine_key: MachineKey::from_bytes([10u8; 32]),
+        node_key: NodeKey::from_bytes([20u8; 32]),
+        disco_key: DiscoKey::from_bytes([30u8; 32]),
         ipv4: Some("100.64.0.2".parse().unwrap()),
         ipv6: Some("fd7a:115c:a1e0::2".parse().unwrap()),
         endpoints: vec![],
@@ -476,12 +476,12 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
     db.create_node(&peer_node).await.unwrap();
 
     // create requesting node (node a)
-    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
+    let node_key = NodeKey::from_bytes([2u8; 32]);
     let node = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![1u8; 32]),
+        machine_key: MachineKey::from_bytes([1u8; 32]),
         node_key: node_key.clone(),
-        disco_key: DiscoKey::from_bytes(vec![3u8; 32]),
+        disco_key: DiscoKey::from_bytes([3u8; 32]),
         ipv4: Some("100.64.0.1".parse().unwrap()),
         ipv6: Some("fd7a:115c:a1e0::1".parse().unwrap()),
         endpoints: vec![],
@@ -508,7 +508,7 @@ async fn test_peer_without_hostinfo_gets_default_hostinfo() {
     let map_request = MapRequest {
         version: railscale_proto::CapabilityVersion(100),
         node_key: node_key.clone(),
-        disco_key: Some(DiscoKey::from_bytes(vec![3u8; 32])),
+        disco_key: Some(DiscoKey::from_bytes([3u8; 32])),
         endpoints: vec![],
         hostinfo: None,
         omit_peers: false,
@@ -675,13 +675,13 @@ async fn test_map_response_excludes_file_sharing_cap_when_taildrop_disabled() {
     let user = User::new(UserId::new(1), "test-user".to_string());
     let user = db.create_user(&user).await.unwrap();
 
-    let node_key = NodeKey::from_bytes(vec![2u8; 32]);
-    let disco_key = DiscoKey::from_bytes(vec![3u8; 32]);
+    let node_key = NodeKey::from_bytes([2u8; 32]);
+    let disco_key = DiscoKey::from_bytes([3u8; 32]);
 
     let now = chrono::Utc::now();
     let node = Node {
         id: NodeId::new(0),
-        machine_key: MachineKey::from_bytes(vec![1u8; 32]),
+        machine_key: MachineKey::from_bytes([1u8; 32]),
         node_key: node_key.clone(),
         disco_key: disco_key.clone(),
         ipv4: Some("100.64.0.1".parse().unwrap()),

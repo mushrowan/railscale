@@ -19,9 +19,14 @@ use railscale_types::MachineKey;
 pub struct MachineKeyContext(pub MachineKey);
 
 impl MachineKeyContext {
-    /// create a new machine key context from raw bytes.
-    pub fn from_bytes(bytes: Vec<u8>) -> Self {
+    /// create a new machine key context from a fixed-size array.
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(MachineKey::from_bytes(bytes))
+    }
+
+    /// try to create from a byte slice, failing if length != 32.
+    pub fn try_from_bytes(bytes: &[u8]) -> Result<Self, railscale_types::keys::KeyLengthError> {
+        MachineKey::try_from_bytes(bytes).map(Self)
     }
 
     /// get the machine key.
@@ -69,21 +74,21 @@ mod tests {
 
     #[test]
     fn from_bytes_creates_context() {
-        let bytes = vec![42u8; 32];
-        let ctx = MachineKeyContext::from_bytes(bytes.clone());
+        let bytes = [42u8; 32];
+        let ctx = MachineKeyContext::from_bytes(bytes);
         assert_eq!(ctx.machine_key().as_bytes(), &bytes);
     }
 
     #[test]
     fn machine_key_accessor() {
-        let key = MachineKey::from_bytes(vec![1u8; 32]);
+        let key = MachineKey::from_bytes([1u8; 32]);
         let ctx = MachineKeyContext(key.clone());
         assert_eq!(ctx.machine_key(), &key);
     }
 
     #[test]
     fn context_is_clone() {
-        let ctx = MachineKeyContext::from_bytes(vec![7u8; 32]);
+        let ctx = MachineKeyContext::from_bytes([7u8; 32]);
         let cloned = ctx.clone();
         assert_eq!(
             ctx.machine_key().as_bytes(),
@@ -93,8 +98,8 @@ mod tests {
 
     #[tokio::test]
     async fn extract_from_request_with_extension() {
-        let key_bytes = vec![99u8; 32];
-        let ctx = MachineKeyContext::from_bytes(key_bytes.clone());
+        let key_bytes = [99u8; 32];
+        let ctx = MachineKeyContext::from_bytes(key_bytes);
 
         let mut request = Request::builder().body(()).unwrap();
         request.extensions_mut().insert(ctx);
@@ -120,7 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn optional_extract_with_extension() {
-        let ctx = MachineKeyContext::from_bytes(vec![55u8; 32]);
+        let ctx = MachineKeyContext::from_bytes([55u8; 32]);
 
         let mut request = Request::builder().body(()).unwrap();
         request.extensions_mut().insert(ctx);
@@ -131,10 +136,7 @@ mod tests {
             .unwrap();
 
         assert!(extracted.0.is_some());
-        assert_eq!(
-            extracted.0.unwrap().machine_key().as_bytes(),
-            &vec![55u8; 32]
-        );
+        assert_eq!(extracted.0.unwrap().machine_key().as_bytes(), &[55u8; 32]);
     }
 
     #[tokio::test]

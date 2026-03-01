@@ -177,7 +177,7 @@ pub async fn register(
             // to ensure each node gets a unique identity
             let mut bytes = [0u8; 32];
             rand::Rng::fill_bytes(&mut rand::rng(), &mut bytes);
-            MachineKey::from_bytes(bytes.to_vec())
+            MachineKey::from_bytes(bytes)
         }
     };
 
@@ -881,7 +881,7 @@ mod tests {
             )
             .await;
 
-            let mut node_key_bytes = vec![0u8; 32];
+            let mut node_key_bytes = [0u8; 32];
             node_key_bytes[0] = i + 1;
             let node_key_hex: String = node_key_bytes.iter().map(|b| format!("{b:02x}")).collect();
 
@@ -981,10 +981,11 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         // verify NL key was stored on the node
-        let nk = railscale_types::NodeKey::from_bytes(
-            hex::decode("aabbccdd00000000000000000000000000000000000000000000000000000000")
+        let nk = railscale_types::NodeKey::try_from_bytes(
+            &hex::decode("aabbccdd00000000000000000000000000000000000000000000000000000000")
                 .unwrap(),
-        );
+        )
+        .unwrap();
         let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
         let expected_bytes = hex::decode(nl_key_hex).unwrap();
         assert_eq!(

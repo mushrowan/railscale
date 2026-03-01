@@ -91,7 +91,7 @@ mod verified_node_tests {
     #[test]
     fn mismatched_machine_key_rejects() {
         let node = TestNodeBuilder::new(1).build();
-        let wrong_key = MachineKeyContext::from_bytes(vec![99u8; 32]);
+        let wrong_key = MachineKeyContext::from_bytes([99u8; 32]);
         assert!(VerifiedNode::verify(node, &Some(wrong_key)).is_err());
     }
 
