@@ -126,9 +126,9 @@ async fn test_map_request_respects_user_grants() {
     };
 
     // alicja should see Ro
-    let alice_map = request_map(alicja_node.node_key).await;
+    let alice_map = request_map(alicja_node.node_key().clone()).await;
     assert_eq!(alice_map.peers.len(), 1);
-    assert_eq!(alice_map.peers[0].id, ro_node.id.as_u64());
+    assert_eq!(alice_map.peers[0].id, ro_node.id().as_u64());
 
     // alicja's user_profiles should contain alicja + ro, but NOT esme
     let alice_profile_ids: std::collections::HashSet<u64> =
@@ -152,7 +152,7 @@ async fn test_map_request_respects_user_grants() {
     );
 
     // ro should not see anyone (directional grant)
-    let bob_map = request_map(ro_node.node_key).await;
+    let bob_map = request_map(ro_node.node_key().clone()).await;
     assert_eq!(bob_map.peers.len(), 0);
 
     // ro's user_profiles should only contain ro (no visible peers)

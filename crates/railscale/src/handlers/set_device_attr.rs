@@ -40,7 +40,7 @@ pub async fn set_device_attr(
     }
 
     // merge updates: load existing attrs, apply patch, remove nulls
-    let mut attrs = node.posture_attributes.clone();
+    let mut attrs = node.posture_attributes().clone();
     for (key, value) in &req.update {
         if value.is_null() {
             attrs.remove(key);
@@ -50,14 +50,14 @@ pub async fn set_device_attr(
     }
 
     debug!(
-        node_id = node.id.as_u64(),
+        node_id = node.id().as_u64(),
         updated_keys = ?req.update.keys().collect::<Vec<_>>(),
         "set-device-attr: updating posture attributes"
     );
 
     state
         .db
-        .set_node_posture_attributes(node.id, &attrs)
+        .set_node_posture_attributes(node.id(), &attrs)
         .await
         .map_internal()?;
 
@@ -116,7 +116,7 @@ mod tests {
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key).unwrap(),
+            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
             "Update": {
                 "node:os": "linux",
                 "custom:encrypted": true
@@ -136,13 +136,13 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let updated = db.get_node(node.id).await.unwrap().unwrap();
+        let updated = db.get_node(node.id()).await.unwrap().unwrap();
         assert_eq!(
-            updated.posture_attributes.get("node:os"),
+            updated.posture_attributes().get("node:os"),
             Some(&serde_json::json!("linux"))
         );
         assert_eq!(
-            updated.posture_attributes.get("custom:encrypted"),
+            updated.posture_attributes().get("custom:encrypted"),
             Some(&serde_json::json!(true))
         );
     }
@@ -154,13 +154,13 @@ mod tests {
         // first set an attribute
         let mut attrs = std::collections::HashMap::new();
         attrs.insert("to-delete".to_string(), serde_json::json!("value"));
-        db.set_node_posture_attributes(node.id, &attrs)
+        db.set_node_posture_attributes(node.id(), &attrs)
             .await
             .unwrap();
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key).unwrap(),
+            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
             "Update": {
                 "to-delete": null
             }
@@ -179,8 +179,8 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        let updated = db.get_node(node.id).await.unwrap().unwrap();
-        assert!(!updated.posture_attributes.contains_key("to-delete"));
+        let updated = db.get_node(node.id()).await.unwrap().unwrap();
+        assert!(!updated.posture_attributes().contains_key("to-delete"));
     }
 
     #[tokio::test]

@@ -164,7 +164,7 @@ mod tests {
         // insert a challenge record with a past timestamp
         let old_record = DnsChallengeRecord {
             id: 0,
-            node_id: node.id,
+            node_id: node.id(),
             record_name: "_acme-challenge.old.example.com".to_string(),
             record_id: "old-record-id".to_string(),
             created_at: chrono::Utc::now() - chrono::Duration::minutes(20),
@@ -174,7 +174,7 @@ mod tests {
         // insert a fresh record
         let fresh_record = DnsChallengeRecord {
             id: 0,
-            node_id: node.id,
+            node_id: node.id(),
             record_name: "_acme-challenge.fresh.example.com".to_string(),
             record_id: "fresh-record-id".to_string(),
             created_at: chrono::Utc::now(),
@@ -196,7 +196,7 @@ mod tests {
 
         // verify fresh record still exists
         let remaining = db
-            .list_dns_challenge_records_for_node(node.id)
+            .list_dns_challenge_records_for_node(node.id())
             .await
             .unwrap();
         assert_eq!(remaining.len(), 1);

@@ -134,7 +134,8 @@ async fn test_map_request_updates_disco_key() {
     // also verify it was persisted to the database
     let updated_node = db.get_node_by_node_key(&node_key).await.unwrap().unwrap();
     assert_eq!(
-        updated_node.disco_key, client_disco_key,
+        updated_node.disco_key(),
+        &client_disco_key,
         "Node in database should have the disco_key updated"
     );
 }
@@ -239,10 +240,10 @@ async fn test_map_request_updates_hostinfo() {
     // also verify it was persisted to the database
     let updated_node = db.get_node_by_node_key(&node_key).await.unwrap().unwrap();
     assert!(
-        updated_node.hostinfo.is_some(),
+        updated_node.hostinfo().is_some(),
         "Node in database should have hostinfo set"
     );
-    let db_hostinfo = updated_node.hostinfo.unwrap();
+    let db_hostinfo = updated_node.hostinfo().unwrap();
     assert_eq!(
         db_hostinfo.os, client_hostinfo.os,
         "Database hostinfo OS should match"

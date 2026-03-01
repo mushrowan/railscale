@@ -161,7 +161,7 @@ async fn test_streaming_map_request_returns_length_prefixed_response() {
     // should have node info
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
-    assert_eq!(response_node.id, fixture.node.id.as_u64());
+    assert_eq!(response_node.id, fixture.node.id().as_u64());
     assert_eq!(response_node.node_key, fixture.node_key);
 
     // first streaming response must have keep_alive=false so client processes node data.
@@ -205,7 +205,7 @@ async fn test_non_streaming_map_request_returns_length_prefixed() {
 
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
-    assert_eq!(response_node.id, fixture.node.id.as_u64());
+    assert_eq!(response_node.id, fixture.node.id().as_u64());
 
     // keep_alive should be false for non-streaming
     assert!(!map_response.keep_alive);
@@ -269,7 +269,7 @@ async fn test_streaming_map_receives_updates_on_state_change() {
         .with_ipv4("100.64.0.2".parse().unwrap())
         .with_ipv6("fd7a:115c:a1e0::2".parse().unwrap())
         .with_hostname("second-node")
-        .with_user_id(fixture.node.user_id.unwrap())
+        .with_user_id(fixture.node.user_id().unwrap())
         .build();
     fixture.db.create_node(&second_node).await.unwrap();
 

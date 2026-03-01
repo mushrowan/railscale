@@ -1246,14 +1246,14 @@ mod tests {
             .build();
 
         let created = db.create_node(&node).await.unwrap();
-        assert!(created.id.as_u64() > 0);
+        assert!(created.id().as_u64() > 0);
 
         // get
-        let fetched = db.get_node(created.id).await.unwrap().unwrap();
-        assert_eq!(fetched.hostname, "test-node");
-        assert_eq!(fetched.tags.len(), 1);
-        assert!(fetched.tags[0] == "tag:server");
-        assert_eq!(fetched.endpoints.len(), 1);
+        let fetched = db.get_node(created.id()).await.unwrap().unwrap();
+        assert_eq!(fetched.hostname(), "test-node");
+        assert_eq!(fetched.tags().len(), 1);
+        assert!(fetched.tags()[0] == "tag:server");
+        assert_eq!(fetched.endpoints().len(), 1);
 
         // list
         let nodes = db.list_nodes().await.unwrap();
@@ -1261,13 +1261,13 @@ mod tests {
 
         // update
         let mut updated_node = fetched.clone();
-        updated_node.hostname = "updated-node".to_string();
+        updated_node.set_hostname("updated-node".to_string());
         let updated = db.update_node(&updated_node).await.unwrap();
-        assert_eq!(updated.hostname, "updated-node");
+        assert_eq!(updated.hostname(), "updated-node");
 
         // delete
-        db.delete_node(created.id).await.unwrap();
-        let deleted = db.get_node(created.id).await.unwrap();
+        db.delete_node(created.id()).await.unwrap();
+        let deleted = db.get_node(created.id()).await.unwrap();
         assert!(deleted.is_none());
     }
 
@@ -1329,17 +1329,17 @@ mod tests {
         let created = db.create_node(&node).await.unwrap();
 
         // initially no signature
-        let sig = db.get_node_key_signature(created.id).await.unwrap();
+        let sig = db.get_node_key_signature(created.id()).await.unwrap();
         assert!(sig.is_none());
 
         // set signature
         let signature = vec![0xde, 0xad, 0xbe, 0xef];
-        db.set_node_key_signature(created.id, &signature)
+        db.set_node_key_signature(created.id(), &signature)
             .await
             .unwrap();
 
         // get signature
-        let fetched = db.get_node_key_signature(created.id).await.unwrap();
+        let fetched = db.get_node_key_signature(created.id()).await.unwrap();
         assert_eq!(fetched, Some(signature));
     }
 
@@ -1367,21 +1367,21 @@ mod tests {
         }
 
         // set signatures on nodes 0 and 2 (not 1)
-        db.set_node_key_signature(nodes[0].id, &[0xaa, 0xbb])
+        db.set_node_key_signature(nodes[0].id(), &[0xaa, 0xbb])
             .await
             .unwrap();
-        db.set_node_key_signature(nodes[2].id, &[0xcc, 0xdd])
+        db.set_node_key_signature(nodes[2].id(), &[0xcc, 0xdd])
             .await
             .unwrap();
 
         // batch fetch all 3
-        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id).collect();
+        let ids: Vec<NodeId> = nodes.iter().map(|n| n.id()).collect();
         let sigs = db.get_node_key_signatures_batch(&ids).await.unwrap();
 
         assert_eq!(sigs.len(), 2);
-        assert_eq!(sigs.get(&nodes[0].id), Some(&vec![0xaa, 0xbb]));
-        assert!(!sigs.contains_key(&nodes[1].id));
-        assert_eq!(sigs.get(&nodes[2].id), Some(&vec![0xcc, 0xdd]));
+        assert_eq!(sigs.get(&nodes[0].id()), Some(&vec![0xaa, 0xbb]));
+        assert!(!sigs.contains_key(&nodes[1].id()));
+        assert_eq!(sigs.get(&nodes[2].id()), Some(&vec![0xcc, 0xdd]));
 
         // empty input returns empty map
         let empty = db.get_node_key_signatures_batch(&[]).await.unwrap();
@@ -1499,7 +1499,7 @@ mod tests {
         // create a challenge record
         let record = DnsChallengeRecord {
             id: 0,
-            node_id: node.id,
+            node_id: node.id(),
             record_name: "_acme-challenge.test-node.example.com".to_string(),
             record_id: "cf-record-abc123".to_string(),
             created_at: Utc::now(),
@@ -1511,7 +1511,7 @@ mod tests {
 
         // list records for node
         let records = db
-            .list_dns_challenge_records_for_node(node.id)
+            .list_dns_challenge_records_for_node(node.id())
             .await
             .unwrap();
         assert_eq!(records.len(), 1);
@@ -1526,7 +1526,7 @@ mod tests {
         // delete the record
         db.delete_dns_challenge_record(created.id).await.unwrap();
         let records = db
-            .list_dns_challenge_records_for_node(node.id)
+            .list_dns_challenge_records_for_node(node.id())
             .await
             .unwrap();
         assert!(records.is_empty(), "record should be deleted");

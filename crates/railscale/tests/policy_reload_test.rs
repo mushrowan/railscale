@@ -106,7 +106,7 @@ async fn test_policy_hot_reload_changes_visibility() {
     };
 
     // initially alicja should not see ro (empty policy)
-    let alice_map = request_map(app.clone(), alicja_node.node_key.clone()).await;
+    let alice_map = request_map(app.clone(), alicja_node.node_key().clone().clone()).await;
     assert_eq!(
         alice_map.peers.len(),
         0,
@@ -126,19 +126,19 @@ async fn test_policy_hot_reload_changes_visibility() {
     policy_handle.reload(new_policy).await;
 
     // now alicja should see ro
-    let alice_map = request_map(app.clone(), alicja_node.node_key.clone()).await;
+    let alice_map = request_map(app.clone(), alicja_node.node_key().clone().clone()).await;
     assert_eq!(
         alice_map.peers.len(),
         1,
         "After policy reload, Alicja should see Ro"
     );
-    assert_eq!(alice_map.peers[0].id, ro_node.id.as_u64());
+    assert_eq!(alice_map.peers[0].id, ro_node.id().as_u64());
 
     // reload back to empty policy
     policy_handle.reload(Policy::empty()).await;
 
     // alicja should not see ro again
-    let alice_map = request_map(app.clone(), alicja_node.node_key).await;
+    let alice_map = request_map(app.clone(), alicja_node.node_key().clone()).await;
     assert_eq!(
         alice_map.peers.len(),
         0,

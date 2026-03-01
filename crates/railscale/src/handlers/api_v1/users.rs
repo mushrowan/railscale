@@ -202,10 +202,10 @@ async fn delete_user(
     {
         let mut allocator = state.ip_allocator.lock().await;
         for node in &user_nodes {
-            if let Some(v4) = node.ipv4 {
+            if let Some(v4) = node.ipv4() {
                 allocator.release(v4);
             }
-            if let Some(v6) = node.ipv6 {
+            if let Some(v6) = node.ipv6() {
                 allocator.release(v6);
             }
         }

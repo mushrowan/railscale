@@ -6,7 +6,7 @@
 use axum::{Json, extract::State};
 use bytes::Bytes;
 use railscale_db::Database;
-use railscale_types::{HostInfo, MachineKey, Node, NodeId, NodeKey};
+use railscale_types::{HostInfo, MachineKey, Node, NodeKey};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -292,24 +292,24 @@ async fn handle_preauth_registration(
         .await
         .map_internal()?;
 
-    let now = chrono::Utc::now();
-
     let _node = if let Some(mut existing) = existing_node {
         // re-registration: update existing node's key and metadata in place
         // this preserves the node's IP allocation and identity
         tracing::info!(
-            node_id = existing.id.as_u64(),
-            old_key = ?existing.node_key,
+            node_id = existing.id().as_u64(),
+            old_key = ?existing.node_key(),
             new_key = ?req.node_key,
             "node re-registering (key rotation)"
         );
-        existing.node_key = req.node_key;
-        existing.hostinfo = req.hostinfo;
-        existing.hostname = hostname.to_string();
-        if existing.given_name.as_str().is_empty() {
-            existing.given_name = hostname;
+        existing.set_node_key(req.node_key);
+        if let Some(hostinfo) = req.hostinfo {
+            existing.set_hostinfo(hostinfo);
         }
-        existing.nl_public_key = nl_public_key;
+        existing.set_hostname(hostname.to_string());
+        if existing.given_name().as_str().is_empty() {
+            existing.set_given_name(hostname);
+        }
+        existing.set_nl_public_key(nl_public_key);
 
         // auto-approve any newly advertised routes
         let grants = state.grants.read().await;
@@ -318,11 +318,13 @@ async fn handle_preauth_registration(
         drop(grants);
         if !auto_approved.is_empty() {
             // merge with existing approved routes (never remove)
+            let mut routes = existing.approved_routes().to_vec();
             for route in auto_approved {
-                if !existing.approved_routes.contains(&route) {
-                    existing.approved_routes.push(route);
+                if !routes.contains(&route) {
+                    routes.push(route);
                 }
             }
+            existing.set_approved_routes(routes);
         }
 
         state.db.update_node(&existing).await.map_internal()?
@@ -335,36 +337,30 @@ async fn handle_preauth_registration(
                 .map_err(|e| ApiError::internal(e.to_string()))?
         };
 
-        let mut node = Node {
-            id: NodeId::new(0),
-            machine_key,
-            node_key: req.node_key,
-            disco_key: Default::default(),
-            ipv4,
-            ipv6,
-            endpoints: vec![],
-            hostinfo: req.hostinfo,
-            hostname: hostname.to_string(),
-            given_name: hostname,
-            user_id: if preauth_key.creates_tagged_nodes() {
-                None
-            } else {
-                Some(preauth_key.user_id)
-            },
-            register_method: railscale_types::RegisterMethod::AuthKey,
-            tags: preauth_key.tags.clone(),
-            auth_key_id: Some(preauth_key.id),
-            ephemeral: preauth_key.ephemeral,
-            last_seen: None,
-            last_seen_country: None,
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key,
-        };
+        let mut builder = Node::builder(machine_key, req.node_key, hostname.to_string())
+            .given_name(hostname)
+            .register_method(railscale_types::RegisterMethod::AuthKey)
+            .tags(preauth_key.tags.clone())
+            .auth_key_id(preauth_key.id)
+            .ephemeral(preauth_key.ephemeral);
+
+        if let Some(ip) = ipv4 {
+            builder = builder.ipv4(ip);
+        }
+        if let Some(ip) = ipv6 {
+            builder = builder.ipv6(ip);
+        }
+        if let Some(hostinfo) = req.hostinfo {
+            builder = builder.hostinfo(hostinfo);
+        }
+        if !preauth_key.creates_tagged_nodes() {
+            builder = builder.user_id(preauth_key.user_id);
+        }
+        if let Some(key) = nl_public_key {
+            builder = builder.nl_public_key(key);
+        }
+
+        let mut node = builder.build();
 
         // auto-approve routes based on policy
         let grants = state.grants.read().await;
@@ -373,11 +369,11 @@ async fn handle_preauth_registration(
         drop(grants);
         if !auto_approved.is_empty() {
             tracing::info!(
-                node_id = ?node.hostname,
+                node_id = ?node.hostname(),
                 routes = ?auto_approved,
                 "auto-approved routes from policy"
             );
-            node.approved_routes = auto_approved;
+            node.set_approved_routes(auto_approved);
         }
 
         if !preauth_key.reusable {
@@ -908,7 +904,7 @@ mod tests {
             // look up the node's machine key
             let nk = railscale_types::NodeKey::from_bytes(node_key_bytes);
             let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
-            machine_keys.push(node.machine_key.as_bytes().to_vec());
+            machine_keys.push(node.machine_key().as_bytes().to_vec());
         }
 
         // machine keys must be different (not all zeros)
@@ -989,8 +985,8 @@ mod tests {
         let node = db.get_node_by_node_key(&nk).await.unwrap().unwrap();
         let expected_bytes = hex::decode(nl_key_hex).unwrap();
         assert_eq!(
-            node.nl_public_key,
-            Some(expected_bytes),
+            node.nl_public_key(),
+            Some(expected_bytes.as_slice()),
             "nl_public_key should be stored from NLKey in register request"
         );
     }

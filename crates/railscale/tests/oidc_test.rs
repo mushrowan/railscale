@@ -644,5 +644,5 @@ async fn test_full_interactive_login_flow() {
     // verify node was created
     let nodes = db.list_nodes().await.expect("should list nodes");
     assert_eq!(nodes.len(), 1, "should have created one node");
-    assert_eq!(nodes[0].user_id, Some(user.id));
+    assert_eq!(nodes[0].user_id(), Some(user.id));
 }

@@ -156,9 +156,9 @@ pub async fn tka_init_begin(
     let need_signatures: Vec<TkaSignInfo> = nodes
         .into_iter()
         .map(|n| TkaSignInfo {
-            node_id: n.id,
-            node_public: n.node_key,
-            rotation_pubkey: n.nl_public_key.unwrap_or_default(),
+            node_id: n.id(),
+            node_public: n.node_key().clone(),
+            rotation_pubkey: n.nl_public_key().unwrap_or_default().to_vec(),
         })
         .collect();
 
@@ -565,11 +565,11 @@ pub async fn tka_sign(
 
     state
         .db
-        .set_node_key_signature(node.id, req.signature.as_bytes())
+        .set_node_key_signature(node.id(), req.signature.as_bytes())
         .await
         .map_internal()?;
 
-    info!(node_id = %node.id, "tka sign: signature stored");
+    info!(node_id = %node.id(), "tka sign: signature stored");
     Ok(Json(TkaSubmitSignatureResponse::default()))
 }
 
@@ -731,7 +731,7 @@ mod tests {
 
         let resp: TkaInitBeginResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(resp.need_signatures.len(), 1);
-        assert_eq!(resp.need_signatures[0].node_id, node.id);
+        assert_eq!(resp.need_signatures[0].node_id, node.id());
         assert_eq!(resp.need_signatures[0].node_public, node_key);
     }
 
@@ -778,7 +778,7 @@ mod tests {
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 
         let mut signatures = HashMap::new();
-        signatures.insert(node.id.as_u64(), node_sig_bytes.clone().into());
+        signatures.insert(node.id().as_u64(), node_sig_bytes.clone().into());
 
         // step 3: init_finish (recreate app to clear cached tka key)
         let app = test_app(&db).await;
@@ -796,7 +796,7 @@ mod tests {
         assert_eq!(tka_state.head.unwrap(), g.genesis_hash.to_string());
 
         let stored_sig = db
-            .get_node_key_signature(node.id)
+            .get_node_key_signature(node.id())
             .await
             .unwrap()
             .expect("signature stored");
@@ -842,7 +842,12 @@ mod tests {
         let g = make_genesis();
         enable_tka(&db, &g).await;
 
-        assert!(db.get_node_key_signature(node.id).await.unwrap().is_none());
+        assert!(
+            db.get_node_key_signature(node.id())
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         let node_sig =
             NodeKeySignature::sign_direct(&node_key.as_bytes().to_vec(), &g.key_id, &g.nl_private)
@@ -859,7 +864,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
 
         let stored_sig = db
-            .get_node_key_signature(node.id)
+            .get_node_key_signature(node.id())
             .await
             .unwrap()
             .expect("signature stored");
@@ -1196,7 +1201,7 @@ mod tests {
 
         let resp: TkaInitBeginResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(resp.need_signatures.len(), 1);
-        assert_eq!(resp.need_signatures[0].node_id, node.id);
+        assert_eq!(resp.need_signatures[0].node_id, node.id());
         assert_eq!(
             resp.need_signatures[0].rotation_pubkey, nl_public_bytes,
             "rotation_pubkey should be populated from node's nl_public_key"

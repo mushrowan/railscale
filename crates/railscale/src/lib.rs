@@ -343,7 +343,7 @@ async fn build_app_state(
     if let Ok(nodes) = db.list_nodes().await {
         let allocated_ips: Vec<std::net::IpAddr> = nodes
             .iter()
-            .flat_map(|n| [n.ipv4, n.ipv6])
+            .flat_map(|n| [n.ipv4(), n.ipv6()])
             .flatten()
             .collect();
         ip_allocator.load_allocated(allocated_ips);

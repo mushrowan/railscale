@@ -130,10 +130,10 @@ impl EphemeralGarbageCollector {
             let node_ips: Vec<IpAddr> = match self.db.get_node(node_id).await {
                 Ok(Some(n)) => {
                     let mut ips = Vec::new();
-                    if let Some(v4) = n.ipv4 {
+                    if let Some(v4) = n.ipv4() {
                         ips.push(v4);
                     }
-                    if let Some(v6) = n.ipv6 {
+                    if let Some(v6) = n.ipv6() {
                         ips.push(v6);
                     }
                     ips
@@ -264,13 +264,13 @@ mod tests {
         let gc = EphemeralGarbageCollector::new(db.clone(), 1);
 
         // schedule deletion
-        gc.schedule_deletion(node.id).await;
+        gc.schedule_deletion(node.id()).await;
         assert_eq!(gc.scheduled_count().await, 1);
 
         // collect immediately - should not delete (not expired yet)
         assert_eq!(gc.collect().await, 0);
         assert_eq!(gc.scheduled_count().await, 1);
-        assert!(db.get_node(node.id).await.unwrap().is_some());
+        assert!(db.get_node(node.id()).await.unwrap().is_some());
 
         // wait for timeout
         tokio::time::sleep(Duration::from_secs(2)).await;
@@ -278,7 +278,7 @@ mod tests {
         // now collect should delete
         assert_eq!(gc.collect().await, 1);
         assert_eq!(gc.scheduled_count().await, 0);
-        assert!(db.get_node(node.id).await.unwrap().is_none());
+        assert!(db.get_node(node.id()).await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -312,12 +312,12 @@ mod tests {
         let gc = EphemeralGarbageCollector::new(db.clone(), 1);
 
         // schedule deletion
-        gc.schedule_deletion(node.id).await;
+        gc.schedule_deletion(node.id()).await;
         assert_eq!(gc.scheduled_count().await, 1);
 
         // wait a bit then cancel (simulating reconnect)
         tokio::time::sleep(Duration::from_millis(500)).await;
-        gc.cancel_deletion(node.id).await;
+        gc.cancel_deletion(node.id()).await;
         assert_eq!(gc.scheduled_count().await, 0);
 
         // wait past timeout
@@ -325,6 +325,6 @@ mod tests {
 
         // collect should not delete (was cancelled)
         assert_eq!(gc.collect().await, 0);
-        assert!(db.get_node(node.id).await.unwrap().is_some());
+        assert!(db.get_node(node.id()).await.unwrap().is_some());
     }
 }

@@ -43,7 +43,7 @@ async fn test_map_request_returns_node() {
     // should include the node's own information
     assert!(map_response.node.is_some());
     let response_node = map_response.node.unwrap();
-    assert_eq!(response_node.id, fixture.node.id.as_u64());
+    assert_eq!(response_node.id, fixture.node.id().as_u64());
     assert_eq!(response_node.node_key, fixture.node_key);
 
     // should have addresses in CIDR notation

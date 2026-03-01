@@ -33,7 +33,7 @@ impl VerifiedNode {
         machine_key_ctx: &Option<MachineKeyContext>,
     ) -> Result<Self, ApiError> {
         if let Some(ctx) = machine_key_ctx
-            && ctx.machine_key().as_bytes() != node.machine_key.as_bytes()
+            && ctx.machine_key().as_bytes() != node.machine_key().as_bytes()
         {
             return Err(ApiError::unauthorized("machine key does not match node"));
         }
@@ -84,7 +84,7 @@ mod verified_node_tests {
     #[test]
     fn matching_machine_key_passes() {
         let node = TestNodeBuilder::new(1).build();
-        let ctx = MachineKeyContext(node.machine_key.clone());
+        let ctx = MachineKeyContext(node.machine_key().clone());
         assert!(VerifiedNode::verify(node, &Some(ctx)).is_ok());
     }
 
@@ -104,25 +104,25 @@ mod verified_node_tests {
     #[test]
     fn deref_exposes_node_fields() {
         let node = TestNodeBuilder::new(1).build();
-        let expected_id = node.id;
+        let expected_id = node.id();
         let verified = VerifiedNode::verify(node, &None).unwrap();
-        assert_eq!(verified.id, expected_id);
+        assert_eq!(verified.id(), expected_id);
     }
 
     #[test]
     fn deref_mut_allows_mutation() {
         let node = TestNodeBuilder::new(1).build();
         let mut verified = VerifiedNode::verify(node, &None).unwrap();
-        verified.hostname = "mutated".to_string();
-        assert_eq!(verified.hostname, "mutated");
+        verified.set_hostname("mutated".to_string());
+        assert_eq!(verified.hostname(), "mutated");
     }
 
     #[test]
     fn into_inner_returns_node() {
         let node = TestNodeBuilder::new(1).build();
-        let expected_id = node.id;
+        let expected_id = node.id();
         let verified = VerifiedNode::verify(node, &None).unwrap();
         let inner = verified.into_inner();
-        assert_eq!(inner.id, expected_id);
+        assert_eq!(inner.id(), expected_id);
     }
 }

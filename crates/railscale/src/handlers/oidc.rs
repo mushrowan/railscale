@@ -174,33 +174,26 @@ pub async fn oidc_callback(
         // sanitise hostname for dns compatibility, falling back to "node"
         let hostname = NodeName::sanitise(&raw_hostname).unwrap_or_else(|| "node".parse().unwrap());
 
-        let now = chrono::Utc::now();
-        let node = railscale_types::Node {
-            id: railscale_types::NodeId::new(0),
-            machine_key: pending.machine_key.clone(),
-            node_key: pending.node_key.clone(),
-            disco_key: Default::default(),
-            ipv4,
-            ipv6,
-            endpoints: vec![],
-            hostinfo: pending.hostinfo.clone(),
-            hostname: hostname.to_string(),
-            given_name: hostname,
-            user_id: Some(user.id),
-            register_method: railscale_types::RegisterMethod::Oidc,
-            tags: vec![],
-            auth_key_id: None,
-            ephemeral: false,
-            last_seen: None,
-            last_seen_country: None,
-            expiry: None,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-        };
+        let mut builder = railscale_types::Node::builder(
+            pending.machine_key.clone(),
+            pending.node_key.clone(),
+            hostname.to_string(),
+        )
+        .given_name(hostname)
+        .user_id(user.id)
+        .register_method(railscale_types::RegisterMethod::Oidc);
+
+        if let Some(ip) = ipv4 {
+            builder = builder.ipv4(ip);
+        }
+        if let Some(ip) = ipv6 {
+            builder = builder.ipv6(ip);
+        }
+        if let Some(hostinfo) = pending.hostinfo.clone() {
+            builder = builder.hostinfo(hostinfo);
+        }
+
+        let mut node = builder.build();
 
         // auto-approve routes based on policy
         let grants = state.grants.read().await;
@@ -210,11 +203,11 @@ pub async fn oidc_callback(
         let mut node = node;
         if !auto_approved.is_empty() {
             tracing::info!(
-                node_id = ?node.hostname,
+                node_id = ?node.hostname(),
                 routes = ?auto_approved,
                 "auto-approved routes from policy"
             );
-            node.approved_routes = auto_approved;
+            node.set_approved_routes(auto_approved);
         }
 
         let node = state.db.create_node(&node).await.map_internal()?;

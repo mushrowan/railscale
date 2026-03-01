@@ -123,7 +123,7 @@ impl GrantsEngine {
     ) -> Vec<&'a Node> {
         all_nodes
             .iter()
-            .filter(|dst| dst.id != src.id && self.can_see(src, dst, resolver))
+            .filter(|dst| dst.id() != src.id() && self.can_see(src, dst, resolver))
             .collect()
     }
 
@@ -205,8 +205,7 @@ impl GrantsEngine {
     fn is_app_connector_node<R: UserResolver>(&self, node: &Node, resolver: &R) -> bool {
         // node must claim to be an app connector
         let is_connector = node
-            .hostinfo
-            .as_ref()
+            .hostinfo()
             .and_then(|h| h.app_connector)
             .unwrap_or(false);
         if !is_connector {
@@ -365,10 +364,10 @@ impl GrantsEngine {
         _resolver: &R,
     ) -> Vec<FilterRule> {
         // taildrop only applies to user-owned (untagged) nodes
-        if node.is_tagged() || node.user_id.is_none() {
+        if node.is_tagged() || node.user_id().is_none() {
             return vec![];
         }
-        let node_user = node.user_id.unwrap();
+        let node_user = node.user_id().unwrap();
 
         // build dst prefixes from node's IPs
         let dsts: Vec<String> = node
@@ -386,10 +385,10 @@ impl GrantsEngine {
         // collect same-user peer IPs
         let mut src_ips = Vec::new();
         for peer in all_nodes {
-            if peer.id == node.id || peer.is_tagged() {
+            if peer.id() == node.id() || peer.is_tagged() {
                 continue;
             }
-            if peer.user_id == Some(node_user) {
+            if peer.user_id() == Some(node_user) {
                 for ip in peer.ips() {
                     src_ips.push(ip.to_string());
                 }
@@ -531,14 +530,14 @@ impl GrantsEngine {
             resolver.lookup_country(ip)
         } else {
             // use cached country from node's last connection
-            node.last_seen_country.clone()
+            node.last_seen_country().map(str::to_owned)
         };
         if let Some(country) = country {
             ctx.set("ip:country", country);
         }
 
         // populate node:* attributes from hostinfo
-        if let Some(ref hostinfo) = node.hostinfo {
+        if let Some(hostinfo) = node.hostinfo() {
             if let Some(ref os) = hostinfo.os {
                 ctx.set("node:os", os);
             }
@@ -549,7 +548,7 @@ impl GrantsEngine {
                 ctx.set("node:tsVersion", ipn_version);
             }
             // tsReleaseTrack - derive from version string
-            if let Some(ref version) = hostinfo.ipn_version {
+            if let Some(version) = &hostinfo.ipn_version {
                 let track = if version.contains("unstable") || version.contains("-") {
                     "unstable"
                 } else {
@@ -561,7 +560,7 @@ impl GrantsEngine {
         }
 
         // populate custom:* attributes from posture_attributes
-        for (key, value) in &node.posture_attributes {
+        for (key, value) in node.posture_attributes() {
             let attr_key = format!("custom:{}", key);
             // convert json value to string for comparison
             let str_value = match value {
@@ -642,8 +641,8 @@ impl GrantsEngine {
                     // both nodes must be user-owned and have the same user id
                     !node.is_tagged()
                         && !peer.is_tagged()
-                        && node.user_id.is_some()
-                        && node.user_id == peer.user_id
+                        && node.user_id().is_some()
+                        && node.user_id() == peer.user_id()
                 } else {
                     false
                 }
@@ -653,12 +652,12 @@ impl GrantsEngine {
                 node.ips().any(|ip| net.contains(&ip))
             }
             Selector::User(email) => node
-                .user_id
+                .user_id()
                 .and_then(|uid| resolver.resolve_user(&uid))
                 .map(|user_email| user_email == *email)
                 .unwrap_or(false),
             Selector::Group(group) => {
-                if let Some(uid) = node.user_id {
+                if let Some(uid) = node.user_id() {
                     return resolver.resolve_groups(&uid).iter().any(|g| g == group);
                 }
                 false
@@ -704,7 +703,7 @@ impl GrantsEngine {
                 match selector {
                     Selector::Autogroup(Autogroup::SelfDevices) => {
                         // node is a valid autogroup:self destination if it's untagged with user
-                        !node.is_tagged() && node.user_id.is_some()
+                        !node.is_tagged() && node.user_id().is_some()
                     }
                     _ => self.node_matches_selector(node, selector, resolver, None),
                 }
@@ -725,12 +724,12 @@ impl GrantsEngine {
             let mut source_ips: Vec<String> = Vec::new();
 
             for src_node in all_nodes {
-                if src_node.id == node.id {
+                if src_node.id() == node.id() {
                     continue; // Can't SSH to self
                 }
 
                 // for autogroup:self destinations, only same-user untagged nodes are sources
-                if has_self_dst && (src_node.is_tagged() || node.user_id != src_node.user_id) {
+                if has_self_dst && (src_node.is_tagged() || node.user_id() != src_node.user_id()) {
                     continue;
                 }
 
@@ -939,7 +938,7 @@ mod tests {
         let resolver = EmptyResolver;
         let node_in_range = test_node(1, vec![]);
         let mut node_out_of_range = test_node(2, vec![]);
-        node_out_of_range.ipv4 = Some("100.65.0.1".parse().unwrap());
+        node_out_of_range.set_ipv4("100.65.0.1".parse().unwrap());
 
         // node with ip in cidr range is accessible
         assert!(engine.can_see(&node_in_range, &node_in_range, &resolver));
@@ -1002,7 +1001,7 @@ mod tests {
 
         // web node should only see database node (not itself, not other)
         assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].id, db_node.id);
+        assert_eq!(visible[0].id(), db_node.id());
     }
 
     #[test]
@@ -1119,7 +1118,7 @@ mod tests {
 
         // we need to override user_id to simulate same user
         let mut node2_u1 = test_node(2, vec![]);
-        node2_u1.user_id = Some(UserId::new(1));
+        node2_u1.set_user_id(UserId::new(1));
 
         // node for user 2
         let node3_u2 = test_node(3, vec![]); // User 3
@@ -1478,9 +1477,9 @@ mod tests {
     // custom posture attribute tests
 
     fn test_node_with_custom_attrs(id: u64, attrs: HashMap<String, serde_json::Value>) -> Node {
-        let mut node = TestNodeBuilder::new(id).build();
-        node.posture_attributes = attrs;
-        node
+        TestNodeBuilder::new(id)
+            .with_posture_attributes(attrs)
+            .build()
     }
 
     #[test]
@@ -1776,8 +1775,7 @@ mod tests {
 
         // two nodes owned by the same user
         let node1 = test_node_with_user(1, vec![], Some(UserId::new(1)));
-        let mut node2 = test_node_with_user(2, vec![], Some(UserId::new(1)));
-        node2.user_id = Some(UserId::new(1));
+        let node2 = test_node_with_user(2, vec![], Some(UserId::new(1)));
 
         // different user
         let node3 = test_node_with_user(3, vec![], Some(UserId::new(2)));
@@ -2207,7 +2205,7 @@ mod tests {
 
         // tagged node advertising a matching subnet
         let mut node = test_node(1, vec!["tag:infra"]);
-        node.hostinfo = Some(railscale_types::HostInfo {
+        node.set_hostinfo(railscale_types::HostInfo {
             routable_ips: vec!["10.0.0.0/8".parse().unwrap()],
             ..Default::default()
         });
@@ -2241,7 +2239,7 @@ mod tests {
 
         // node without matching tag
         let mut node = test_node(1, vec!["tag:web"]);
-        node.hostinfo = Some(railscale_types::HostInfo {
+        node.set_hostinfo(railscale_types::HostInfo {
             routable_ips: vec!["10.0.0.0/8".parse().unwrap()],
             ..Default::default()
         });
@@ -2264,7 +2262,7 @@ mod tests {
         let resolver = MockResolver::new();
 
         let mut node = test_node(1, vec!["tag:exit"]);
-        node.hostinfo = Some(railscale_types::HostInfo {
+        node.set_hostinfo(railscale_types::HostInfo {
             routable_ips: vec!["0.0.0.0/0".parse().unwrap(), "::/0".parse().unwrap()],
             ..Default::default()
         });
@@ -2297,7 +2295,7 @@ mod tests {
         let resolver = MockResolver::new();
 
         let mut node = test_node(1, vec!["tag:infra"]);
-        node.hostinfo = Some(railscale_types::HostInfo {
+        node.set_hostinfo(railscale_types::HostInfo {
             routable_ips: vec!["10.0.1.0/24".parse().unwrap()],
             ..Default::default()
         });
@@ -2316,7 +2314,7 @@ mod tests {
         let resolver = MockResolver::new();
 
         let mut node = test_node(1, vec![]);
-        node.hostinfo = Some(railscale_types::HostInfo {
+        node.set_hostinfo(railscale_types::HostInfo {
             routable_ips: vec!["10.0.0.0/8".parse().unwrap()],
             ..Default::default()
         });
@@ -2352,7 +2350,7 @@ mod tests {
 
         // app connector node advertising dynamically discovered routes
         let mut node = test_node(1, vec!["tag:connector"]);
-        node.hostinfo = Some(railscale_types::HostInfo {
+        node.set_hostinfo(railscale_types::HostInfo {
             app_connector: Some(true),
             routable_ips: vec![
                 "192.0.2.5/32".parse().unwrap(),   // within declared routes
@@ -2395,7 +2393,7 @@ mod tests {
 
         // node that is NOT tagged as connector but claims app_connector
         let mut node = test_node(1, vec!["tag:other"]);
-        node.hostinfo = Some(railscale_types::HostInfo {
+        node.set_hostinfo(railscale_types::HostInfo {
             app_connector: Some(true),
             routable_ips: vec!["192.0.2.5/32".parse().unwrap()],
             ..Default::default()
@@ -2429,13 +2427,12 @@ mod tests {
 
         // create node with cached country
         let mut us_node = test_node(1, vec![]);
-        us_node.last_seen_country = Some("US".to_string());
+        us_node.set_last_seen_country("US".to_string());
 
         let mut uk_node = test_node(2, vec![]);
-        uk_node.last_seen_country = Some("UK".to_string());
+        uk_node.set_last_seen_country("UK".to_string());
 
-        let mut no_country_node = test_node(3, vec![]);
-        no_country_node.last_seen_country = None;
+        let no_country_node = test_node(3, vec![]);
 
         let dst_node = test_node(4, vec![]);
 

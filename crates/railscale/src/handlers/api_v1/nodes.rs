@@ -88,22 +88,26 @@ fn format_key(prefix: &str, bytes: &[u8]) -> String {
 impl From<Node> for NodeResponse {
     fn from(node: Node) -> Self {
         Self {
-            id: node.id.to_string(),
-            machine_key: format_key("mkey", node.machine_key.as_bytes()),
-            node_key: format_key("nodekey", node.node_key.as_bytes()),
-            disco_key: format_key("discokey", node.disco_key.as_bytes()),
-            ipv4: node.ipv4.map(|ip| ip.to_string()),
-            ipv6: node.ipv6.map(|ip| ip.to_string()),
-            hostname: node.hostname,
-            given_name: node.given_name.to_string(),
-            user_id: node.user_id.map(|id| id.to_string()),
-            register_method: format!("{:?}", node.register_method).to_lowercase(),
-            tags: node.tags.iter().map(|t| t.to_string()).collect(),
-            expiry: node.expiry.map(|dt| dt.to_rfc3339()),
-            last_seen: node.last_seen.map(|dt| dt.to_rfc3339()),
-            approved_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
-            created_at: node.created_at.to_rfc3339(),
-            online: node.is_online.unwrap_or(false),
+            id: node.id().to_string(),
+            machine_key: format_key("mkey", node.machine_key().as_bytes()),
+            node_key: format_key("nodekey", node.node_key().as_bytes()),
+            disco_key: format_key("discokey", node.disco_key().as_bytes()),
+            ipv4: node.ipv4().map(|ip| ip.to_string()),
+            ipv6: node.ipv6().map(|ip| ip.to_string()),
+            hostname: node.hostname().to_string(),
+            given_name: node.given_name().to_string(),
+            user_id: node.user_id().map(|id| id.to_string()),
+            register_method: format!("{:?}", node.register_method()).to_lowercase(),
+            tags: node.tags().iter().map(|t| t.to_string()).collect(),
+            expiry: node.expiry().map(|dt| dt.to_rfc3339()),
+            last_seen: node.last_seen().map(|dt| dt.to_rfc3339()),
+            approved_routes: node
+                .approved_routes()
+                .iter()
+                .map(|r| r.to_string())
+                .collect(),
+            created_at: node.created_at().to_rfc3339(),
+            online: node.is_online().unwrap_or(false),
             connected_at: None,
         }
     }
@@ -190,7 +194,7 @@ async fn list_nodes(
 
     let mut responses = Vec::with_capacity(nodes.len());
     for node in pagination.apply(nodes) {
-        let node_id = node.id;
+        let node_id = node.id();
         let info = state.presence.get_connection_info(node_id).await;
         responses.push(NodeResponse::from(node).with_presence(info.as_ref()));
     }
@@ -247,16 +251,16 @@ async fn delete_node(
         .map_err(ApiError::internal)?;
     {
         let mut allocator = state.ip_allocator.lock().await;
-        if let Some(v4) = node.ipv4 {
+        if let Some(v4) = node.ipv4() {
             allocator.release(v4);
         }
-        if let Some(v6) = node.ipv6 {
+        if let Some(v6) = node.ipv6() {
             allocator.release(v6);
         }
     }
 
     state.notifier.notify_state_changed();
-    warn!(node_id = id, hostname = %node.hostname, "node deleted");
+    warn!(node_id = id, hostname = %node.hostname(), "node deleted");
     Ok(Json(EmptyResponse {}))
 }
 
@@ -286,7 +290,7 @@ async fn expire_node(
         Utc::now()
     };
 
-    node.expiry = Some(expiry);
+    node.set_expiry(expiry);
     let node = state
         .db
         .update_node(&node)
@@ -321,14 +325,14 @@ async fn rename_node(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    node.given_name = new_name;
+    node.set_given_name(new_name);
     let node = state
         .db
         .update_node(&node)
         .await
         .map_err(ApiError::internal)?;
 
-    info!(node_id = id, new_name = %node.given_name, "node renamed");
+    info!(node_id = id, new_name = %node.given_name(), "node renamed");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;
@@ -357,20 +361,20 @@ async fn set_tags(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    if !node.tags.is_empty() && req.tags.is_empty() {
+    if !node.tags().is_empty() && req.tags.is_empty() {
         return Err(ApiError::bad_request(
             "cannot remove all tags from a tagged node - tagged nodes must have at least one tag",
         ));
     }
 
-    node.tags = req.tags.into_inner();
+    node.set_tags(req.tags.into_inner());
     let node = state
         .db
         .update_node(&node)
         .await
         .map_err(ApiError::internal)?;
 
-    info!(node_id = id, tags = ?node.tags, "node tags updated");
+    info!(node_id = id, tags = ?node.tags(), "node tags updated");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;
@@ -397,14 +401,14 @@ async fn set_routes(
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("node {} not found", id)))?;
 
-    node.approved_routes = req.routes;
+    node.set_approved_routes(req.routes);
     let node = state
         .db
         .update_node(&node)
         .await
         .map_err(ApiError::internal)?;
 
-    info!(node_id = id, routes = ?node.approved_routes, "node routes updated");
+    info!(node_id = id, routes = ?node.approved_routes(), "node routes updated");
     state.notifier.notify_state_changed();
 
     let info = state.presence.get_connection_info(node_id).await;
@@ -452,15 +456,15 @@ async fn set_posture_attributes(
 
     for (key, value) in req.attributes {
         if value.is_null() {
-            node.posture_attributes.remove(&key);
+            node.posture_attributes_mut().remove(&key);
         } else {
-            node.posture_attributes.insert(key, value);
+            node.posture_attributes_mut().insert(key, value);
         }
     }
 
     state
         .db
-        .set_node_posture_attributes(node_id, &node.posture_attributes)
+        .set_node_posture_attributes(node_id, &node.posture_attributes())
         .await
         .map_err(ApiError::internal)?;
 

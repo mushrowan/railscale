@@ -100,14 +100,14 @@ pub async fn map(
     let mut country_changed = false;
 
     if let Some(ref disco_key) = req.disco_key
-        && node.disco_key.as_bytes() != disco_key.as_bytes()
+        && node.disco_key().as_bytes() != disco_key.as_bytes()
     {
-        node.disco_key = disco_key.clone();
+        node.set_disco_key(disco_key.clone());
         needs_update = true;
     }
 
     if let Some(ref hostinfo) = req.hostinfo {
-        node.hostinfo = Some(hostinfo.clone());
+        node.set_hostinfo(hostinfo.clone());
         needs_update = true;
     }
 
@@ -115,15 +115,15 @@ pub async fn map(
     if let (Some(geoip), Some(addr)) = (&state.geoip, client_addr) {
         let client_ip = addr.ip();
         if let Some(country) = geoip.lookup_country(client_ip)
-            && node.last_seen_country.as_ref() != Some(&country)
+            && node.last_seen_country() != Some(&*country)
         {
             tracing::debug!(
-                node_id = node.id.as_u64(),
-                old_country = ?node.last_seen_country,
+                node_id = node.id().as_u64(),
+                old_country = ?node.last_seen_country(),
                 new_country = %country,
                 "node country changed"
             );
-            node.last_seen_country = Some(country);
+            node.set_last_seen_country(country);
             needs_update = true;
             country_changed = true;
         }
@@ -135,7 +135,7 @@ pub async fn map(
         // country changes affect other nodes' filter rules, so always notify
         if country_changed {
             tracing::debug!(
-                node_id = node.id.as_u64(),
+                node_id = node.id().as_u64(),
                 "notifying state change due to country update"
             );
         }
@@ -146,11 +146,15 @@ pub async fn map(
 
     if req.stream {
         let node = node.into_inner();
-        Ok(
-            streaming_response(state, node.id, node.node_key, compression, node.ephemeral)
-                .await
-                .into_response(),
+        Ok(streaming_response(
+            state,
+            node.id(),
+            node.node_key().clone(),
+            compression,
+            node.ephemeral(),
         )
+        .await
+        .into_response())
     } else {
         // non-streaming mode: return single length-prefixed response
         let response = build_map_response(&state, &req.node_key, req.omit_peers).await?;
@@ -430,10 +434,10 @@ async fn build_map_response(
         let self_sig = if tka_info.is_some() {
             state
                 .db
-                .get_node_key_signature(node.id)
+                .get_node_key_signature(node.id())
                 .await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, node_id = %node.id, "failed to fetch tka signature for self");
+                    tracing::warn!(error = %e, node_id = %node.id(), "failed to fetch tka signature for self");
                     None
                 })
         } else {
@@ -500,9 +504,9 @@ async fn build_map_response(
     // collect user IDs from visible peers + self node, then filter profiles
     let mut visible_user_ids: std::collections::HashSet<u64> = visible_peers
         .iter()
-        .filter_map(|n| n.user_id.map(|id| id.as_u64()))
+        .filter_map(|n| n.user_id().map(|id| id.as_u64()))
         .collect();
-    if let Some(self_uid) = node.user_id {
+    if let Some(self_uid) = node.user_id() {
         visible_user_ids.insert(self_uid.as_u64());
     }
 
@@ -547,8 +551,8 @@ async fn build_map_response(
 
     // batch-fetch TKA key signatures when tailnet lock is enabled
     let key_signatures = if tka_info.is_some() {
-        let mut all_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
-        all_ids.push(node.id);
+        let mut all_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id()).collect();
+        all_ids.push(node.id());
         state
             .db
             .get_node_key_signatures_batch(&all_ids)
@@ -562,7 +566,7 @@ async fn build_map_response(
     };
 
     // build self node with capabilities (self is always online if we're making this request)
-    let self_sig = key_signatures.get(&node.id).map(|v| v.as_slice());
+    let self_sig = key_signatures.get(&node.id()).map(|v| v.as_slice());
     let mut self_node =
         node_to_map_response_node(&node, Some(true), self_sig, &state.config.base_domain);
     self_node.cap_map = build_self_cap_map(&state.config, &grants, &node, &resolver);
@@ -579,15 +583,15 @@ async fn build_map_response(
     );
 
     // get online status for all visible peers
-    let peer_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id).collect();
+    let peer_ids: Vec<NodeId> = visible_peers.iter().map(|n| n.id()).collect();
     let online_statuses = state.presence.get_online_statuses(&peer_ids).await;
 
     // build peer nodes with online status, TKA signatures, and nodeAttrs cap_map
     let peers: Vec<MapResponseNode> = visible_peers
         .iter()
         .map(|n| {
-            let online = online_statuses.get(&n.id).copied();
-            let sig = key_signatures.get(&n.id).map(|v| v.as_slice());
+            let online = online_statuses.get(&n.id()).copied();
+            let sig = key_signatures.get(&n.id()).map(|v| v.as_slice());
             let mut peer = node_to_map_response_node(n, online, sig, &state.config.base_domain);
             peer.cap_map = build_peer_cap_map(&grants, n, &resolver);
             peer
@@ -663,26 +667,25 @@ fn node_to_map_response_node(
 ) -> MapResponseNode {
     // derive home derp from client's reported preferred region
     let home_derp = node
-        .hostinfo
-        .as_ref()
+        .hostinfo()
         .and_then(|h| h.net_info.as_ref())
         .map(|n| n.preferred_derp)
         .unwrap_or(0);
     // addresses must be in cidr notation for tailscale client
     let mut addresses = Vec::new();
-    if let Some(ip) = node.ipv4 {
+    if let Some(ip) = node.ipv4() {
         addresses.push(ip_to_cidr(ip));
     }
-    if let Some(ip) = node.ipv6 {
+    if let Some(ip) = node.ipv6() {
         addresses.push(ip_to_cidr(ip));
     }
 
     let mut allowed_ips = addresses.clone();
-    allowed_ips.extend(node.approved_routes.iter().map(|r| r.to_string()));
+    allowed_ips.extend(node.approved_routes().iter().map(|r| r.to_string()));
 
     MapResponseNode {
-        id: node.id.as_u64(),
-        stable_id: node.id.stable_id(),
+        id: node.id().as_u64(),
+        stable_id: node.id().stable_id(),
         name: {
             let hostname = node.display_hostname();
             if base_domain.is_empty() {
@@ -691,26 +694,30 @@ fn node_to_map_response_node(
                 format!("{}.{}.", hostname, base_domain)
             }
         },
-        node_key: node.node_key.clone(),
-        machine_key: node.machine_key.clone(),
-        disco_key: node.disco_key.clone(),
+        node_key: node.node_key().clone(),
+        machine_key: node.machine_key().clone(),
+        disco_key: node.disco_key().clone(),
         addresses,
         allowed_ips,
-        endpoints: node.endpoints.iter().map(|e| e.to_string()).collect(),
+        endpoints: node.endpoints().iter().map(|e| e.to_string()).collect(),
         derp: String::new(), // Deprecated - use home_derp instead
         home_derp,
         // always include hostinfo (default to empty if none) to prevent nil pointer
         // crashes in Tailscale client when accessing Hostinfo.Hostname() on peers
-        hostinfo: Some(node.hostinfo.clone().unwrap_or_default()),
+        hostinfo: Some(node.hostinfo().cloned().unwrap_or_default()),
         online,
-        tags: node.tags.iter().map(|t| t.to_string()).collect(),
-        primary_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
-        key_expiry: node.expiry.as_ref().map(|e| e.to_rfc3339()),
+        tags: node.tags().iter().map(|t| t.to_string()).collect(),
+        primary_routes: node
+            .approved_routes()
+            .iter()
+            .map(|r| r.to_string())
+            .collect(),
+        key_expiry: node.expiry().map(|e| e.to_rfc3339()),
         key_signature: key_sig
             .map(|s| railscale_tka::MarshaledSignature::from(s.to_vec()))
             .unwrap_or_default(),
         expired: node.is_expired(),
-        user: node.user_id.unwrap_or(UserId::TAGGED_DEVICES).as_u64(),
+        user: node.user_id().unwrap_or(UserId::TAGGED_DEVICES).as_u64(),
         // nodes in the database that respond to map requests are authorized
         machine_authorized: true,
         cap: railscale_proto::CapabilityVersion::CURRENT.0,
@@ -724,7 +731,7 @@ fn node_to_map_response_node(
 fn build_health_warnings(node: &Node) -> Option<Vec<String>> {
     let mut warnings = Vec::new();
 
-    if let Some(ref expiry) = node.expiry {
+    if let Some(ref expiry) = node.expiry() {
         let now = chrono::Utc::now();
         if *expiry <= now {
             warnings.push("key has expired".to_string());
@@ -963,7 +970,7 @@ mod tests {
             .with_hostname("original")
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
-        node.given_name = "renamed".parse().unwrap();
+        node.set_given_name("renamed".parse().unwrap());
 
         let result = node_to_map_response_node(&node, Some(true), None, "example.com");
         assert_eq!(result.name, "renamed.example.com.");

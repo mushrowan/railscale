@@ -345,7 +345,7 @@ impl AdminService for AdminServiceImpl {
         let nodes: Vec<_> = if let Some(ref tag) = req.tag {
             nodes
                 .into_iter()
-                .filter(|n| n.tags.iter().any(|t| t == tag.as_str()))
+                .filter(|n| n.tags().iter().any(|t| t == tag.as_str()))
                 .collect()
         } else {
             nodes
@@ -383,7 +383,7 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
             .ok_or_else(|| Status::not_found("Node not found"))?;
 
-        node.expiry = Some(chrono::Utc::now());
+        node.set_expiry(chrono::Utc::now());
 
         let updated = self
             .db
@@ -412,7 +412,7 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
             .ok_or_else(|| Status::not_found("Node not found"))?;
 
-        node.given_name = validated_name;
+        node.set_given_name(validated_name);
 
         let updated = self
             .db
@@ -454,7 +454,7 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
             .ok_or_else(|| Status::not_found("Node not found"))?;
 
-        node.tags = tags;
+        node.set_tags(tags);
 
         let updated = self
             .db
@@ -491,7 +491,7 @@ impl AdminService for AdminServiceImpl {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        node.approved_routes = routes;
+        node.set_approved_routes(routes);
 
         let updated = self
             .db
@@ -984,20 +984,24 @@ fn user_to_pb(user: &railscale_types::User) -> pb::User {
 
 fn node_to_pb(node: &railscale_types::Node) -> pb::Node {
     pb::Node {
-        id: node.id.as_u64(),
-        machine_key: hex::encode(node.machine_key.as_bytes()),
-        node_key: hex::encode(node.node_key.as_bytes()),
-        hostname: node.hostname.clone(),
-        given_name: node.given_name.to_string(),
-        ipv4: node.ipv4.map(|ip| ip.to_string()),
-        ipv6: node.ipv6.map(|ip| ip.to_string()),
-        user_id: node.user_id.map(|id| id.as_u64()),
-        tags: node.tags.iter().map(|t| t.to_string()).collect(),
-        last_seen: node.last_seen.map(|t| t.to_rfc3339()),
-        expiry: node.expiry.map(|t| t.to_rfc3339()),
-        approved_routes: node.approved_routes.iter().map(|r| r.to_string()).collect(),
-        created_at: node.created_at.to_rfc3339(),
-        online: node.is_online.unwrap_or(false),
+        id: node.id().as_u64(),
+        machine_key: hex::encode(node.machine_key().as_bytes()),
+        node_key: hex::encode(node.node_key().as_bytes()),
+        hostname: node.hostname().to_string(),
+        given_name: node.given_name().to_string(),
+        ipv4: node.ipv4().map(|ip| ip.to_string()),
+        ipv6: node.ipv6().map(|ip| ip.to_string()),
+        user_id: node.user_id().map(|id| id.as_u64()),
+        tags: node.tags().iter().map(|t| t.to_string()).collect(),
+        last_seen: node.last_seen().map(|t| t.to_rfc3339()),
+        expiry: node.expiry().map(|t| t.to_rfc3339()),
+        approved_routes: node
+            .approved_routes()
+            .iter()
+            .map(|r| r.to_string())
+            .collect(),
+        created_at: node.created_at().to_rfc3339(),
+        online: node.is_online().unwrap_or(false),
     }
 }
 

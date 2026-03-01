@@ -279,16 +279,16 @@ async fn test_register_allocates_ip_addresses() {
 
     // node should have both ipv4 and ipv6 addresses assigned
     assert!(
-        node.ipv4.is_some(),
+        node.ipv4().is_some(),
         "Node should have an IPv4 address assigned"
     );
     assert!(
-        node.ipv6.is_some(),
+        node.ipv6().is_some(),
         "Node should have an IPv6 address assigned"
     );
 
     // ipv4 should be in the tailscale cgnat range (100.64.0.0/10)
-    if let Some(ipv4) = node.ipv4 {
+    if let Some(ipv4) = node.ipv4() {
         let ip: std::net::Ipv4Addr = match ipv4 {
             std::net::IpAddr::V4(v4) => v4,
             _ => panic!("Expected IPv4 address"),
@@ -300,7 +300,7 @@ async fn test_register_allocates_ip_addresses() {
     }
 
     // ipv6 should be in the tailscale ula range (fd7a:115c:a1e0::/48)
-    if let Some(ipv6) = node.ipv6 {
+    if let Some(ipv6) = node.ipv6() {
         let ip: std::net::Ipv6Addr = match ipv6 {
             std::net::IpAddr::V6(v6) => v6,
             _ => panic!("Expected IPv6 address"),

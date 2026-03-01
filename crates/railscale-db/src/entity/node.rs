@@ -177,89 +177,108 @@ impl From<Model> for Node {
             })
             .unwrap_or_default();
 
-        Node {
-            id: NodeId::from(model.id),
-            machine_key: MachineKey::try_from_bytes(&model.machine_key).unwrap_or_default(),
-            node_key: NodeKey::try_from_bytes(&model.node_key).unwrap_or_default(),
-            disco_key: DiscoKey::try_from_bytes(&model.disco_key).unwrap_or_default(),
-            endpoints,
-            hostinfo,
-            ipv4,
-            ipv6,
-            hostname: model.hostname,
-            given_name: railscale_types::NodeName::sanitise(&model.given_name)
-                .unwrap_or_else(|| "node".parse().unwrap()),
-            user_id: model.user_id.map(|id| UserId::from(id)),
-            register_method,
-            tags,
-            auth_key_id: model.auth_key_id.map(|id| id as u64),
-            ephemeral: model.ephemeral,
-            expiry: model.expiry,
-            last_seen: model.last_seen,
-            last_seen_country: model.last_seen_country,
-            approved_routes,
-            created_at: model.created_at,
-            updated_at: model.updated_at,
-            is_online: None,
-            posture_attributes,
-            nl_public_key: model.nl_public_key,
+        let machine_key = MachineKey::try_from_bytes(&model.machine_key).unwrap_or_default();
+        let node_key = NodeKey::try_from_bytes(&model.node_key).unwrap_or_default();
+        let disco_key = DiscoKey::try_from_bytes(&model.disco_key).unwrap_or_default();
+
+        let mut builder = Node::builder(machine_key, node_key, model.hostname)
+            .id(NodeId::from(model.id))
+            .disco_key(disco_key)
+            .endpoints(endpoints)
+            .given_name(
+                railscale_types::NodeName::sanitise(&model.given_name)
+                    .unwrap_or_else(|| "node".parse().unwrap()),
+            )
+            .register_method(register_method)
+            .tags(tags)
+            .ephemeral(model.ephemeral)
+            .approved_routes(approved_routes)
+            .created_at(model.created_at)
+            .updated_at(model.updated_at)
+            .posture_attributes(posture_attributes);
+
+        if let Some(hi) = hostinfo {
+            builder = builder.hostinfo(hi);
         }
+        if let Some(ip) = ipv4 {
+            builder = builder.ipv4(ip);
+        }
+        if let Some(ip) = ipv6 {
+            builder = builder.ipv6(ip);
+        }
+        if let Some(uid) = model.user_id {
+            builder = builder.user_id(UserId::from(uid));
+        }
+        if let Some(id) = model.auth_key_id {
+            builder = builder.auth_key_id(id as u64);
+        }
+        if let Some(exp) = model.expiry {
+            builder = builder.expiry(exp);
+        }
+        if let Some(ls) = model.last_seen {
+            builder = builder.last_seen(ls);
+        }
+        if let Some(country) = model.last_seen_country {
+            builder = builder.last_seen_country(country);
+        }
+        if let Some(key) = model.nl_public_key {
+            builder = builder.nl_public_key(key);
+        }
+
+        builder.build()
     }
 }
 
 impl From<&Node> for ActiveModel {
     fn from(node: &Node) -> Self {
         let endpoints_json =
-            serde_json::to_string(&node.endpoints).unwrap_or_else(|_| "[]".to_string());
-        let hostinfo_json = node
-            .hostinfo
-            .as_ref()
-            .and_then(|h| serde_json::to_string(h).ok());
-        let tags_json = serde_json::to_string(&node.tags).unwrap_or_else(|_| "[]".to_string());
+            serde_json::to_string(node.endpoints()).unwrap_or_else(|_| "[]".to_string());
+        let hostinfo_json = node.hostinfo().and_then(|h| serde_json::to_string(h).ok());
+        let tags_json = serde_json::to_string(node.tags()).unwrap_or_else(|_| "[]".to_string());
         let approved_routes_json =
-            serde_json::to_string(&node.approved_routes).unwrap_or_else(|_| "[]".to_string());
-        let posture_attributes_json = if node.posture_attributes.is_empty() {
+            serde_json::to_string(node.approved_routes()).unwrap_or_else(|_| "[]".to_string());
+        let posture_attributes_json = if node.posture_attributes().is_empty() {
             None
         } else {
-            serde_json::to_string(&node.posture_attributes).ok()
+            serde_json::to_string(node.posture_attributes()).ok()
         };
 
-        let register_method = match node.register_method {
+        let register_method = match node.register_method() {
             RegisterMethod::AuthKey => "authkey",
             RegisterMethod::Oidc => "oidc",
             RegisterMethod::Cli => "cli",
         };
 
         ActiveModel {
-            id: if node.id.as_u64() == 0 {
+            id: if node.id().as_u64() == 0 {
                 NotSet
             } else {
-                Set(node.id.as_i64())
+                Set(node.id().as_i64())
             },
-            machine_key: Set(node.machine_key.as_bytes().to_vec()),
-            node_key: Set(node.node_key.as_bytes().to_vec()),
-            disco_key: Set(node.disco_key.as_bytes().to_vec()),
+            machine_key: Set(node.machine_key().as_bytes().to_vec()),
+            node_key: Set(node.node_key().as_bytes().to_vec()),
+            disco_key: Set(node.disco_key().as_bytes().to_vec()),
             endpoints: Set(endpoints_json),
             hostinfo: Set(hostinfo_json),
-            ipv4: Set(node.ipv4.map(|ip| ip.to_string())),
-            ipv6: Set(node.ipv6.map(|ip| ip.to_string())),
-            hostname: Set(node.hostname.clone()),
-            given_name: Set(node.given_name.to_string()),
-            user_id: Set(node.user_id.map(|id| id.as_i64())),
+            ipv4: Set(node.ipv4().map(|ip| ip.to_string())),
+            ipv6: Set(node.ipv6().map(|ip| ip.to_string())),
+            hostname: Set(node.hostname().to_string()),
+            given_name: Set(node.given_name().to_string()),
+            user_id: Set(node.user_id().map(|id| id.as_i64())),
             register_method: Set(register_method.to_string()),
             tags: Set(tags_json),
-            auth_key_id: Set(node.auth_key_id.map(|id| id as i64)),
-            ephemeral: Set(node.ephemeral),
-            expiry: Set(node.expiry),
-            last_seen: Set(node.last_seen),
+            auth_key_id: Set(node.auth_key_id().map(|id| id as i64)),
+            ephemeral: Set(node.ephemeral()),
+            expiry: Set(node.expiry()),
+            last_seen: Set(node.last_seen()),
             approved_routes: Set(approved_routes_json),
-            created_at: Set(node.created_at),
-            updated_at: Set(node.updated_at),
+            created_at: Set(node.created_at()),
+            updated_at: Set(node.updated_at()),
             deleted_at: NotSet,
             key_signature: NotSet, // managed separately via TKA operations
             posture_attributes: Set(posture_attributes_json),
-            last_seen_country: Set(node.last_seen_country.clone()),
-            nl_public_key: Set(node.nl_public_key.clone()),
+            last_seen_country: Set(node.last_seen_country().map(str::to_owned)),
+            nl_public_key: Set(node.nl_public_key().map(|k| k.to_vec())),
         }
     }
 }

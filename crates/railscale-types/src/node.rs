@@ -68,100 +68,359 @@ impl std::fmt::Display for NodeId {
 /// are mutually exclusive.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Node {
-    /// unique identifier.
-    pub id: NodeId,
-
-    /// machine key - identifies the physical device.
-    pub machine_key: MachineKey,
-
-    /// node key - identifies the current session (can rotate).
-    pub node_key: NodeKey,
-
-    /// disco key - used for peer discovery.
-    pub disco_key: DiscoKey,
-
-    /// network endpoints where this node can be reached.
-    pub endpoints: Vec<SocketAddr>,
-
-    /// host information from the tailscale client.
-    pub hostinfo: Option<HostInfo>,
-
-    /// ipv4 address assigned to this node.
-    pub ipv4: Option<IpAddr>,
-
-    /// ipv6 address assigned to this node.
-    pub ipv6: Option<IpAddr>,
-
-    /// hostname reported by the tailscale client during registration.
-    pub hostname: String,
-
-    /// dns-safe name for the node.
-    /// either auto-generated from hostname or manually set.
-    /// always a valid dns label (enforced by `NodeName` newtype)
-    pub given_name: NodeName,
-
-    /// user id for tracking "created by".
-    ///
-    /// for tagged nodes: informational only (tag is the owner).
-    /// for user-owned nodes: identifies the owner.
-    pub user_id: Option<UserId>,
-
-    /// how the node was registered (authkey, oidc, cli).
-    pub register_method: RegisterMethod,
-
-    /// tags defining the node's identity (for tagged nodes).
-    ///
-    /// when non-empty, the node is "tagged" and tags define its identity.
-    /// empty for user-owned nodes.
-    /// tags cannot be removed once set (one-way transition).
-    pub tags: Vec<Tag>,
-
-    /// preauthkey id used to register this node.
-    pub auth_key_id: Option<u64>,
-
-    /// whether this is an ephemeral node (auto-deleted when inactive).
-    pub ephemeral: bool,
-
-    /// when the node registration expires.
-    pub expiry: Option<DateTime<Utc>>,
-
-    /// last time the node contacted the server.
-    pub last_seen: Option<DateTime<Utc>>,
-
-    /// ISO 3166-1 alpha-2 country code from geoip lookup of connection IP.
-    /// used for ip:country posture checks. updated when node connects.
-    pub last_seen_country: Option<String>,
-
-    /// routes this node is approved to announce as a subnet router.
-    pub approved_routes: Vec<IpNet>,
-
-    /// when the node was created.
-    pub created_at: DateTime<Utc>,
-
-    /// when the node was last updated.
-    pub updated_at: DateTime<Utc>,
-
-    /// whether the node is currently online (not persisted).
+    pub(crate) id: NodeId,
+    pub(crate) machine_key: MachineKey,
+    pub(crate) node_key: NodeKey,
+    pub(crate) disco_key: DiscoKey,
+    pub(crate) endpoints: Vec<SocketAddr>,
+    pub(crate) hostinfo: Option<HostInfo>,
+    pub(crate) ipv4: Option<IpAddr>,
+    pub(crate) ipv6: Option<IpAddr>,
+    pub(crate) hostname: String,
+    pub(crate) given_name: NodeName,
+    pub(crate) user_id: Option<UserId>,
+    pub(crate) register_method: RegisterMethod,
+    pub(crate) tags: Vec<Tag>,
+    pub(crate) auth_key_id: Option<u64>,
+    pub(crate) ephemeral: bool,
+    pub(crate) expiry: Option<DateTime<Utc>>,
+    pub(crate) last_seen: Option<DateTime<Utc>>,
+    pub(crate) last_seen_country: Option<String>,
+    pub(crate) approved_routes: Vec<IpNet>,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) updated_at: DateTime<Utc>,
     #[serde(skip)]
-    pub is_online: Option<bool>,
-
-    /// custom posture attributes for access control
-    ///
-    /// key-value pairs in the `custom:` namespace (e.g., `custom:tier`, `custom:managed`).
-    /// values can be strings, numbers, or booleans.
+    pub(crate) is_online: Option<bool>,
     #[serde(default)]
-    pub posture_attributes: HashMap<String, serde_json::Value>,
-
-    /// network lock public key (raw ed25519, 32 bytes).
-    ///
-    /// sent by the client as `NLKey` during registration (format: `nlpub:<hex>`).
-    /// used as `rotation_pubkey` in TkaSignInfo so nodes can autonomously
-    /// rotate their wireguard keys under tailnet lock.
+    pub(crate) posture_attributes: HashMap<String, serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub nl_public_key: Option<Vec<u8>>,
+    pub(crate) nl_public_key: Option<Vec<u8>>,
+}
+
+/// builder for constructing Node values
+///
+/// required fields: machine_key, node_key, hostname.
+/// all other fields have sensible defaults.
+pub struct NodeBuilder {
+    node: Node,
+}
+
+impl NodeBuilder {
+    pub fn new(machine_key: MachineKey, node_key: NodeKey, hostname: String) -> Self {
+        let given_name = NodeName::sanitise(&hostname).unwrap_or_else(|| "node".parse().unwrap());
+        let now = Utc::now();
+        Self {
+            node: Node {
+                id: NodeId::new(0),
+                machine_key,
+                node_key,
+                disco_key: DiscoKey::default(),
+                endpoints: vec![],
+                hostinfo: None,
+                ipv4: None,
+                ipv6: None,
+                hostname,
+                given_name,
+                user_id: None,
+                register_method: RegisterMethod::default(),
+                tags: vec![],
+                auth_key_id: None,
+                ephemeral: false,
+                expiry: None,
+                last_seen: None,
+                last_seen_country: None,
+                approved_routes: vec![],
+                created_at: now,
+                updated_at: now,
+                is_online: None,
+                posture_attributes: HashMap::new(),
+                nl_public_key: None,
+            },
+        }
+    }
+
+    pub fn id(mut self, id: NodeId) -> Self {
+        self.node.id = id;
+        self
+    }
+
+    pub fn disco_key(mut self, key: DiscoKey) -> Self {
+        self.node.disco_key = key;
+        self
+    }
+
+    pub fn endpoints(mut self, endpoints: Vec<SocketAddr>) -> Self {
+        self.node.endpoints = endpoints;
+        self
+    }
+
+    pub fn hostinfo(mut self, hostinfo: HostInfo) -> Self {
+        self.node.hostinfo = Some(hostinfo);
+        self
+    }
+
+    pub fn ipv4(mut self, ip: IpAddr) -> Self {
+        self.node.ipv4 = Some(ip);
+        self
+    }
+
+    pub fn ipv6(mut self, ip: IpAddr) -> Self {
+        self.node.ipv6 = Some(ip);
+        self
+    }
+
+    pub fn given_name(mut self, name: NodeName) -> Self {
+        self.node.given_name = name;
+        self
+    }
+
+    pub fn user_id(mut self, id: UserId) -> Self {
+        self.node.user_id = Some(id);
+        self
+    }
+
+    pub fn register_method(mut self, method: RegisterMethod) -> Self {
+        self.node.register_method = method;
+        self
+    }
+
+    pub fn tags(mut self, tags: Vec<Tag>) -> Self {
+        self.node.tags = tags;
+        self
+    }
+
+    pub fn auth_key_id(mut self, id: u64) -> Self {
+        self.node.auth_key_id = Some(id);
+        self
+    }
+
+    pub fn ephemeral(mut self, ephemeral: bool) -> Self {
+        self.node.ephemeral = ephemeral;
+        self
+    }
+
+    pub fn expiry(mut self, expiry: DateTime<Utc>) -> Self {
+        self.node.expiry = Some(expiry);
+        self
+    }
+
+    pub fn last_seen(mut self, last_seen: DateTime<Utc>) -> Self {
+        self.node.last_seen = Some(last_seen);
+        self
+    }
+
+    pub fn last_seen_country(mut self, country: String) -> Self {
+        self.node.last_seen_country = Some(country);
+        self
+    }
+
+    pub fn approved_routes(mut self, routes: Vec<IpNet>) -> Self {
+        self.node.approved_routes = routes;
+        self
+    }
+
+    pub fn created_at(mut self, time: DateTime<Utc>) -> Self {
+        self.node.created_at = time;
+        self
+    }
+
+    pub fn updated_at(mut self, time: DateTime<Utc>) -> Self {
+        self.node.updated_at = time;
+        self
+    }
+
+    pub fn posture_attributes(mut self, attrs: HashMap<String, serde_json::Value>) -> Self {
+        self.node.posture_attributes = attrs;
+        self
+    }
+
+    pub fn nl_public_key(mut self, key: Vec<u8>) -> Self {
+        self.node.nl_public_key = Some(key);
+        self
+    }
+
+    pub fn build(self) -> Node {
+        self.node
+    }
 }
 
 impl Node {
+    pub fn builder(machine_key: MachineKey, node_key: NodeKey, hostname: String) -> NodeBuilder {
+        NodeBuilder::new(machine_key, node_key, hostname)
+    }
+
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+
+    pub fn machine_key(&self) -> &MachineKey {
+        &self.machine_key
+    }
+
+    pub fn node_key(&self) -> &NodeKey {
+        &self.node_key
+    }
+
+    pub fn disco_key(&self) -> &DiscoKey {
+        &self.disco_key
+    }
+
+    pub fn endpoints(&self) -> &[SocketAddr] {
+        &self.endpoints
+    }
+
+    pub fn hostinfo(&self) -> Option<&HostInfo> {
+        self.hostinfo.as_ref()
+    }
+
+    pub fn ipv4(&self) -> Option<IpAddr> {
+        self.ipv4
+    }
+
+    pub fn ipv6(&self) -> Option<IpAddr> {
+        self.ipv6
+    }
+
+    pub fn hostname(&self) -> &str {
+        &self.hostname
+    }
+
+    pub fn given_name(&self) -> &NodeName {
+        &self.given_name
+    }
+
+    pub fn user_id(&self) -> Option<UserId> {
+        self.user_id
+    }
+
+    pub fn register_method(&self) -> RegisterMethod {
+        self.register_method
+    }
+
+    pub fn tags(&self) -> &[Tag] {
+        &self.tags
+    }
+
+    pub fn auth_key_id(&self) -> Option<u64> {
+        self.auth_key_id
+    }
+
+    pub fn ephemeral(&self) -> bool {
+        self.ephemeral
+    }
+
+    pub fn expiry(&self) -> Option<DateTime<Utc>> {
+        self.expiry
+    }
+
+    pub fn last_seen(&self) -> Option<DateTime<Utc>> {
+        self.last_seen
+    }
+
+    pub fn last_seen_country(&self) -> Option<&str> {
+        self.last_seen_country.as_deref()
+    }
+
+    pub fn approved_routes(&self) -> &[IpNet] {
+        &self.approved_routes
+    }
+
+    pub fn created_at(&self) -> DateTime<Utc> {
+        self.created_at
+    }
+
+    pub fn updated_at(&self) -> DateTime<Utc> {
+        self.updated_at
+    }
+
+    pub fn is_online(&self) -> Option<bool> {
+        self.is_online
+    }
+
+    pub fn posture_attributes(&self) -> &HashMap<String, serde_json::Value> {
+        &self.posture_attributes
+    }
+
+    pub fn nl_public_key(&self) -> Option<&[u8]> {
+        self.nl_public_key.as_deref()
+    }
+
+    pub fn set_disco_key(&mut self, key: DiscoKey) {
+        self.disco_key = key;
+    }
+
+    pub fn set_hostinfo(&mut self, hostinfo: HostInfo) {
+        self.hostinfo = Some(hostinfo);
+    }
+
+    pub fn set_last_seen_country(&mut self, country: String) {
+        self.last_seen_country = Some(country);
+    }
+
+    pub fn set_approved_routes(&mut self, routes: Vec<IpNet>) {
+        self.approved_routes = routes;
+    }
+
+    pub fn set_expiry(&mut self, expiry: DateTime<Utc>) {
+        self.expiry = Some(expiry);
+    }
+
+    pub fn set_given_name(&mut self, name: NodeName) {
+        self.given_name = name;
+    }
+
+    pub fn set_tags(&mut self, tags: Vec<Tag>) {
+        self.tags = tags;
+    }
+
+    pub fn posture_attributes_mut(&mut self) -> &mut HashMap<String, serde_json::Value> {
+        &mut self.posture_attributes
+    }
+
+    pub fn set_ipv4(&mut self, ip: IpAddr) {
+        self.ipv4 = Some(ip);
+    }
+
+    pub fn set_user_id(&mut self, user_id: UserId) {
+        self.user_id = Some(user_id);
+    }
+
+    pub fn set_is_online(&mut self, online: bool) {
+        self.is_online = Some(online);
+    }
+
+    pub fn set_node_key(&mut self, key: NodeKey) {
+        self.node_key = key;
+    }
+
+    pub fn set_hostname(&mut self, hostname: String) {
+        self.hostname = hostname;
+    }
+
+    pub fn set_endpoints(&mut self, endpoints: Vec<SocketAddr>) {
+        self.endpoints = endpoints;
+    }
+
+    pub fn set_last_seen(&mut self, last_seen: DateTime<Utc>) {
+        self.last_seen = Some(last_seen);
+    }
+
+    pub fn set_id(&mut self, id: NodeId) {
+        self.id = id;
+    }
+
+    pub fn set_nl_public_key(&mut self, key: Option<Vec<u8>>) {
+        self.nl_public_key = key;
+    }
+
+    pub fn set_ephemeral(&mut self, ephemeral: bool) {
+        self.ephemeral = ephemeral;
+    }
+
+    pub fn set_auth_key_id(&mut self, id: u64) {
+        self.auth_key_id = Some(id);
+    }
+
     /// returns whether the node registration has expired.
     pub fn is_expired(&self) -> bool {
         match &self.expiry {

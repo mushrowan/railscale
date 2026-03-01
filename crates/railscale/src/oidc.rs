@@ -397,7 +397,7 @@ mod tests {
 
         // now completed
         let result = pending.get_completed().await.expect("should be completed");
-        assert_eq!(result.node.id, node.id);
+        assert_eq!(result.node.id(), node.id());
         assert_eq!(result.user.id, user.id);
     }
 
@@ -425,7 +425,7 @@ mod tests {
             user: user.clone(),
         };
 
-        assert_eq!(completed.node.id, node.id);
+        assert_eq!(completed.node.id(), node.id());
         assert_eq!(completed.user.id, user.id);
     }
 

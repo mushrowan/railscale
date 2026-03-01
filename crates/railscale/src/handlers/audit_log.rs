@@ -43,7 +43,7 @@ pub async fn audit_log(
 
     let log = AuditLog {
         id: 0,
-        node_id: node.id,
+        node_id: node.id(),
         action: req.action.clone(),
         details: req.details,
         client_timestamp,
@@ -53,7 +53,7 @@ pub async fn audit_log(
     state.db.create_audit_log(&log).await.map_internal()?;
 
     debug!(
-        node_id = node.id.as_u64(),
+        node_id = node.id().as_u64(),
         action = %req.action,
         "audit-log: recorded"
     );
@@ -110,7 +110,7 @@ mod tests {
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key).unwrap(),
+            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
             "Action": "ssh-session-start",
             "Details": "user=root",
             "Timestamp": "2026-01-15T12:00:00Z"
@@ -161,7 +161,7 @@ mod tests {
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key).unwrap(),
+            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
             "Action": "test-action"
         });
 

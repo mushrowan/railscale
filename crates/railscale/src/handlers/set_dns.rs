@@ -55,7 +55,7 @@ pub async fn set_dns(
     );
     if req.name != expected_name {
         info!(
-            node_id = node.id.as_u64(),
+            node_id = node.id().as_u64(),
             requested = %req.name,
             expected = %expected_name,
             "set-dns: name mismatch"
@@ -74,7 +74,7 @@ pub async fn set_dns(
     // persist the challenge record for cleanup
     let record = DnsChallengeRecord {
         id: 0,
-        node_id: node.id,
+        node_id: node.id(),
         record_name: req.name,
         record_id,
         created_at: chrono::Utc::now(),
@@ -85,7 +85,7 @@ pub async fn set_dns(
         .await
         .map_internal()?;
 
-    info!(node_id = node.id.as_u64(), "set-dns: TXT record created");
+    info!(node_id = node.id().as_u64(), "set-dns: TXT record created");
 
     Ok(Json(railscale_proto::SetDNSResponse {}))
 }
@@ -149,7 +149,7 @@ mod tests {
 
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key),
+            "NodeKey": node_key_json(&node.node_key()),
             "Name": "_acme-challenge.test-node.example.com",
             "Type": "A",
             "Value": "test-value"
@@ -230,7 +230,7 @@ mod tests {
         // request a name that doesn't match the node's hostname
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key),
+            "NodeKey": node_key_json(&node.node_key()),
             "Name": "_acme-challenge.evil-host.example.com",
             "Type": "TXT",
             "Value": "test-value"
@@ -275,7 +275,7 @@ mod tests {
 
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key),
+            "NodeKey": node_key_json(&node.node_key()),
             "Name": format!("_acme-challenge.{}.example.com", node.display_hostname()),
             "Type": "TXT",
             "Value": "test-value"
@@ -336,7 +336,7 @@ mod tests {
 
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key),
+            "NodeKey": node_key_json(&node.node_key()),
             "Name": format!("_acme-challenge.{}.example.com", node.display_hostname()),
             "Type": "TXT",
             "Value": "acme-challenge-value-xyz"
@@ -357,7 +357,7 @@ mod tests {
 
         // verify the challenge record was persisted
         let records = db
-            .list_dns_challenge_records_for_node(node.id)
+            .list_dns_challenge_records_for_node(node.id())
             .await
             .unwrap();
         assert_eq!(records.len(), 1);

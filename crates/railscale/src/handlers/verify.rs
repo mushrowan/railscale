@@ -99,7 +99,7 @@ pub async fn verify(
     // check node exists and is not expired
     let allow = match node {
         Some(n) => {
-            if let Some(expiry) = n.expiry {
+            if let Some(expiry) = n.expiry() {
                 if chrono::Utc::now() > expiry {
                     debug!(node_key = ?request.node_public, expiry = %expiry, "verify: node expired");
                     false
@@ -122,7 +122,9 @@ mod tests {
     use crate::handlers::test_helpers::default_grants;
     use axum::{body::Body, http::Request};
     use railscale_db::RailscaleDb;
-    use railscale_types::{DiscoKey, MachineKey, Node, NodeId, RegisterMethod, User, UserId};
+    use railscale_types::{
+        DiscoKey, MachineKey, NodeKey, User, UserId, test_utils::TestNodeBuilder,
+    };
     use tower::ServiceExt;
 
     async fn setup_db_with_node(
@@ -137,33 +139,17 @@ mod tests {
         let user = db.create_user(&user).await.unwrap();
 
         let node_key = NodeKey::from_bytes([1u8; 32]);
-        let now = chrono::Utc::now();
-        let node = Node {
-            id: NodeId::new(0),
-            machine_key: MachineKey::from_bytes([2u8; 32]),
-            node_key: node_key.clone(),
-            disco_key: DiscoKey::from_bytes([3u8; 32]),
-            ipv4: Some("100.64.0.1".parse().unwrap()),
-            ipv6: None,
-            endpoints: vec![],
-            hostinfo: None,
-            hostname: "test-node".to_string(),
-            given_name: "test-node".parse().unwrap(),
-            user_id: Some(user.id),
-            register_method: RegisterMethod::AuthKey,
-            tags: vec![],
-            auth_key_id: None,
-            last_seen: Some(now),
-            expiry,
-            approved_routes: vec![],
-            created_at: now,
-            updated_at: now,
-            is_online: None,
-            posture_attributes: std::collections::HashMap::new(),
-            nl_public_key: None,
-            last_seen_country: None,
-            ephemeral: false,
-        };
+        let mut builder = TestNodeBuilder::new(0)
+            .with_machine_key(MachineKey::from_bytes([2u8; 32]))
+            .with_node_key(node_key.clone())
+            .with_disco_key(DiscoKey::from_bytes([3u8; 32]))
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .with_hostname("test-node")
+            .with_user_id(user.id);
+        if let Some(exp) = expiry {
+            builder = builder.with_expiry(exp);
+        }
+        let node = builder.build();
         db.create_node(&node).await.unwrap();
 
         (db, node_key)
