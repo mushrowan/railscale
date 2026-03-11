@@ -1,5 +1,7 @@
 //! selector types for matching sources and destinations in grants.
 
+use std::net::IpAddr;
+
 use ipnet::IpNet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
@@ -22,6 +24,10 @@ pub enum Selector {
     Autogroup(Autogroup),
     /// cidr range (e.g., "192.168.1.0/24").
     Cidr(IpNet),
+    /// host alias (e.g., "host:sql-server-1"), resolved via policy hosts map.
+    Host(String),
+    /// bare ip address (e.g., "192.0.2.2").
+    Ip(IpAddr),
 }
 
 impl Serialize for Selector {
@@ -38,6 +44,8 @@ impl Serialize for Selector {
                 serializer.serialize_str(&format!("autogroup:{}", autogroup_name(*ag)))
             }
             Selector::Cidr(net) => serializer.serialize_str(&net.to_string()),
+            Selector::Host(name) => serializer.serialize_str(&format!("host:{}", name)),
+            Selector::Ip(addr) => serializer.serialize_str(&addr.to_string()),
         }
     }
 }
@@ -102,6 +110,9 @@ impl Selector {
         if let Some(name) = s.strip_prefix("group:") {
             return Ok(Selector::Group(name.to_string()));
         }
+        if let Some(name) = s.strip_prefix("host:") {
+            return Ok(Selector::Host(name.to_string()));
+        }
         if let Some(name) = s.strip_prefix("autogroup:") {
             let autogroup = match name {
                 "admin" => Autogroup::Admin,
@@ -124,6 +135,9 @@ impl Selector {
                 .parse()
                 .map_err(|_| ParseError::InvalidCidr(s.to_string()))?;
             return Ok(Selector::Cidr(net));
+        }
+        if let Ok(addr) = s.parse::<IpAddr>() {
+            return Ok(Selector::Ip(addr));
         }
         Err(ParseError::UnknownSelector(s.to_string()))
     }
@@ -197,6 +211,24 @@ mod tests {
     fn test_parse_unknown_autogroup() {
         let result = Selector::parse("autogroup:unknown");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_host_alias() {
+        let selector = Selector::parse("host:sql-server-1").unwrap();
+        assert_eq!(selector, Selector::Host("sql-server-1".to_string()));
+    }
+
+    #[test]
+    fn test_parse_bare_ipv4() {
+        let selector = Selector::parse("192.0.2.2").unwrap();
+        assert_eq!(selector, Selector::Ip("192.0.2.2".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_parse_bare_ipv6() {
+        let selector = Selector::parse("fd7a:115c:a1e0::1").unwrap();
+        assert_eq!(selector, Selector::Ip("fd7a:115c:a1e0::1".parse().unwrap()));
     }
 }
 
@@ -312,6 +344,29 @@ mod proptests {
                     prop_assert_eq!(net.prefix_len(), parsed_net.prefix_len());
                 }
             }
+        }
+
+        #[test]
+        fn host_roundtrips(name in "[a-z][a-z0-9_-]{0,49}") {
+            let input = format!("host:{}", name);
+            let selector = Selector::parse(&input).unwrap();
+            prop_assert_eq!(&selector, &Selector::Host(name.clone()));
+            // roundtrip through serde
+            let json = serde_json::to_string(&selector).unwrap();
+            let parsed: Selector = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, selector);
+        }
+
+        #[test]
+        fn bare_ipv4_roundtrips(a in 0u8..=255, b in 0u8..=255, c in 0u8..=255, d in 0u8..=255) {
+            let input = format!("{}.{}.{}.{}", a, b, c, d);
+            let selector = Selector::parse(&input).unwrap();
+            let expected: std::net::IpAddr = input.parse().unwrap();
+            prop_assert_eq!(&selector, &Selector::Ip(expected));
+            // roundtrip through serde
+            let json = serde_json::to_string(&selector).unwrap();
+            let parsed: Selector = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(parsed, selector);
         }
 
         #[test]

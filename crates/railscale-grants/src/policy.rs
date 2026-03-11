@@ -1,6 +1,7 @@
 //! policy container holding all grants.
 
 use std::collections::HashMap;
+use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
 
@@ -62,6 +63,13 @@ pub struct AutoApproverPolicy {
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Policy {
+    /// host alias definitions mapping names to ip addresses.
+    ///
+    /// host names are referenced via `host:name` selectors in grants.
+    /// e.g., `"sql-server-1": "100.64.0.5"`
+    #[serde(default)]
+    pub hosts: HashMap<String, IpAddr>,
+
     /// group definitions mapping group names to member emails.
     ///
     /// group names should include the `group:` prefix (e.g., `"group:engineering"`).
@@ -222,6 +230,7 @@ mod proptests {
             groups in prop::collection::hash_map(group_name_strategy(), prop::collection::vec(email_strategy(), 0..3), 0..3)
         ) {
             let policy = Policy {
+                hosts: HashMap::new(),
                 groups,
                 postures: HashMap::new(),
                 default_src_posture: vec![],

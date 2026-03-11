@@ -107,7 +107,8 @@
 
               # note: cargoFmt clears cargoArtifacts/cargoVendorDir by design (no compilation needed)
               fmt = craneLib.cargoFmt { inherit (commonArgs) src; };
-              cargoTest = craneLib.cargoTest (commonArgs // { inherit cargoArtifacts; });
+              nextest = craneLib.cargoNextest (commonArgs // { inherit cargoArtifacts; });
+              doctest = craneLib.cargoDocTest (commonArgs // { inherit cargoArtifacts; });
             }
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
               # NixOS integration tests via attest/firecracker

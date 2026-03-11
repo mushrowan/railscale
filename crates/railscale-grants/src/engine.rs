@@ -662,6 +662,15 @@ impl GrantsEngine {
                 }
                 false
             }
+            Selector::Host(name) => {
+                // resolve host alias from policy hosts map, then match by ip
+                if let Some(addr) = self.policy.hosts.get(name.as_str()) {
+                    node.ips().any(|ip| ip == *addr)
+                } else {
+                    false
+                }
+            }
+            Selector::Ip(addr) => node.ips().any(|ip| ip == *addr),
             // other autogroups require role resolution (future)
             Selector::Autogroup(_) => false,
         }
@@ -945,6 +954,146 @@ mod tests {
 
         // node with ip out of range is not accessible
         assert!(!engine.can_see(&node_in_range, &node_out_of_range, &resolver));
+    }
+
+    #[test]
+    fn test_host_alias_selector() {
+        let mut policy = Policy::empty();
+        policy
+            .hosts
+            .insert("db-server".to_string(), "100.64.0.5".parse().unwrap());
+        policy.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Host("db-server".to_string())],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let mut matching_node = test_node(1, vec![]);
+        matching_node.set_ipv4("100.64.0.5".parse().unwrap());
+
+        let mut other_node = test_node(2, vec![]);
+        other_node.set_ipv4("100.64.0.6".parse().unwrap());
+
+        let src = test_node(3, vec![]);
+
+        // node with matching ip is accessible via host alias
+        assert!(engine.can_see(&src, &matching_node, &resolver));
+
+        // node with different ip is not
+        assert!(!engine.can_see(&src, &other_node, &resolver));
+    }
+
+    #[test]
+    fn test_host_alias_undefined_denies() {
+        let policy = Policy::empty(); // no hosts defined
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // even if we construct a grant manually with a host selector,
+        // it won't match anything because the host isn't in the map
+        let mut engine2 = GrantsEngine::empty();
+        let mut p = Policy::empty();
+        p.grants.push(Grant {
+            src: vec![Selector::Wildcard],
+            dst: vec![Selector::Host("nonexistent".to_string())],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+        engine2.update_policy(p);
+
+        let node = test_node(1, vec![]);
+        let dst = test_node(2, vec![]);
+        assert!(!engine.can_see(&node, &dst, &resolver));
+        assert!(!engine2.can_see(&node, &dst, &resolver));
+    }
+
+    #[test]
+    fn test_bare_ip_selector() {
+        let mut policy = Policy::empty();
+        policy.grants.push(Grant {
+            src: vec![Selector::Ip("100.64.0.5".parse().unwrap())],
+            dst: vec![Selector::Wildcard],
+            ip: vec![NetworkCapability::Wildcard],
+            app: vec![],
+            src_posture: vec![],
+            via: vec![],
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let mut matching_node = test_node(1, vec![]);
+        matching_node.set_ipv4("100.64.0.5".parse().unwrap());
+
+        let mut other_node = test_node(2, vec![]);
+        other_node.set_ipv4("100.64.0.6".parse().unwrap());
+
+        let dst = test_node(3, vec![]);
+
+        // node with matching ip can see dst
+        assert!(engine.can_see(&matching_node, &dst, &resolver));
+
+        // node with different ip cannot
+        assert!(!engine.can_see(&other_node, &dst, &resolver));
+    }
+
+    #[test]
+    fn test_host_alias_policy_json_roundtrip() {
+        let json = r#"{
+            "hosts": {
+                "db-primary": "100.64.0.5",
+                "db-replica": "100.64.0.6"
+            },
+            "grants": [
+                {
+                    "src": ["*"],
+                    "dst": ["host:db-primary"],
+                    "ip": ["5432"]
+                }
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(policy.hosts.len(), 2);
+        assert_eq!(
+            policy.hosts.get("db-primary"),
+            Some(&"100.64.0.5".parse().unwrap())
+        );
+        assert_eq!(
+            policy.grants[0].dst,
+            vec![Selector::Host("db-primary".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_bare_ip_in_policy_json() {
+        let json = r#"{
+            "grants": [
+                {
+                    "src": ["100.64.0.5"],
+                    "dst": ["100.64.0.6"],
+                    "ip": ["*"]
+                }
+            ]
+        }"#;
+
+        let policy = Policy::from_json(json).unwrap();
+        assert_eq!(
+            policy.grants[0].src,
+            vec![Selector::Ip("100.64.0.5".parse().unwrap())]
+        );
+        assert_eq!(
+            policy.grants[0].dst,
+            vec![Selector::Ip("100.64.0.6".parse().unwrap())]
+        );
     }
 
     #[test]

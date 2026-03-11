@@ -13,6 +13,7 @@ craneLib.devShell {
   packages = with pkgs; [
     cargo-edit
     cargo-llvm-cov
+    cargo-nextest
     cargo-update
 
     curl
