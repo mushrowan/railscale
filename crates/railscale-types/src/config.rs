@@ -298,29 +298,18 @@ impl std::fmt::Debug for DatabaseConfig {
     }
 }
 
-/// redact password from a database connection string.
+/// redact password from a database connection string
 ///
 /// handles postgresql urls like `postgres://user:password@host:port/database`.
 /// returns the original string for non-url formats (like sqlite file paths).
 fn redact_connection_string(s: &str) -> String {
-    // check if it looks like a url with credentials
-    if let Some(at_pos) = s.find('@')
-        && let Some(scheme_end) = s.find("://")
-    {
-        let credentials_start = scheme_end + 3;
-        let credentials = &s[credentials_start..at_pos];
-
-        // check if credentials contain a password (colon-separated)
-        if let Some(colon_pos) = credentials.find(':') {
-            let user = &credentials[..colon_pos];
-            let scheme = &s[..scheme_end + 3];
-            let rest = &s[at_pos..];
-            return format!("{}{}:[REDACTED]{}", scheme, user, rest);
-        }
+    let Ok(mut parsed) = url::Url::parse(s) else {
+        return s.to_string();
+    };
+    if parsed.password().is_some() {
+        let _ = parsed.set_password(Some("[REDACTED]"));
     }
-
-    // no password found, return as-is
-    s.to_string()
+    parsed.to_string()
 }
 
 fn default_max_connections() -> u32 {
@@ -1133,6 +1122,27 @@ mod tests {
         let debug_output = format!("{:?}", config);
         // sqlite paths have no password to redact
         assert!(debug_output.contains("/var/lib/railscale/db.sqlite"));
+    }
+
+    #[test]
+    fn test_redact_connection_string_edge_cases() {
+        // user without password
+        assert_eq!(
+            redact_connection_string("postgres://admin@localhost/db"),
+            "postgres://admin@localhost/db"
+        );
+        // no credentials at all
+        assert_eq!(
+            redact_connection_string("postgres://localhost/db"),
+            "postgres://localhost/db"
+        );
+        // url-encoded password is still redacted
+        let redacted = redact_connection_string("postgres://admin:p%40ss%3Aword@localhost/db");
+        assert!(
+            redacted.contains("[REDACTED]") || redacted.contains("%5BREDACTED%5D"),
+            "password should be redacted: {redacted}"
+        );
+        assert!(!redacted.contains("p%40ss"));
     }
 
     #[test]

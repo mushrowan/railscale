@@ -69,6 +69,7 @@ base64 = "0.22"
 
 # Validation
 email_address = { version = "0.2", features = ["serde_support"] }
+url = "2"
 
 # OIDC
 openidconnect = "4"

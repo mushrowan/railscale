@@ -722,21 +722,16 @@ pub struct NodeView {
 }
 
 impl NodeView {
-    /// create a new nodeview from a node.
+    /// create a new nodeview from a node
     pub fn new(node: Node) -> Self {
         Self {
             inner: std::sync::Arc::new(node),
         }
     }
 
-    /// get the node id.
+    /// get the node id
     pub fn id(&self) -> NodeId {
         self.inner.id
-    }
-
-    /// check if this view is valid.
-    pub fn valid(&self) -> bool {
-        true // Always valid if we have an Arc
     }
 }
 
