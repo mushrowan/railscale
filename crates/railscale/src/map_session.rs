@@ -108,7 +108,7 @@ impl MapSession {
                                 online_changes.insert(*id, online);
                             }
                         } else {
-                            patches.push(patch);
+                            patches.push(*patch);
                         }
                     }
                 },
@@ -139,7 +139,7 @@ enum PatchResult {
     /// structural change requiring full peer resend
     NeedsFull,
     /// lightweight patch
-    Patch(PeerChange),
+    Patch(Box<PeerChange>),
 }
 
 /// compute a PeerChange patch between old and new node state
@@ -222,7 +222,7 @@ fn compute_peer_patch(old: &MapResponseNode, new: &MapResponseNode) -> PatchResu
     }
 
     if has_change {
-        PatchResult::Patch(patch)
+        PatchResult::Patch(Box::new(patch))
     } else {
         PatchResult::Identical
     }
