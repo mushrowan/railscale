@@ -484,6 +484,12 @@ pub struct DnsConfig {
     #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
     pub routes: std::collections::HashMap<String, Vec<DnsResolver>>,
 
+    /// enables MagicDNS on the client (automatic resolution of peer hostnames).
+    /// despite the legacy name, this is the flag that tells the client to
+    /// resolve netmap hostnames via the built-in 100.100.100.100 resolver
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub proxied: bool,
+
     /// FQDNs for which the control plane will provision TLS certs via dns-01 ACME.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cert_domains: Vec<String>,
@@ -843,6 +849,7 @@ mod set_dns_tests {
             resolvers: vec![],
             domains: vec![],
             routes: Default::default(),
+            proxied: false,
             cert_domains: vec![
                 "mynode.tail.example.com".to_string(),
                 "other.tail.example.com".to_string(),
@@ -866,6 +873,7 @@ mod set_dns_tests {
             resolvers: vec![],
             domains: vec![],
             routes: Default::default(),
+            proxied: false,
             cert_domains: vec![],
         };
 
@@ -873,6 +881,40 @@ mod set_dns_tests {
         assert!(
             !json.contains("CertDomains"),
             "empty cert_domains should be omitted: {json}"
+        );
+    }
+
+    #[test]
+    fn dns_config_proxied_roundtrips() {
+        let config = DnsConfig {
+            resolvers: vec![],
+            domains: vec!["example.com".to_string()],
+            routes: Default::default(),
+            proxied: true,
+            cert_domains: vec![],
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            json.contains("\"Proxied\":true"),
+            "expected Proxied field: {json}"
+        );
+
+        let parsed: DnsConfig = serde_json::from_str(&json).unwrap();
+        assert!(parsed.proxied);
+    }
+
+    #[test]
+    fn dns_config_proxied_false_omitted() {
+        let config = DnsConfig {
+            proxied: false,
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(
+            !json.contains("Proxied"),
+            "proxied=false should be omitted: {json}"
         );
     }
 

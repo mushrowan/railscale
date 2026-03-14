@@ -222,10 +222,8 @@ mod tests {
         use railscale_proto::DnsConfig;
 
         let dns = DnsConfig {
-            resolvers: vec![],
             domains: vec!["example.com".to_string()],
-            routes: std::collections::HashMap::new(),
-            cert_domains: vec![],
+            ..Default::default()
         };
 
         let cache = MapCache::new(Some(dns.clone()));

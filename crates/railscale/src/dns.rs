@@ -78,6 +78,7 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
         resolvers,
         domains,
         routes,
+        proxied: true,
         cert_domains: vec![],
     })
 }
@@ -108,6 +109,7 @@ fn generate_minimal_dns_config(config: &Config) -> Option<DnsConfig> {
         resolvers: vec![], // empty = don't override client's resolvers
         domains: vec![config.base_domain.clone()],
         routes,
+        proxied: true,
         cert_domains: vec![],
     })
 }
@@ -252,7 +254,7 @@ mod tests {
             resolvers: vec![DnsResolver::new("8.8.8.8")],
             domains: vec!["example.com".into()],
             routes: HashMap::new(),
-            cert_domains: vec![],
+            ..Default::default()
         }
     }
 
@@ -329,5 +331,47 @@ mod tests {
         );
         let config = config.unwrap();
         assert_eq!(config.cert_domains, vec!["myhost.example.com"]);
+    }
+
+    #[test]
+    fn generate_dns_config_sets_proxied_when_magic_dns_enabled() {
+        let config = Config {
+            base_domain: "example.com".to_string(),
+            dns: railscale_types::DnsConfig {
+                magic_dns: true,
+                override_local_dns: true,
+                nameservers: railscale_types::Nameservers {
+                    global: vec!["1.1.1.1".to_string()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let dns = generate_dns_config(&config).unwrap();
+        assert!(
+            dns.proxied,
+            "proxied should be true when magic_dns is enabled"
+        );
+    }
+
+    #[test]
+    fn generate_minimal_dns_config_sets_proxied() {
+        let config = Config {
+            base_domain: "example.com".to_string(),
+            dns: railscale_types::DnsConfig {
+                magic_dns: true,
+                override_local_dns: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let dns = generate_dns_config(&config).unwrap();
+        assert!(
+            dns.proxied,
+            "proxied should be true even in minimal dns config"
+        );
     }
 }
