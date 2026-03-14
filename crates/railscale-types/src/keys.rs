@@ -98,7 +98,7 @@ impl<P: KeyPrefix> Serialize for TailscaleKey<P> {
     where
         S: Serializer,
     {
-        let hex = hex::encode(&self.bytes);
+        let hex = hex::encode(self.bytes);
         let s = format!("{}:{}", P::PREFIX, hex);
         serializer.serialize_str(&s)
     }
@@ -184,7 +184,7 @@ mod proptests {
 
         #[test]
         fn machine_key_serde_roundtrips(bytes in valid_key_bytes()) {
-            let key = MachineKey::from_bytes(bytes.clone());
+            let key = MachineKey::from_bytes(bytes);
             let json = serde_json::to_string(&key).unwrap();
             prop_assert!(json.contains("mkey:"));
             let parsed: MachineKey = serde_json::from_str(&json).unwrap();
@@ -202,7 +202,7 @@ mod proptests {
 
         #[test]
         fn node_key_serde_roundtrips(bytes in valid_key_bytes()) {
-            let key = NodeKey::from_bytes(bytes.clone());
+            let key = NodeKey::from_bytes(bytes);
             let json = serde_json::to_string(&key).unwrap();
             prop_assert!(json.contains("nodekey:"));
             let parsed: NodeKey = serde_json::from_str(&json).unwrap();
@@ -212,7 +212,7 @@ mod proptests {
 
         #[test]
         fn node_key_is_zero_correct(bytes in valid_key_bytes()) {
-            let key = NodeKey::from_bytes(bytes.clone());
+            let key = NodeKey::from_bytes(bytes);
             let expected_zero = bytes.iter().all(|&b| b == 0);
             prop_assert_eq!(key.is_zero(), expected_zero);
         }
@@ -227,7 +227,7 @@ mod proptests {
 
         #[test]
         fn disco_key_serde_roundtrips(bytes in valid_key_bytes()) {
-            let key = DiscoKey::from_bytes(bytes.clone());
+            let key = DiscoKey::from_bytes(bytes);
             let json = serde_json::to_string(&key).unwrap();
             prop_assert!(json.contains("discokey:"));
             let parsed: DiscoKey = serde_json::from_str(&json).unwrap();
@@ -270,7 +270,7 @@ mod proptests {
         #[test]
         fn node_key_rejects_wrong_prefix(bytes in valid_key_bytes(), prefix in "[a-z]{3,8}") {
             prop_assume!(prefix != "nodekey");
-            let hex = hex::encode(&bytes);
+            let hex = hex::encode(bytes);
             let json = format!("\"{}:{}\"", prefix, hex);
             let result: Result<NodeKey, _> = serde_json::from_str(&json);
             prop_assert!(result.is_err());
@@ -279,7 +279,7 @@ mod proptests {
         #[test]
         fn machine_key_rejects_wrong_prefix(bytes in valid_key_bytes(), prefix in "[a-z]{3,8}") {
             prop_assume!(prefix != "mkey");
-            let hex = hex::encode(&bytes);
+            let hex = hex::encode(bytes);
             let json = format!("\"{}:{}\"", prefix, hex);
             let result: Result<MachineKey, _> = serde_json::from_str(&json);
             prop_assert!(result.is_err());
@@ -288,7 +288,7 @@ mod proptests {
         #[test]
         fn disco_key_rejects_wrong_prefix(bytes in valid_key_bytes(), prefix in "[a-z]{3,8}") {
             prop_assume!(prefix != "discokey");
-            let hex = hex::encode(&bytes);
+            let hex = hex::encode(bytes);
             let json = format!("\"{}:{}\"", prefix, hex);
             let result: Result<DiscoKey, _> = serde_json::from_str(&json);
             prop_assert!(result.is_err());

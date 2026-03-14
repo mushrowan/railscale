@@ -149,7 +149,7 @@ mod tests {
 
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key()),
+            "NodeKey": node_key_json(node.node_key()),
             "Name": "_acme-challenge.test-node.example.com",
             "Type": "A",
             "Value": "test-value"
@@ -230,7 +230,7 @@ mod tests {
         // request a name that doesn't match the node's hostname
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key()),
+            "NodeKey": node_key_json(node.node_key()),
             "Name": "_acme-challenge.evil-host.example.com",
             "Type": "TXT",
             "Value": "test-value"
@@ -275,7 +275,7 @@ mod tests {
 
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key()),
+            "NodeKey": node_key_json(node.node_key()),
             "Name": format!("_acme-challenge.{}.example.com", node.display_hostname()),
             "Type": "TXT",
             "Value": "test-value"
@@ -336,7 +336,7 @@ mod tests {
 
         let req = serde_json::json!({
             "Version": 68,
-            "NodeKey": node_key_json(&node.node_key()),
+            "NodeKey": node_key_json(node.node_key()),
             "Name": format!("_acme-challenge.{}.example.com", node.display_hostname()),
             "Type": "TXT",
             "Value": "acme-challenge-value-xyz"

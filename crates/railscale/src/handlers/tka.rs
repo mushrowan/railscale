@@ -773,7 +773,7 @@ mod tests {
 
         // step 2: create node-key signature
         let node_sig =
-            NodeKeySignature::sign_direct(&node_key.as_bytes().to_vec(), &g.key_id, &g.nl_private)
+            NodeKeySignature::sign_direct(node_key.as_bytes().as_ref(), &g.key_id, &g.nl_private)
                 .unwrap();
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 
@@ -850,7 +850,7 @@ mod tests {
         );
 
         let node_sig =
-            NodeKeySignature::sign_direct(&node_key.as_bytes().to_vec(), &g.key_id, &g.nl_private)
+            NodeKeySignature::sign_direct(node_key.as_bytes().as_ref(), &g.key_id, &g.nl_private)
                 .unwrap();
         let node_sig_bytes = node_sig.to_cbor().unwrap();
 

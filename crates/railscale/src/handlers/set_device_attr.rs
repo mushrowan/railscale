@@ -116,7 +116,7 @@ mod tests {
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
+            "NodeKey": serde_json::to_value(node.node_key()).unwrap(),
             "Update": {
                 "node:os": "linux",
                 "custom:encrypted": true
@@ -160,7 +160,7 @@ mod tests {
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
+            "NodeKey": serde_json::to_value(node.node_key()).unwrap(),
             "Update": {
                 "to-delete": null
             }

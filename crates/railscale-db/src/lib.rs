@@ -125,6 +125,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// this trait abstracts over different database backends (sqlite, postgresql).
 /// all operations use soft-delete semantics - records are marked with a `deleted_at`
 /// timestamp rather than being physically removed.
+#[allow(async_fn_in_trait)]
 pub trait Database: Send + Sync {
     // ─── Health Check ─────────────────────────────────────────────────────────
 
@@ -1353,7 +1354,7 @@ mod tests {
                 .with_node_key(NodeKey::from_bytes([i + 10; 32]))
                 .with_disco_key(DiscoKey::from_bytes([i + 20; 32]))
                 .with_ipv4(format!("100.64.0.{}", i + 1).parse().unwrap())
-                .with_hostname(&format!("node-{}", i))
+                .with_hostname(format!("node-{}", i))
                 .with_user_id(user.id)
                 .build();
             nodes.push(db.create_node(&node).await.unwrap());

@@ -464,7 +464,7 @@ async fn set_posture_attributes(
 
     state
         .db
-        .set_node_posture_attributes(node_id, &node.posture_attributes())
+        .set_node_posture_attributes(node_id, node.posture_attributes())
         .await
         .map_err(ApiError::internal)?;
 

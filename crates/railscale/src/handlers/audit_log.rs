@@ -110,7 +110,7 @@ mod tests {
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
+            "NodeKey": serde_json::to_value(node.node_key()).unwrap(),
             "Action": "ssh-session-start",
             "Details": "user=root",
             "Timestamp": "2026-01-15T12:00:00Z"
@@ -161,7 +161,7 @@ mod tests {
 
         let req_body = serde_json::json!({
             "Version": 106,
-            "NodeKey": serde_json::to_value(&node.node_key()).unwrap(),
+            "NodeKey": serde_json::to_value(node.node_key()).unwrap(),
             "Action": "test-action"
         });
 

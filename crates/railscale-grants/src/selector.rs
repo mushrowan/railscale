@@ -119,7 +119,7 @@ impl Selector {
             return Ok(Selector::Wildcard);
         }
         if s.starts_with("tag:") {
-            let tag: Tag = s.parse().map_err(|e| ParseError::InvalidTag(e))?;
+            let tag: Tag = s.parse().map_err(ParseError::InvalidTag)?;
             return Ok(Selector::Tag(tag));
         }
         if let Some(name) = s.strip_prefix("group:") {
