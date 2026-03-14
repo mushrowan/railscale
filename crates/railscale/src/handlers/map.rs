@@ -53,9 +53,9 @@ enum Compression {
     Zstd,
 }
 
-impl From<Option<&String>> for Compression {
-    fn from(s: Option<&String>) -> Self {
-        match s.map(String::as_str) {
+impl From<Option<&str>> for Compression {
+    fn from(s: Option<&str>) -> Self {
+        match s {
             Some("zstd") => Compression::Zstd,
             _ => Compression::None,
         }
@@ -142,7 +142,7 @@ pub async fn map(
         state.notifier.notify_state_changed();
     }
 
-    let compression = Compression::from(req.compress.as_ref());
+    let compression = Compression::from(req.compress.as_deref());
 
     if req.stream {
         let node = node.into_inner();
@@ -243,6 +243,17 @@ impl<S> Drop for PresenceTrackingStream<S> {
     }
 }
 
+/// state carried across streaming map response iterations
+struct StreamState {
+    state: AppState,
+    node_key: NodeKey,
+    receiver: broadcast::Receiver<crate::notifier::StateChanged>,
+    is_first: bool,
+    keepalive_interval: Option<Duration>,
+    compression: Compression,
+    session: crate::map_session::MapSession,
+}
+
 /// build a streaming response that pushes updates when state changes.
 ///
 /// this function marks the node as online when the stream starts,
@@ -282,76 +293,46 @@ async fn streaming_response(
 
     // create a stream that yields length-prefixed responses
     let inner_stream = stream::unfold(
-        (
-            state.clone(),
+        StreamState {
+            state: state.clone(),
             node_key,
             receiver,
-            true,
+            is_first: true,
             keepalive_interval,
             compression,
             session,
-        ),
-        |(
-            state,
-            node_key,
-            mut receiver,
-            is_first,
-            keepalive_interval,
-            compression,
-            mut session,
-        )| async move {
+        },
+        |mut s| async move {
             // determine what message to send
-            let message_type = if is_first {
+            let message_type = if s.is_first {
                 StreamMessage::FullUpdate
             } else {
-                wait_for_next_message(&mut receiver, keepalive_interval).await
+                wait_for_next_message(&mut s.receiver, s.keepalive_interval).await
             };
 
             match message_type {
                 StreamMessage::FullUpdate => {
-                    let response = match build_map_response(&state, &node_key, false).await {
+                    let response = match build_map_response(&s.state, &s.node_key, false).await {
                         Ok(r) => r,
                         Err(_) => return None,
                     };
 
-                    let response = if is_first {
-                        // first message: send full peer list, record session state
-                        session.apply_full(response)
+                    let response = if s.is_first {
+                        s.session.apply_full(response)
                     } else {
-                        // subsequent: extract peers for delta computation
                         let peers = response.peers.clone();
-                        session.compute_delta(peers, response)
+                        s.session.compute_delta(peers, response)
                     };
 
-                    let bytes = encode_length_prefixed(&response, &compression)?;
-                    Some((
-                        bytes,
-                        (
-                            state,
-                            node_key,
-                            receiver,
-                            false,
-                            keepalive_interval,
-                            compression,
-                            session,
-                        ),
-                    ))
+                    let bytes = encode_length_prefixed(&response, &s.compression)?;
+                    s.is_first = false;
+                    Some((bytes, s))
                 }
                 StreamMessage::KeepAlive => {
                     let response = MapResponse::keepalive();
-                    let bytes = encode_length_prefixed(&response, &compression)?;
-                    Some((
-                        bytes,
-                        (
-                            state,
-                            node_key,
-                            receiver,
-                            false,
-                            keepalive_interval,
-                            compression,
-                            session,
-                        ),
-                    ))
+                    let bytes = encode_length_prefixed(&response, &s.compression)?;
+                    s.is_first = false;
+                    Some((bytes, s))
                 }
                 StreamMessage::End => None,
             }
