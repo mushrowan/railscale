@@ -20,6 +20,7 @@ use crate::user::UserId;
 pub struct NodeId(u64);
 
 impl NodeId {
+    /// create a new node identifier
     pub const fn new(id: u64) -> Self {
         Self(id)
     }
@@ -245,178 +246,222 @@ impl NodeBuilder {
 }
 
 impl Node {
+    /// create a new node builder
     pub fn builder(machine_key: MachineKey, node_key: NodeKey, hostname: String) -> NodeBuilder {
         NodeBuilder::new(machine_key, node_key, hostname)
     }
 
+    /// returns the node's unique identifier
     pub fn id(&self) -> NodeId {
         self.id
     }
 
+    /// returns the node's machine key
     pub fn machine_key(&self) -> &MachineKey {
         &self.machine_key
     }
 
+    /// returns the node's current node key
     pub fn node_key(&self) -> &NodeKey {
         &self.node_key
     }
 
+    /// returns the node's disco key
     pub fn disco_key(&self) -> &DiscoKey {
         &self.disco_key
     }
 
+    /// returns the node's advertised endpoints
     pub fn endpoints(&self) -> &[SocketAddr] {
         &self.endpoints
     }
 
+    /// returns the node's host info if available
     pub fn hostinfo(&self) -> Option<&HostInfo> {
         self.hostinfo.as_ref()
     }
 
+    /// returns the node's allocated ipv4 address
     pub fn ipv4(&self) -> Option<IpAddr> {
         self.ipv4
     }
 
+    /// returns the node's allocated ipv6 address
     pub fn ipv6(&self) -> Option<IpAddr> {
         self.ipv6
     }
 
+    /// returns the node's hostname
     pub fn hostname(&self) -> &str {
         &self.hostname
     }
 
+    /// returns the node's display name
     pub fn given_name(&self) -> &NodeName {
         &self.given_name
     }
 
+    /// returns the owning user id if not a tagged device
     pub fn user_id(&self) -> Option<UserId> {
         self.user_id
     }
 
+    /// returns how the node was registered
     pub fn register_method(&self) -> RegisterMethod {
         self.register_method
     }
 
+    /// returns the node's tags
     pub fn tags(&self) -> &[Tag] {
         &self.tags
     }
 
+    /// returns the pre-auth key id used to register, if any
     pub fn auth_key_id(&self) -> Option<u64> {
         self.auth_key_id
     }
 
+    /// returns whether the node is ephemeral
     pub fn ephemeral(&self) -> bool {
         self.ephemeral
     }
 
+    /// returns the node's key expiry time
     pub fn expiry(&self) -> Option<DateTime<Utc>> {
         self.expiry
     }
 
+    /// returns when the node was last seen
     pub fn last_seen(&self) -> Option<DateTime<Utc>> {
         self.last_seen
     }
 
+    /// returns the country code where the node was last seen
     pub fn last_seen_country(&self) -> Option<&str> {
         self.last_seen_country.as_deref()
     }
 
+    /// returns the node's approved subnet routes
     pub fn approved_routes(&self) -> &[IpNet] {
         &self.approved_routes
     }
 
+    /// returns when the node was created
     pub fn created_at(&self) -> DateTime<Utc> {
         self.created_at
     }
 
+    /// returns when the node was last updated
     pub fn updated_at(&self) -> DateTime<Utc> {
         self.updated_at
     }
 
+    /// returns the node's online status
     pub fn is_online(&self) -> Option<bool> {
         self.is_online
     }
 
+    /// returns the node's posture attributes
     pub fn posture_attributes(&self) -> &HashMap<String, serde_json::Value> {
         &self.posture_attributes
     }
 
+    /// returns the node's tka public key if enrolled
     pub fn nl_public_key(&self) -> Option<&[u8]> {
         self.nl_public_key.as_deref()
     }
 
+    /// set the node's disco key
     pub fn set_disco_key(&mut self, key: DiscoKey) {
         self.disco_key = key;
     }
 
+    /// set the node's host info
     pub fn set_hostinfo(&mut self, hostinfo: HostInfo) {
         self.hostinfo = Some(hostinfo);
     }
 
+    /// set the country where the node was last seen
     pub fn set_last_seen_country(&mut self, country: String) {
         self.last_seen_country = Some(country);
     }
 
+    /// set the node's approved subnet routes
     pub fn set_approved_routes(&mut self, routes: Vec<IpNet>) {
         self.approved_routes = routes;
     }
 
+    /// set the node's key expiry time
     pub fn set_expiry(&mut self, expiry: DateTime<Utc>) {
         self.expiry = Some(expiry);
     }
 
+    /// set the node's display name
     pub fn set_given_name(&mut self, name: NodeName) {
         self.given_name = name;
     }
 
+    /// set the node's tags
     pub fn set_tags(&mut self, tags: Vec<Tag>) {
         self.tags = tags;
     }
 
+    /// returns a mutable reference to the posture attributes
     pub fn posture_attributes_mut(&mut self) -> &mut HashMap<String, serde_json::Value> {
         &mut self.posture_attributes
     }
 
+    /// set the node's ipv4 address
     pub fn set_ipv4(&mut self, ip: IpAddr) {
         self.ipv4 = Some(ip);
     }
 
+    /// set the owning user id
     pub fn set_user_id(&mut self, user_id: UserId) {
         self.user_id = Some(user_id);
     }
 
+    /// set the node's online status
     pub fn set_is_online(&mut self, online: bool) {
         self.is_online = Some(online);
     }
 
+    /// set the node's current node key
     pub fn set_node_key(&mut self, key: NodeKey) {
         self.node_key = key;
     }
 
+    /// set the node's hostname
     pub fn set_hostname(&mut self, hostname: String) {
         self.hostname = hostname;
     }
 
+    /// set the node's advertised endpoints
     pub fn set_endpoints(&mut self, endpoints: Vec<SocketAddr>) {
         self.endpoints = endpoints;
     }
 
+    /// set when the node was last seen
     pub fn set_last_seen(&mut self, last_seen: DateTime<Utc>) {
         self.last_seen = Some(last_seen);
     }
 
+    /// set the node's unique identifier
     pub fn set_id(&mut self, id: NodeId) {
         self.id = id;
     }
 
+    /// set the node's tka public key
     pub fn set_nl_public_key(&mut self, key: Option<Vec<u8>>) {
         self.nl_public_key = key;
     }
 
+    /// set whether the node is ephemeral
     pub fn set_ephemeral(&mut self, ephemeral: bool) {
         self.ephemeral = ephemeral;
     }
 
+    /// set the pre-auth key id used to register
     pub fn set_auth_key_id(&mut self, id: u64) {
         self.auth_key_id = Some(id);
     }
