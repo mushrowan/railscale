@@ -44,6 +44,7 @@ impl UserResolver for EmptyResolver {
 /// wraps a policy in arc for cheap cloning and concurrent access.
 /// all evaluation methods take &self, making it safe for use in
 /// async handlers.
+#[derive(Clone)]
 pub struct GrantsEngine {
     policy: Arc<Policy>,
 }
@@ -800,14 +801,6 @@ impl GrantsEngine {
             None
         } else {
             Some(SshPolicy { rules })
-        }
-    }
-}
-
-impl Clone for GrantsEngine {
-    fn clone(&self) -> Self {
-        Self {
-            policy: Arc::clone(&self.policy),
         }
     }
 }

@@ -98,12 +98,9 @@ impl PreAuthKey {
         computed_hash.ct_eq(&stored_hash).into()
     }
 
-    /// check if this key is expired.
+    /// check if this key is expired
     pub fn is_expired(&self) -> bool {
-        match &self.expiration {
-            None => false,
-            Some(exp) => Utc::now() > *exp,
-        }
+        self.expiration.is_some_and(|exp| Utc::now() > exp)
     }
 
     /// check if this key is valid for use.

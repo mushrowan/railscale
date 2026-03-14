@@ -97,6 +97,21 @@ pub enum Autogroup {
     NonRoot,
 }
 
+impl std::fmt::Display for Autogroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Autogroup::Admin => "admin",
+            Autogroup::Member => "member",
+            Autogroup::Owner => "owner",
+            Autogroup::Tagged => "tagged",
+            Autogroup::Shared => "shared",
+            Autogroup::Internet => "internet",
+            Autogroup::SelfDevices => "self",
+            Autogroup::NonRoot => "nonroot",
+        })
+    }
+}
+
 impl Selector {
     /// parse a selector from a string.
     pub fn parse(s: &str) -> Result<Self, ParseError> {

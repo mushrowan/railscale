@@ -149,6 +149,22 @@ impl Protocol {
     }
 }
 
+impl std::fmt::Display for Protocol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Protocol::Tcp => "tcp",
+            Protocol::Udp => "udp",
+            Protocol::Icmp => "icmp",
+            Protocol::Gre => "gre",
+            Protocol::Esp => "esp",
+            Protocol::Ah => "ah",
+            Protocol::Sctp => "sctp",
+            Protocol::Igmp => "igmp",
+            Protocol::Ipv4 => "ipv4",
+        })
+    }
+}
+
 impl NetworkCapability {
     /// parse from string like "*", "443", "80-443", "tcp:443", "tcp:80-443".
     pub fn parse(s: &str) -> Result<Self, ParseError> {

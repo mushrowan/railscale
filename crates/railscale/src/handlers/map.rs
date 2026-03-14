@@ -731,12 +731,12 @@ fn node_to_map_response_node(
 fn build_health_warnings(node: &Node) -> Option<Vec<String>> {
     let mut warnings = Vec::new();
 
-    if let Some(ref expiry) = node.expiry() {
+    if let Some(expiry) = node.expiry() {
         let now = chrono::Utc::now();
-        if *expiry <= now {
+        if expiry <= now {
             warnings.push("key has expired".to_string());
         } else {
-            let remaining = *expiry - now;
+            let remaining = expiry - now;
             if remaining <= chrono::Duration::days(7) {
                 let days = remaining.num_days();
                 let hours = remaining.num_hours() % 24;

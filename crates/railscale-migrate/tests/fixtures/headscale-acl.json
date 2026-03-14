@@ -1,0 +1,58 @@
+{
+  "groups": {
+    "group:admin": ["ro@example.com", "alicja@example.com"],
+    "group:devs": ["ro@example.com"],
+    "group:ml-team": ["ro@example.com", "esme@example.com", "alicja@example.com", "valerie@example.com", "maria@example.com"]
+  },
+
+  "tagOwners": {
+    "tag:server": ["group:admin"],
+    "tag:app": ["group:admin"],
+    "tag:dev-vpn": ["group:admin"],
+    "tag:prod-vpn": ["group:admin"],
+    "tag:customer": ["group:admin"],
+    "tag:ml": ["group:admin"],
+    "tag:ml-api": ["group:admin"],
+    "tag:infra": ["group:admin"],
+    "tag:internal": ["group:admin"],
+    "tag:vpn": ["group:admin"]
+  },
+
+  "hosts": {
+    "build-server": "100.64.0.19",
+    "ci-runner": "100.64.0.79",
+    "file-server": "100.64.0.28",
+    "gpu-box": "100.64.0.9",
+    "ml-worker": "100.64.0.1",
+    "staging-api": "100.64.0.7",
+    "prod-api": "100.64.0.6",
+    "ml-api": "100.64.0.10"
+  },
+
+  "acls": [
+    {"action": "accept", "src": ["tag:ml-api"], "dst": ["ml-worker:11434"]},
+    {"action": "accept", "src": ["prod-api", "staging-api"], "dst": ["ml-api:8000"]},
+    {"action": "accept", "src": ["build-server"], "dst": ["file-server:*"]},
+    {"action": "accept", "src": ["ci-runner"], "dst": ["file-server:*"]},
+
+    {"action": "accept", "src": ["group:ml-team"], "dst": ["tag:ml:*"]},
+    {"action": "accept", "src": ["autogroup:member"], "dst": ["autogroup:internet:*"]},
+    {"action": "accept", "src": ["group:admin"], "dst": ["*:*"]},
+    {"action": "accept", "proto": "icmp", "src": ["*"], "dst": ["*:*"]}
+  ],
+
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["group:admin"],
+      "dst": ["autogroup:tagged", "autogroup:member"],
+      "users": ["root", "autogroup:nonroot"]
+    },
+    {
+      "action": "accept",
+      "src": ["group:ml-team"],
+      "dst": ["tag:ml"],
+      "users": ["root", "autogroup:nonroot"]
+    }
+  ]
+}

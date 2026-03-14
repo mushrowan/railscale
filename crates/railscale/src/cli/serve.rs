@@ -368,7 +368,7 @@ impl ServeCommand {
         }
 
         // ensure parent directory exists for sqlite databases
-        if config.database.db_type == "sqlite" {
+        if config.database.db_type == railscale_types::DatabaseType::Sqlite {
             let db_path = std::path::Path::new(&config.database.connection_string);
             if let Some(parent) = db_path.parent()
                 && !parent.exists()
@@ -778,7 +778,7 @@ fn parse_database_url(db_url: &str) -> Result<railscale_types::DatabaseConfig> {
 
     match parsed.scheme() {
         "postgres" | "postgresql" => Ok(railscale_types::DatabaseConfig {
-            db_type: "postgres".to_string(),
+            db_type: railscale_types::DatabaseType::Postgres,
             connection_string: db_url.to_string(),
             ..Default::default()
         }),
@@ -786,7 +786,7 @@ fn parse_database_url(db_url: &str) -> Result<railscale_types::DatabaseConfig> {
             // extract path from sqlite:// url
             let path = parsed.path();
             Ok(railscale_types::DatabaseConfig {
-                db_type: "sqlite".to_string(),
+                db_type: railscale_types::DatabaseType::Sqlite,
                 connection_string: path.to_string(),
                 ..Default::default()
             })
@@ -808,12 +808,12 @@ mod tests {
     fn test_parse_database_url() {
         // sqlite
         let db = parse_database_url("sqlite:///var/lib/railscale/db.sqlite").unwrap();
-        assert_eq!(db.db_type, "sqlite");
+        assert_eq!(db.db_type, railscale_types::DatabaseType::Sqlite);
         assert_eq!(db.connection_string, "/var/lib/railscale/db.sqlite");
 
         // postgres
         let db = parse_database_url("postgres://user:pass@host/db").unwrap();
-        assert_eq!(db.db_type, "postgres");
+        assert_eq!(db.db_type, railscale_types::DatabaseType::Postgres);
         assert_eq!(db.connection_string, "postgres://user:pass@host/db");
 
         // invalid

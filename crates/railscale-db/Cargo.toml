@@ -9,6 +9,7 @@ license.workspace = true
 railscale-types = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }

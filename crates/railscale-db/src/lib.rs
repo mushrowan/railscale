@@ -26,7 +26,9 @@ use sea_orm::{
 };
 use sea_orm_migration::MigratorTrait;
 
-use railscale_types::{ApiKey, Config, Node, NodeId, PreAuthKey, PreAuthKeyToken, User, UserId};
+use railscale_types::{
+    ApiKey, Config, DatabaseType, Node, NodeId, PreAuthKey, PreAuthKeyToken, User, UserId,
+};
 
 /// tailnet key authority state.
 #[derive(Clone, Debug, Default)]
@@ -341,7 +343,8 @@ impl RailscaleDb {
         let db = Self { conn };
 
         // enable WAL mode for sqlite if configured
-        if config.database.db_type == "sqlite" && config.database.sqlite.write_ahead_log {
+        if config.database.db_type == DatabaseType::Sqlite && config.database.sqlite.write_ahead_log
+        {
             db.enable_wal_mode().await?;
         }
 
@@ -385,8 +388,8 @@ impl RailscaleDb {
 
     /// build a sea-orm compatible connection url from config.
     fn build_connection_url(config: &railscale_types::DatabaseConfig) -> Result<String> {
-        match config.db_type.as_str() {
-            "sqlite" => {
+        match config.db_type {
+            DatabaseType::Sqlite => {
                 // for sqlite, build the connection url with create mode
                 let path = if config.connection_string.starts_with("sqlite:") {
                     config.connection_string.clone()
@@ -400,14 +403,10 @@ impl RailscaleDb {
                     Ok(format!("{}?mode=rwc", path))
                 }
             }
-            "postgres" | "postgresql" => {
+            DatabaseType::Postgres => {
                 // postgresql urls should already be properly formatted
                 Ok(config.connection_string.clone())
             }
-            other => Err(Error::InvalidData(format!(
-                "unsupported database type: {}",
-                other
-            ))),
         }
     }
 
@@ -427,12 +426,6 @@ impl RailscaleDb {
         migration::Migrator::up(&self.conn, None)
             .await
             .map_err(|e| Error::Migration(e.to_string()))?;
-        Ok(())
-    }
-
-    /// close the database connection.
-    pub async fn close(&self) -> Result<()> {
-        tracing::debug!("database connection marked for close");
         Ok(())
     }
 }
@@ -1395,7 +1388,7 @@ mod tests {
         let db_path = temp_dir.path().join("test_wal.db");
 
         let mut config = Config::default();
-        config.database.db_type = "sqlite".to_string();
+        config.database.db_type = DatabaseType::Sqlite;
         config.database.connection_string = db_path.to_string_lossy().to_string();
         config.database.sqlite.write_ahead_log = true;
 

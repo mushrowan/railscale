@@ -421,12 +421,9 @@ impl Node {
         self.auth_key_id = Some(id);
     }
 
-    /// returns whether the node registration has expired.
+    /// returns whether the node registration has expired
     pub fn is_expired(&self) -> bool {
-        match &self.expiry {
-            None => false,
-            Some(expiry) => Utc::now() > *expiry,
-        }
+        self.expiry.is_some_and(|exp| Utc::now() > exp)
     }
 
     /// returns whether this is a tagged node.
@@ -680,17 +677,40 @@ pub struct NetInfo {
     pub derp_latency: std::collections::HashMap<String, f64>,
 }
 
-/// how a node was registered.
+/// how a node was registered
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum RegisterMethod {
-    /// registered via pre-authentication key.
+    /// registered via pre-authentication key
     #[default]
     AuthKey,
-    /// registered via oidc.
+    /// registered via oidc
     Oidc,
-    /// registered via cli.
+    /// registered via cli
     Cli,
+}
+
+impl std::fmt::Display for RegisterMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RegisterMethod::AuthKey => write!(f, "authkey"),
+            RegisterMethod::Oidc => write!(f, "oidc"),
+            RegisterMethod::Cli => write!(f, "cli"),
+        }
+    }
+}
+
+impl std::str::FromStr for RegisterMethod {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "authkey" => Ok(RegisterMethod::AuthKey),
+            "oidc" => Ok(RegisterMethod::Oidc),
+            "cli" => Ok(RegisterMethod::Cli),
+            _ => Err(format!("unknown register method: {s}")),
+        }
+    }
 }
 
 /// an immutable view of a node for safe concurrent access.

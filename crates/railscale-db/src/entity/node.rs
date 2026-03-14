@@ -120,62 +120,61 @@ impl Related<super::preauth_key::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+/// parse json with a warning on failure, returning the default value
+fn parse_json_or_default<T: for<'de> serde::Deserialize<'de> + Default>(
+    json: &str,
+    node_id: i64,
+    field: &str,
+) -> T {
+    match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(node_id, error = %e, "failed to parse node {field} JSON, using default");
+            T::default()
+        }
+    }
+}
+
+/// parse optional json with a warning on failure
+fn parse_optional_json<T: for<'de> serde::Deserialize<'de>>(
+    json: Option<&str>,
+    node_id: i64,
+    field: &str,
+) -> Option<T> {
+    json.and_then(|s| match serde_json::from_str(s) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            warn!(node_id, error = %e, "failed to parse node {field} JSON");
+            None
+        }
+    })
+}
+
 impl From<Model> for Node {
     fn from(model: Model) -> Self {
-        let endpoints: Vec<SocketAddr> = match serde_json::from_str(&model.endpoints) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(node_id = model.id, error = %e, "failed to parse node endpoints JSON, using empty list");
-                Vec::new()
-            }
-        };
+        let endpoints: Vec<SocketAddr> =
+            parse_json_or_default(&model.endpoints, model.id, "endpoints");
         let hostinfo: Option<HostInfo> =
-            model
-                .hostinfo
-                .as_ref()
-                .and_then(|s| match serde_json::from_str(s) {
-                    Ok(v) => Some(v),
-                    Err(e) => {
-                        warn!(node_id = model.id, error = %e, "failed to parse node hostinfo JSON");
-                        None
-                    }
-                });
+            parse_optional_json(model.hostinfo.as_deref(), model.id, "hostinfo");
         // parse tags - invalid tags from legacy data are filtered out
-        let tags: Vec<Tag> = match serde_json::from_str::<Vec<String>>(&model.tags) {
-            Ok(v) => v.into_iter().filter_map(|s| s.parse().ok()).collect(),
-            Err(e) => {
-                warn!(node_id = model.id, error = %e, "failed to parse node tags JSON, using empty list");
-                Vec::new()
-            }
-        };
-        let approved_routes: Vec<IpNet> = match serde_json::from_str(&model.approved_routes) {
-            Ok(v) => v,
-            Err(e) => {
-                warn!(node_id = model.id, error = %e, "failed to parse node approved_routes JSON, using empty list");
-                Vec::new()
-            }
-        };
+        let tags: Vec<Tag> = parse_json_or_default::<Vec<String>>(&model.tags, model.id, "tags")
+            .into_iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let approved_routes: Vec<IpNet> =
+            parse_json_or_default(&model.approved_routes, model.id, "approved_routes");
 
         let ipv4: Option<IpAddr> = model.ipv4.as_ref().and_then(|s| s.parse().ok());
         let ipv6: Option<IpAddr> = model.ipv6.as_ref().and_then(|s| s.parse().ok());
 
-        let register_method = match model.register_method.as_str() {
-            "oidc" => RegisterMethod::Oidc,
-            "cli" => RegisterMethod::Cli,
-            _ => RegisterMethod::AuthKey,
-        };
+        let register_method: RegisterMethod = model.register_method.parse().unwrap_or_default();
 
-        let posture_attributes: HashMap<String, serde_json::Value> = model
-            .posture_attributes
-            .as_ref()
-            .and_then(|s| match serde_json::from_str(s) {
-                Ok(v) => Some(v),
-                Err(e) => {
-                    warn!(node_id = model.id, error = %e, "failed to parse posture_attributes JSON");
-                    None
-                }
-            })
-            .unwrap_or_default();
+        let posture_attributes: HashMap<String, serde_json::Value> = parse_optional_json(
+            model.posture_attributes.as_deref(),
+            model.id,
+            "posture_attributes",
+        )
+        .unwrap_or_default();
 
         let machine_key = MachineKey::try_from_bytes(&model.machine_key).unwrap_or_default();
         let node_key = NodeKey::try_from_bytes(&model.node_key).unwrap_or_default();
@@ -243,11 +242,7 @@ impl From<&Node> for ActiveModel {
             serde_json::to_string(node.posture_attributes()).ok()
         };
 
-        let register_method = match node.register_method() {
-            RegisterMethod::AuthKey => "authkey",
-            RegisterMethod::Oidc => "oidc",
-            RegisterMethod::Cli => "cli",
-        };
+        let register_method = node.register_method().to_string();
 
         ActiveModel {
             id: if node.id().as_u64() == 0 {
@@ -265,7 +260,7 @@ impl From<&Node> for ActiveModel {
             hostname: Set(node.hostname().to_string()),
             given_name: Set(node.given_name().to_string()),
             user_id: Set(node.user_id().map(|id| id.as_i64())),
-            register_method: Set(register_method.to_string()),
+            register_method: Set(register_method),
             tags: Set(tags_json),
             auth_key_id: Set(node.auth_key_id().map(|id| id as i64)),
             ephemeral: Set(node.ephemeral()),

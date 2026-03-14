@@ -1,0 +1,33 @@
+[package]
+name = "railscale-migrate"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "railscale-migrate"
+required-features = ["cli"]
+
+[features]
+cli = ["dep:clap", "dep:sqlx", "dep:tokio", "dep:serde_yaml", "dep:toml"]
+
+[dependencies]
+chrono = { workspace = true }
+clap = { version = "4", features = ["derive"], optional = true }
+hex = "0.4"
+ipnet = { workspace = true }
+railscale-grants = { path = "../railscale-grants" }
+railscale-types = { path = "../railscale-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { version = "0.9", optional = true }
+sqlx = { version = "0.8", features = [
+  "runtime-tokio-rustls",
+  "sqlite",
+  "chrono",
+], optional = true }
+thiserror = { workspace = true }
+tokio = { version = "1", features = ["rt", "macros"], optional = true }
+toml = { version = "1.0", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "1"

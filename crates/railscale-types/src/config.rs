@@ -215,12 +215,32 @@ impl std::str::FromStr for LogLevel {
     }
 }
 
+/// database backend type
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseType {
+    /// sqlite file-based database
+    #[default]
+    Sqlite,
+    /// postgresql
+    Postgres,
+}
+
+impl std::fmt::Display for DatabaseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DatabaseType::Sqlite => write!(f, "sqlite"),
+            DatabaseType::Postgres => write!(f, "postgres"),
+        }
+    }
+}
+
 /// database configuration.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
-    /// database type: "sqlite" or "postgres".
-    pub db_type: String,
+    /// database type: sqlite or postgres
+    pub db_type: DatabaseType,
 
     /// database connection string or file path.
     pub connection_string: String,
@@ -322,7 +342,7 @@ fn default_idle_timeout_secs() -> u64 {
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
-            db_type: "sqlite".to_string(),
+            db_type: DatabaseType::Sqlite,
             connection_string: "/var/lib/railscale/db.sqlite".to_string(),
             max_connections: default_max_connections(),
             min_connections: default_min_connections(),
@@ -1083,7 +1103,7 @@ mod tests {
     #[test]
     fn test_database_config_debug_redacts_password() {
         let config = DatabaseConfig {
-            db_type: "postgres".to_string(),
+            db_type: DatabaseType::Postgres,
             connection_string: "postgres://admin:supersecretpassword@localhost:5432/railscale"
                 .to_string(),
             ..Default::default()
@@ -1105,7 +1125,7 @@ mod tests {
     #[test]
     fn test_database_config_debug_sqlite_unchanged() {
         let config = DatabaseConfig {
-            db_type: "sqlite".to_string(),
+            db_type: DatabaseType::Sqlite,
             connection_string: "/var/lib/railscale/db.sqlite".to_string(),
             ..Default::default()
         };
@@ -1118,7 +1138,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.database.db_type, "sqlite");
+        assert_eq!(config.database.db_type, DatabaseType::Sqlite);
         assert!(config.prefix_v4.is_some());
         assert!(config.prefix_v6.is_some());
         // api is disabled by default

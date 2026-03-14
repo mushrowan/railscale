@@ -8,6 +8,16 @@ members = [
   "crates/railscale-grants",
   "crates/railscale-admin",
   "crates/railscale-tka",
+  "crates/railscale-migrate",
+]
+default-members = [
+  "crates/railscale",
+  "crates/railscale-types",
+  "crates/railscale-db",
+  "crates/railscale-proto",
+  "crates/railscale-grants",
+  "crates/railscale-admin",
+  "crates/railscale-tka",
 ]
 
 [workspace.metadata.crane]
