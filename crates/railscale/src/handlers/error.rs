@@ -103,6 +103,36 @@ where
     }
 }
 
+/// extension trait for converting results to apierror.
+pub trait ResultExt<T> {
+    /// convert an error to an internal server error.
+    fn map_internal(self) -> Result<T, ApiError>;
+}
+
+impl<T, E: std::fmt::Display> ResultExt<T> for Result<T, E> {
+    fn map_internal(self) -> Result<T, ApiError> {
+        self.map_err(ApiError::internal)
+    }
+}
+
+/// extension trait for converting options to apierror.
+pub trait OptionExt<T> {
+    /// convert none to an unauthorized error.
+    fn or_unauthorized(self, msg: &str) -> Result<T, ApiError>;
+    /// convert none to a not found error.
+    fn or_not_found(self, msg: &str) -> Result<T, ApiError>;
+}
+
+impl<T> OptionExt<T> for Option<T> {
+    fn or_unauthorized(self, msg: &str) -> Result<T, ApiError> {
+        self.ok_or_else(|| ApiError::unauthorized(msg))
+    }
+
+    fn or_not_found(self, msg: &str) -> Result<T, ApiError> {
+        self.ok_or_else(|| ApiError::not_found(msg))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,35 +256,5 @@ mod tests {
             !body.contains("db connection"),
             "internal details should not be exposed"
         );
-    }
-}
-
-/// extension trait for converting results to apierror.
-pub trait ResultExt<T> {
-    /// convert an error to an internal server error.
-    fn map_internal(self) -> Result<T, ApiError>;
-}
-
-impl<T, E: std::fmt::Display> ResultExt<T> for Result<T, E> {
-    fn map_internal(self) -> Result<T, ApiError> {
-        self.map_err(ApiError::internal)
-    }
-}
-
-/// extension trait for converting options to apierror.
-pub trait OptionExt<T> {
-    /// convert none to an unauthorized error.
-    fn or_unauthorized(self, msg: &str) -> Result<T, ApiError>;
-    /// convert none to a not found error.
-    fn or_not_found(self, msg: &str) -> Result<T, ApiError>;
-}
-
-impl<T> OptionExt<T> for Option<T> {
-    fn or_unauthorized(self, msg: &str) -> Result<T, ApiError> {
-        self.ok_or_else(|| ApiError::unauthorized(msg))
-    }
-
-    fn or_not_found(self, msg: &str) -> Result<T, ApiError> {
-        self.ok_or_else(|| ApiError::not_found(msg))
     }
 }
