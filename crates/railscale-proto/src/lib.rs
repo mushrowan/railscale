@@ -17,8 +17,8 @@ mod tka;
 pub use error::Error;
 pub use map_request::{
     AppConnectorAttr, AuditLogRequest, CAP_APP_CONNECTORS, CAP_DNS_SUBDOMAIN_RESOLVE,
-    CAP_FILE_SHARING, CAP_SSH_ENV_VARS, CAP_STORE_APPC_ROUTES, CapGrant, DebugSettings, DerpMap,
-    DerpNode, DerpRegion, DnsConfig, DnsResolver, FilterRule, MapRequest, MapResponse,
+    CAP_FILE_SHARING, CAP_SSH, CAP_SSH_ENV_VARS, CAP_STORE_APPC_ROUTES, CapGrant, DebugSettings,
+    DerpMap, DerpNode, DerpRegion, DnsConfig, DnsResolver, FilterRule, MapRequest, MapResponse,
     MapResponseNode, NetPortRange, PEER_CAP_DEBUG_PEER, PEER_CAP_FILE_SEND,
     PEER_CAP_FILE_SHARING_TARGET, PEER_CAP_INGRESS, PEER_CAP_WAKE_ON_LAN, PeerChange, PortRange,
     SetDNSRequest, SetDNSResponse, SetDeviceAttributesRequest, UserProfile,

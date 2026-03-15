@@ -67,6 +67,20 @@ in
 
     package = lib.mkPackageOption pkgs "railscale" { };
 
+    openFirewall = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Whether to open firewall ports for the embedded DERP relay and STUN server.
+        Opens the DERP TLS port (TCP, default 3340) and STUN port (UDP, default 3478)
+        when {option}`settings.derp.embedded_derp.enabled` is also true.
+
+        These ports must be reachable from the public internet for relay
+        and NAT traversal to work. Clients connect to DERP before the
+        tailnet is established, so they cannot reach it via the tailnet.
+      '';
+    };
+
     user = lib.mkOption {
       type = lib.types.str;
       default = "railscale";
@@ -963,8 +977,8 @@ in
 
     # Open firewall ports
     networking.firewall = lib.mkMerge [
-      # DERP/STUN ports when embedded DERP is enabled
-      (lib.mkIf cfg.settings.derp.embedded_derp.enabled {
+      # DERP (TCP) and STUN (UDP) when openFirewall and embedded DERP are both enabled
+      (lib.mkIf (cfg.openFirewall && cfg.settings.derp.embedded_derp.enabled) {
         allowedTCPPorts = [ derpPort ];
         allowedUDPPorts = lib.optional (cfg.settings.derp.embedded_derp.stun_listen_addr != null) stunPort;
       })

@@ -83,12 +83,8 @@ in
     "net.netfilter.nf_conntrack_max" = 16384;
   };
 
-  # Common server firewall rules for DERP
+  # Common server firewall rules (control plane only, DERP/STUN handled by openFirewall)
   serverFirewall = {
-    allowedTCPPorts = [
-      8080
-      3340
-    ]; # HTTP + DERP
-    allowedUDPPorts = [ 3478 ]; # STUN
+    allowedTCPPorts = [ 8080 ]; # HTTP control plane
   };
 }

@@ -759,6 +759,8 @@ fn build_self_cap_map_simple(
 ) -> Option<HashMap<String, Vec<serde_json::Value>>> {
     let mut cap_map = HashMap::new();
 
+    // signal that tailscale ssh is available on this tailnet
+    cap_map.insert(railscale_proto::CAP_SSH.to_string(), vec![]);
     cap_map.insert(railscale_proto::CAP_SSH_ENV_VARS.to_string(), vec![]);
 
     if config.taildrop_enabled {
@@ -854,6 +856,17 @@ mod tests {
         assert!(
             cap_map.contains_key(railscale_proto::CAP_SSH_ENV_VARS),
             "cap_map should contain ssh-env-vars capability"
+        );
+    }
+
+    #[test]
+    fn test_build_self_cap_map_includes_ssh_capability() {
+        // CAP_SSH must be present so clients allow enabling `--ssh`
+        let config = railscale_types::Config::default();
+        let cap_map = build_self_cap_map_simple(&config).unwrap();
+        assert!(
+            cap_map.contains_key(railscale_proto::CAP_SSH),
+            "cap_map should contain https://tailscale.com/cap/ssh"
         );
     }
 

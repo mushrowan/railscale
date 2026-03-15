@@ -40,6 +40,12 @@ use crate::tka::TkaInfo;
 /// emitted as CapGrant on FilterRule
 pub const CAP_FILE_SHARING: &str = "https://tailscale.com/cap/file-sharing";
 
+/// node capability indicating tailscale ssh is available on this tailnet.
+///
+/// the tailscale client checks for this capability before allowing `--ssh`.
+/// without it, the client reports "not enabled on Tailnet"
+pub const CAP_SSH: &str = "https://tailscale.com/cap/ssh";
+
 /// node capability enabling ssh environment variable forwarding.
 ///
 /// when present, the client's ssh server will filter client-proposed env vars

@@ -24,6 +24,7 @@ in
       services.railscale = {
         enable = true;
         package = railscale;
+        openFirewall = true;
         address = "0.0.0.0";
         port = 8080;
 

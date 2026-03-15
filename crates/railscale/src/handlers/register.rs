@@ -211,6 +211,9 @@ pub async fn register(
     } else if !auth_key_str.is_empty() {
         debug!("routing to preauth key flow");
         handle_preauth_registration(state, req, machine_key, &auth_key_str).await
+    } else if let Some(resp) = handle_returning_node(&state, &req.node_key, &machine_key).await? {
+        debug!("returning node recognised, auto-authorizing");
+        Ok(resp)
     } else {
         debug!("routing to interactive registration flow");
         handle_interactive_registration(state, req, machine_key).await
@@ -453,6 +456,72 @@ async fn handle_interactive_registration(
         auth_url,
         error: String::new(),
     }))
+}
+
+/// check if a node with this key already exists and is still valid.
+///
+/// when a client does `tailscale switch` back to railscale, it sends a
+/// register request with its existing node key but no auth key or followup.
+/// if the node exists, isn't expired, and the machine key matches, we
+/// return success immediately without requiring re-authentication.
+async fn handle_returning_node(
+    state: &AppState,
+    node_key: &NodeKey,
+    machine_key: &MachineKey,
+) -> Result<Option<Json<RegisterResponse>>, ApiError> {
+    let node = match state
+        .db
+        .get_node_by_node_key(node_key)
+        .await
+        .map_internal()?
+    {
+        Some(n) => n,
+        None => return Ok(None),
+    };
+
+    // machine key must match (prevents spoofing with a stolen node key)
+    if node.machine_key() != machine_key {
+        debug!("existing node found but machine key mismatch, requiring re-auth");
+        return Ok(None);
+    }
+
+    // expired nodes must re-authenticate
+    if node.is_expired() {
+        debug!("existing node found but expired, requiring re-auth");
+        return Ok(None);
+    }
+
+    // node is valid, build success response
+    let user = if let Some(user_id) = node.user_id() {
+        state.db.get_user(user_id).await.map_internal()?
+    } else {
+        None
+    };
+
+    let (user_info, login_info) = match user {
+        Some(u) => (
+            TailcfgUser {
+                id: u.id.as_i64(),
+                display_name: u.display_name.clone().unwrap_or_default(),
+            },
+            TailcfgLogin {
+                id: u.id.as_i64(),
+                provider: u.provider.clone().unwrap_or_default(),
+                login_name: u.name.clone(),
+                display_name: u.display_name.unwrap_or(u.name),
+            },
+        ),
+        None => (TailcfgUser::default(), TailcfgLogin::default()),
+    };
+
+    Ok(Some(Json(RegisterResponse {
+        user: user_info,
+        login: login_info,
+        node_key_expired: false,
+        machine_authorized: true,
+        auth_url: String::new(),
+        error: String::new(),
+    })))
 }
 
 /// handle followup registration request.
@@ -988,6 +1057,112 @@ mod tests {
             node.nl_public_key(),
             Some(expected_bytes.as_slice()),
             "nl_public_key should be stored from NLKey in register request"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_register_existing_node_without_auth_returns_success() {
+        // when a client switches back to railscale (e.g. after tailscale switch),
+        // it sends a register request with its existing node key, no auth key,
+        // and no followup. the server should recognise the existing node and
+        // return success without requiring re-authentication
+        use crate::handlers::MachineKeyContext;
+        use railscale_db::Database;
+
+        let db = RailscaleDb::new_in_memory().await.unwrap();
+        db.migrate().await.unwrap();
+
+        // create user and register a node via preauth key first
+        let user = railscale_types::User::new(railscale_types::UserId::new(1), "test".to_string());
+        let user = db.create_user(&user).await.unwrap();
+        let token = railscale_types::PreAuthKeyToken::generate();
+        let preauth = railscale_types::PreAuthKey::from_token(1, &token, user.id);
+        db.create_preauth_key(&preauth).await.unwrap();
+
+        let config = railscale_types::Config::default();
+        let node_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+
+        // use a fixed machine key (simulating same noise handshake identity)
+        let machine_key_bytes = [0xAAu8; 32];
+        let mk_ctx = MachineKeyContext::from_bytes(machine_key_bytes);
+
+        // step 1: register the node initially with preauth key + noise context
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config.clone(),
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": format!("nodekey:{node_key_hex}"),
+            "Auth": { "AuthKey": token.to_string() }
+        });
+
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/machine/register")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+            .unwrap();
+        request.extensions_mut().insert(mk_ctx.clone());
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+        assert!(
+            resp.machine_authorized,
+            "initial registration should succeed"
+        );
+
+        // step 2: simulate tailscale switch back - same machine key via noise
+        // handshake, but no auth key, no followup
+        let app = crate::create_app(
+            db.clone(),
+            default_grants(),
+            config,
+            None,
+            crate::StateNotifier::default(),
+            None,
+        )
+        .await;
+
+        let req_body = serde_json::json!({
+            "Version": 68,
+            "NodeKey": format!("nodekey:{node_key_hex}")
+        });
+
+        let mut request = Request::builder()
+            .method("POST")
+            .uri("/machine/register")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&req_body).unwrap()))
+            .unwrap();
+        request.extensions_mut().insert(mk_ctx);
+
+        let response = app.oneshot(request).await.unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let resp: RegisterResponse = serde_json::from_slice(&body).unwrap();
+
+        assert!(
+            resp.machine_authorized,
+            "returning node should be auto-authorized without re-authentication"
+        );
+        assert!(
+            resp.auth_url.is_empty(),
+            "returning node should not get an auth_url, got: {}",
+            resp.auth_url
         );
     }
 }
