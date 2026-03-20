@@ -701,24 +701,21 @@ impl GrantsEngine {
                 .filter_map(|s| Selector::parse(s).ok())
                 .collect();
 
-            // check if this node is in the destination set
-            let has_self_dst = dst_selectors
-                .iter()
-                .any(|s| matches!(s, Selector::Autogroup(Autogroup::SelfDevices)));
+            // check which dst selectors this node matches.
+            // track whether it matched via autogroup:self (needs same-user
+            // source filtering) vs other selectors (normal source matching)
+            let matched_via_self = !node.is_tagged()
+                && node.user_id().is_some()
+                && dst_selectors
+                    .iter()
+                    .any(|s| matches!(s, Selector::Autogroup(Autogroup::SelfDevices)));
 
-            // for autogroup:self destinations, node must be untagged with a user_id
-            // for other selectors, use normal matching
-            let node_matches_dst = dst_selectors.iter().any(|selector| {
-                match selector {
-                    Selector::Autogroup(Autogroup::SelfDevices) => {
-                        // node is a valid autogroup:self destination if it's untagged with user
-                        !node.is_tagged() && node.user_id().is_some()
-                    }
-                    _ => self.node_matches_selector(node, selector, resolver, None),
-                }
+            let matched_via_other = dst_selectors.iter().any(|selector| match selector {
+                Selector::Autogroup(Autogroup::SelfDevices) => false,
+                _ => self.node_matches_selector(node, selector, resolver, None),
             });
 
-            if !node_matches_dst {
+            if !matched_via_self && !matched_via_other {
                 continue;
             }
 
@@ -734,11 +731,6 @@ impl GrantsEngine {
 
             for src_node in all_nodes {
                 if src_node.id() == node.id() {
-                    continue; // Can't SSH to self
-                }
-
-                // for autogroup:self destinations, only same-user untagged nodes are sources
-                if has_self_dst && (src_node.is_tagged() || node.user_id() != src_node.user_id()) {
                     continue;
                 }
 
@@ -746,12 +738,22 @@ impl GrantsEngine {
                 let matches_src = src_selectors.iter().any(|selector| {
                     self.node_matches_selector(src_node, selector, resolver, Some(node))
                 });
+                if !matches_src {
+                    continue;
+                }
 
-                if matches_src {
-                    // add all ips from this source node
-                    for ip in src_node.ips() {
-                        source_ips.push(ip.to_string());
-                    }
+                // if node matched only via autogroup:self, restrict to
+                // same-user untagged sources. if it also matched via other
+                // selectors (e.g. autogroup:tagged), allow all matching sources
+                if !matched_via_other
+                    && matched_via_self
+                    && (src_node.is_tagged() || node.user_id() != src_node.user_id())
+                {
+                    continue;
+                }
+
+                for ip in src_node.ips() {
+                    source_ips.push(ip.to_string());
                 }
             }
 
@@ -1360,6 +1362,56 @@ mod tests {
                 .principals
                 .iter()
                 .any(|p| p.node_ip.as_deref() == Some("100.64.0.2"))
+        );
+    }
+
+    #[test]
+    fn test_compile_ssh_policy_tagged_dst_with_autogroup_self_in_rule() {
+        // reproduces the real policy: dst: [autogroup:tagged, autogroup:self]
+        // the autogroup:self filter must not block member sources when the
+        // node matched via autogroup:tagged
+        let mut policy = Policy::empty();
+        policy.ssh.push(crate::ssh::SshPolicyRule {
+            action: crate::ssh::SshActionType::Accept,
+            check_period: None,
+            src: vec!["autogroup:member".to_string()],
+            dst: vec!["autogroup:tagged".to_string(), "autogroup:self".to_string()],
+            users: vec![
+                "autogroup:nonroot".to_string(),
+                "autogroup:root".to_string(),
+            ],
+            accept_env: None,
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        // tagged node with no user (like val with tag:ssh)
+        let tagged_node = TestNodeBuilder::new(1)
+            .with_tags(vec!["tag:ssh".parse().unwrap()])
+            .with_ipv4("100.64.0.5".parse().unwrap())
+            .build();
+        // member node with user (like termina)
+        let member_node = TestNodeBuilder::new(2)
+            .with_user_id(UserId::new(1))
+            .with_ipv4("100.64.0.6".parse().unwrap())
+            .build();
+        let all_nodes = vec![tagged_node.clone(), member_node.clone()];
+
+        let ssh_policy = engine.compile_ssh_policy(&tagged_node, &all_nodes, &resolver);
+        assert!(
+            ssh_policy.is_some(),
+            "tagged node should get ssh policy even with autogroup:self in dst list"
+        );
+
+        let rules = ssh_policy.unwrap().rules;
+        assert_eq!(rules.len(), 1);
+        assert!(
+            rules[0]
+                .principals
+                .iter()
+                .any(|p| p.node_ip.as_deref() == Some("100.64.0.6")),
+            "member node must be a principal for the tagged destination"
         );
     }
 
