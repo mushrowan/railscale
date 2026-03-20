@@ -155,6 +155,8 @@ pub struct AppRouters {
     pub api_separate: bool,
     /// shared derp map for dynamic updates (e.g., periodic refresh from URL/path).
     pub derp_map: Arc<RwLock<DerpMap>>,
+    /// presence tracker shared with the admin service for online status
+    pub presence: PresenceTracker,
 }
 
 /// load a noise keypair from file, or generate and save a new one.
@@ -317,6 +319,7 @@ pub async fn create_app_routers_with_policy_handle(
         api: api_router,
         api_separate,
         derp_map: state.derp_map.clone(),
+        presence: state.presence.clone(),
     };
 
     (routers, handle)

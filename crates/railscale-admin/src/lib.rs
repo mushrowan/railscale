@@ -29,7 +29,7 @@
 
 pub mod server;
 
-pub use server::{AdminServiceImpl, PolicyHandle};
+pub use server::{AdminServiceImpl, OnlineChecker, PolicyHandle};
 
 /// generated protobuf types and service definitions.
 pub mod pb {

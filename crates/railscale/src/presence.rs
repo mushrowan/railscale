@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use railscale_admin::OnlineChecker;
 use railscale_types::{NodeId, NodeKey};
 use tokio::sync::RwLock;
 
@@ -93,6 +94,13 @@ impl PresenceTracker {
     pub async fn get_connection_info(&self, node_id: NodeId) -> Option<ConnectionInfo> {
         let connected = self.connected.read().await;
         connected.get(&node_id).cloned()
+    }
+}
+
+#[tonic::async_trait]
+impl OnlineChecker for PresenceTracker {
+    async fn get_online_statuses(&self, node_ids: &[NodeId]) -> HashMap<NodeId, bool> {
+        self.get_online_statuses(node_ids).await
     }
 }
 

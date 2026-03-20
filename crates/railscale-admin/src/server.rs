@@ -1,16 +1,39 @@
 //! admin service implementation.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use railscale_db::{Database, RailscaleDb};
 use railscale_grants::Policy;
-use railscale_types::{MAX_POLICY_SIZE, MAX_TAGS, NodeName, Username};
+use railscale_types::{MAX_POLICY_SIZE, MAX_TAGS, NodeId, NodeName, Username};
 use tokio::sync::RwLock;
 use tonic::{Request, Response, Status};
 use tracing::info;
 
 use crate::pb::{self, admin_service_server::AdminService};
+
+/// trait for checking whether nodes are currently connected.
+///
+/// implemented by `PresenceTracker` in the railscale crate, but defined
+/// here so the admin service can query online status without a circular
+/// dependency.
+#[tonic::async_trait]
+pub trait OnlineChecker: Send + Sync {
+    /// return the online status for a batch of node ids
+    async fn get_online_statuses(&self, node_ids: &[NodeId]) -> HashMap<NodeId, bool>;
+}
+
+/// no-op checker that reports every node as offline.
+/// used when no presence tracker is available.
+struct NullOnlineChecker;
+
+#[tonic::async_trait]
+impl OnlineChecker for NullOnlineChecker {
+    async fn get_online_statuses(&self, node_ids: &[NodeId]) -> HashMap<NodeId, bool> {
+        node_ids.iter().map(|id| (*id, false)).collect()
+    }
+}
 
 /// policy handle for hot-reload (mirrors railscale::policyhandle).
 #[derive(Clone)]
@@ -55,6 +78,7 @@ pub struct AdminServiceImpl {
     db: RailscaleDb,
     policy_handle: PolicyHandle,
     policy_file_path: Option<PathBuf>,
+    online_checker: Arc<dyn OnlineChecker>,
 }
 
 impl AdminServiceImpl {
@@ -68,6 +92,22 @@ impl AdminServiceImpl {
             db,
             policy_handle,
             policy_file_path,
+            online_checker: Arc::new(NullOnlineChecker),
+        }
+    }
+
+    /// create a new admin service with an online status provider.
+    pub fn with_online_checker(
+        db: RailscaleDb,
+        policy_handle: PolicyHandle,
+        policy_file_path: Option<PathBuf>,
+        online_checker: Arc<dyn OnlineChecker>,
+    ) -> Self {
+        Self {
+            db,
+            policy_handle,
+            policy_file_path,
+            online_checker,
         }
     }
 }
@@ -320,7 +360,10 @@ impl AdminService for AdminServiceImpl {
             .map_err(|e| Status::internal(format!("Failed to get node: {}", e)))?
             .ok_or_else(|| Status::not_found("Node not found"))?;
 
-        Ok(Response::new(node_to_pb(&node)))
+        let statuses = self.online_checker.get_online_statuses(&[id]).await;
+        let online = statuses.get(&id).copied().unwrap_or(false);
+
+        Ok(Response::new(node_to_pb(&node, online)))
     }
 
     async fn list_nodes(
@@ -351,8 +394,18 @@ impl AdminService for AdminServiceImpl {
             nodes
         };
 
+        // batch-fetch online statuses
+        let node_ids: Vec<NodeId> = nodes.iter().map(|n| n.id()).collect();
+        let statuses = self.online_checker.get_online_statuses(&node_ids).await;
+
         Ok(Response::new(pb::ListNodesResponse {
-            nodes: nodes.iter().map(node_to_pb).collect(),
+            nodes: nodes
+                .iter()
+                .map(|n| {
+                    let online = statuses.get(&n.id()).copied().unwrap_or(false);
+                    node_to_pb(n, online)
+                })
+                .collect(),
         }))
     }
 
@@ -391,7 +444,10 @@ impl AdminService for AdminServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
 
-        Ok(Response::new(node_to_pb(&updated)))
+        let statuses = self.online_checker.get_online_statuses(&[id]).await;
+        let online = statuses.get(&id).copied().unwrap_or(false);
+
+        Ok(Response::new(node_to_pb(&updated, online)))
     }
 
     async fn rename_node(
@@ -420,7 +476,10 @@ impl AdminService for AdminServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
 
-        Ok(Response::new(node_to_pb(&updated)))
+        let statuses = self.online_checker.get_online_statuses(&[id]).await;
+        let online = statuses.get(&id).copied().unwrap_or(false);
+
+        Ok(Response::new(node_to_pb(&updated, online)))
     }
 
     async fn set_tags(
@@ -462,7 +521,10 @@ impl AdminService for AdminServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
 
-        Ok(Response::new(node_to_pb(&updated)))
+        let statuses = self.online_checker.get_online_statuses(&[id]).await;
+        let online = statuses.get(&id).copied().unwrap_or(false);
+
+        Ok(Response::new(node_to_pb(&updated, online)))
     }
 
     async fn set_approved_routes(
@@ -499,7 +561,10 @@ impl AdminService for AdminServiceImpl {
             .await
             .map_err(|e| Status::internal(format!("Failed to update node: {}", e)))?;
 
-        Ok(Response::new(node_to_pb(&updated)))
+        let statuses = self.online_checker.get_online_statuses(&[id]).await;
+        let online = statuses.get(&id).copied().unwrap_or(false);
+
+        Ok(Response::new(node_to_pb(&updated, online)))
     }
 
     // ============ PreAuth Keys ============
@@ -982,7 +1047,7 @@ fn user_to_pb(user: &railscale_types::User) -> pb::User {
     }
 }
 
-fn node_to_pb(node: &railscale_types::Node) -> pb::Node {
+fn node_to_pb(node: &railscale_types::Node, online: bool) -> pb::Node {
     pb::Node {
         id: node.id().as_u64(),
         machine_key: hex::encode(node.machine_key().as_bytes()),
@@ -1001,7 +1066,7 @@ fn node_to_pb(node: &railscale_types::Node) -> pb::Node {
             .map(|r| r.to_string())
             .collect(),
         created_at: node.created_at().to_rfc3339(),
-        online: node.is_online().unwrap_or(false),
+        online,
     }
 }
 
@@ -1068,4 +1133,26 @@ fn extract_tka_keys(genesis_bytes: &[u8]) -> Vec<pb::TkaKey> {
         key_id: hex::encode(key_id.as_bytes()),
         votes: key.votes,
     }]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use railscale_types::test_utils::TestNodeBuilder;
+
+    #[test]
+    fn node_to_pb_reflects_explicit_online_status() {
+        let node = TestNodeBuilder::new(1).build();
+        // node.is_online() is None by default (not stored in DB)
+        // but if the node is actually connected, we should show online=true
+
+        let pb_online = node_to_pb(&node, true);
+        assert!(pb_online.online, "should be online when presence says so");
+
+        let pb_offline = node_to_pb(&node, false);
+        assert!(
+            !pb_offline.online,
+            "should be offline when presence says so"
+        );
+    }
 }

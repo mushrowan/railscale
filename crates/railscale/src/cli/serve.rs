@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Args;
 use color_eyre::eyre::{Context, Result, bail};
@@ -651,8 +652,12 @@ impl ServeCommand {
 
         // spawn admin grpc server on unix socket
         {
-            let admin_service =
-                AdminServiceImpl::new(admin_db, admin_policy_handle, policy_file_path);
+            let admin_service = AdminServiceImpl::with_online_checker(
+                admin_db,
+                admin_policy_handle,
+                policy_file_path,
+                Arc::new(routers.presence.clone()),
+            );
 
             // remove old socket file if it exists
             let _ = std::fs::remove_file(&admin_socket_path);
