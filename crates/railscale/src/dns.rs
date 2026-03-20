@@ -5,30 +5,19 @@ use railscale_proto::{DnsConfig, DnsResolver};
 use railscale_types::Config;
 use std::collections::HashMap;
 
-/// the magicdns resolver address
-const MAGIC_DNS_RESOLVER: &str = "100.100.100.100";
-
 /// generate dns config for the tailnet
 ///
-/// returns `None` if:
-/// - MagicDNS is disabled, OR
-/// - `override_local_dns` is false (client keeps local DNS settings)
+/// returns `None` if MagicDNS is disabled
 pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
-    // global resolvers from config (these handle general dns queries)
     if !config.dns.magic_dns {
         return None;
     }
 
-    // if override_local_dns is false, don't override client's dns
-    // (but we still need routes for Tailscale-specific domains)
     if !config.dns.override_local_dns {
         return generate_minimal_dns_config(config);
     }
 
-    let magic_resolver = DnsResolver::new(MAGIC_DNS_RESOLVER);
-
-    // route base domain to MagicDNS
-    let mut resolvers: Vec<DnsResolver> = config
+    let resolvers: Vec<DnsResolver> = config
         .dns
         .nameservers
         .global
@@ -36,20 +25,35 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
         .map(|addr| DnsResolver::new(addr.clone()))
         .collect();
 
-    // add magicdns resolver last (for tailscale-specific lookups)
-    resolvers.push(magic_resolver.clone());
+    Some(DnsConfig {
+        resolvers,
+        domains: dns_domains(config),
+        routes: dns_routes(config),
+        proxied: true,
+        cert_domains: vec![],
+    })
+}
 
-    // search domains: base domain first, then any configured search domains
+/// generate minimal dns config when override_local_dns is false
+fn generate_minimal_dns_config(config: &Config) -> Option<DnsConfig> {
+    Some(DnsConfig {
+        resolvers: vec![],
+        domains: dns_domains(config),
+        routes: dns_routes(config),
+        proxied: true,
+        cert_domains: vec![],
+    })
+}
+
+fn dns_domains(config: &Config) -> Vec<String> {
     let mut domains = vec![config.base_domain.clone()];
     domains.extend(config.dns.search_domains.clone());
+    domains
+}
 
-    // build routes map for split dns
+fn dns_routes(config: &Config) -> HashMap<String, Vec<DnsResolver>> {
     let mut routes = HashMap::new();
 
-    // route base domain to magicdns
-    routes.insert(config.base_domain.clone(), vec![magic_resolver.clone()]);
-
-    // add split dns routes from config
     for (domain, nameservers) in &config.dns.nameservers.split {
         let resolvers: Vec<DnsResolver> = nameservers
             .iter()
@@ -58,60 +62,19 @@ pub fn generate_dns_config(config: &Config) -> Option<DnsConfig> {
         routes.insert(domain.clone(), resolvers);
     }
 
-    // generate reverse dns routes for ipv4 prefix (for PTR lookups)
-    if let Some(prefix_v4) = config.prefix_v4 {
-        let v4_routes = generate_ipv4_reverse_dns_routes(prefix_v4);
-        for route in v4_routes {
-            routes.insert(route, vec![magic_resolver.clone()]);
-        }
-    }
-
-    // generate reverse dns routes for ipv6 prefix
-    if let Some(prefix_v6) = config.prefix_v6 {
-        let v6_routes = generate_ipv6_reverse_dns_routes(prefix_v6);
-        for route in v6_routes {
-            routes.insert(route, vec![magic_resolver.clone()]);
-        }
-    }
-
-    Some(DnsConfig {
-        resolvers,
-        domains,
-        routes,
-        proxied: true,
-        cert_domains: vec![],
-    })
-}
-
-/// generate minimal dns config when override_local_dns is false.
-/// only includes routes for tailscale-specific domains, not global resolvers.
-fn generate_minimal_dns_config(config: &Config) -> Option<DnsConfig> {
-    let magic_resolver = DnsResolver::new(MAGIC_DNS_RESOLVER);
-
-    let mut routes = HashMap::new();
-
-    // add reverse dns routes
-    routes.insert(config.base_domain.clone(), vec![magic_resolver.clone()]);
-
-    // add reverse dns routes
     if let Some(prefix_v4) = config.prefix_v4 {
         for route in generate_ipv4_reverse_dns_routes(prefix_v4) {
-            routes.insert(route, vec![magic_resolver.clone()]);
-        }
-    }
-    if let Some(prefix_v6) = config.prefix_v6 {
-        for route in generate_ipv6_reverse_dns_routes(prefix_v6) {
-            routes.insert(route, vec![magic_resolver.clone()]);
+            routes.insert(route, vec![]);
         }
     }
 
-    Some(DnsConfig {
-        resolvers: vec![], // empty = don't override client's resolvers
-        domains: vec![config.base_domain.clone()],
-        routes,
-        proxied: true,
-        cert_domains: vec![],
-    })
+    if let Some(prefix_v6) = config.prefix_v6 {
+        for route in generate_ipv6_reverse_dns_routes(prefix_v6) {
+            routes.insert(route, vec![]);
+        }
+    }
+
+    routes
 }
 
 /// add cert_domains for a specific node to a cloned dns config.
@@ -357,6 +320,51 @@ mod tests {
     }
 
     #[test]
+    fn generate_dns_config_does_not_advertise_quad100_as_global_resolver() {
+        let config = Config {
+            base_domain: "example.com".to_string(),
+            dns: railscale_types::DnsConfig {
+                magic_dns: true,
+                override_local_dns: true,
+                nameservers: railscale_types::Nameservers {
+                    global: vec!["1.1.1.1".to_string(), "1.0.0.1".to_string()],
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let dns = generate_dns_config(&config).unwrap();
+        assert_eq!(dns.resolvers.len(), 2);
+        assert_eq!(dns.resolvers[0].addr, "1.1.1.1");
+        assert_eq!(dns.resolvers[1].addr, "1.0.0.1");
+        assert!(
+            dns.resolvers
+                .iter()
+                .all(|resolver| resolver.addr != "100.100.100.100")
+        );
+    }
+
+    #[test]
+    fn generate_dns_config_leaves_magicdns_routes_internal() {
+        let config = Config {
+            base_domain: "example.com".to_string(),
+            ..Default::default()
+        };
+
+        let dns = generate_dns_config(&config).unwrap();
+        assert!(!dns.routes.contains_key("example.com"));
+        assert!(dns.routes.get("64.100.in-addr.arpa.").unwrap().is_empty());
+        assert!(
+            dns.routes
+                .get("0.e.1.a.c.5.1.1.a.7.d.f.ip6.arpa.")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn generate_minimal_dns_config_sets_proxied() {
         let config = Config {
             base_domain: "example.com".to_string(),
@@ -373,5 +381,33 @@ mod tests {
             dns.proxied,
             "proxied should be true even in minimal dns config"
         );
+    }
+
+    #[test]
+    fn generate_minimal_dns_config_keeps_split_routes() {
+        let config = Config {
+            base_domain: "example.com".to_string(),
+            dns: railscale_types::DnsConfig {
+                magic_dns: true,
+                override_local_dns: false,
+                nameservers: railscale_types::Nameservers {
+                    global: vec!["1.1.1.1".to_string()],
+                    split: HashMap::from([(
+                        "corp.example.com".to_string(),
+                        vec!["9.9.9.9".to_string()],
+                    )]),
+                },
+                search_domains: vec!["search.example.com".to_string()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let dns = generate_dns_config(&config).unwrap();
+        assert!(dns.resolvers.is_empty());
+        assert_eq!(dns.domains, vec!["example.com", "search.example.com"]);
+        let split_resolvers = dns.routes.get("corp.example.com").unwrap();
+        assert_eq!(split_resolvers.len(), 1);
+        assert_eq!(split_resolvers[0].addr, "9.9.9.9");
     }
 }

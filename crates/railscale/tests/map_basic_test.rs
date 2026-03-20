@@ -157,12 +157,26 @@ async fn test_map_request_returns_dns_config() {
 
     // verify dns config
     let dns = response.dns_config.expect("Missing DNS config");
+    assert!(dns.proxied, "MagicDNS should be enabled");
     assert!(
-        dns.resolvers.iter().any(|r| r.addr == "100.100.100.100"),
-        "Should have MagicDNS resolver"
+        dns.resolvers.iter().any(|r| r.addr == "1.1.1.1"),
+        "Should keep configured upstream resolvers"
+    );
+    assert!(
+        dns.resolvers.iter().all(|r| r.addr != "100.100.100.100"),
+        "Should not advertise quad100 as a global resolver"
     );
     assert!(dns.domains.contains(&"railscale.net".to_string()));
-    assert!(dns.routes.contains_key("railscale.net"));
+    assert!(
+        !dns.routes.contains_key("railscale.net"),
+        "MagicDNS suffix should stay internal to the client"
+    );
+    assert!(
+        dns.routes
+            .get("64.100.in-addr.arpa.")
+            .expect("Missing reverse route")
+            .is_empty()
+    );
 }
 
 #[tokio::test]
