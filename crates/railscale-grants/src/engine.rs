@@ -680,18 +680,17 @@ impl GrantsEngine {
     /// compile ssh policy for a specific node
     ///
     /// returns the ssh policy that should be sent to this node in mapresponse
-    /// tagged nodes receive no ssh policy (ssh only applies to user-owned devices)
+    /// compile ssh policy for a node based on the ssh rules in the policy.
+    ///
+    /// returns ssh rules where this node is in the destination set.
+    /// tagged nodes can be ssh destinations (e.g. via `autogroup:tagged`
+    /// or `tag:name` selectors) just like member nodes.
     pub fn compile_ssh_policy<R: UserResolver>(
         &self,
         node: &Node,
         all_nodes: &[Node],
         resolver: &R,
     ) -> Option<SshPolicy> {
-        // tagged nodes don't get ssh policies
-        if node.is_tagged() {
-            return None;
-        }
-
         let mut rules = Vec::new();
 
         for ssh_rule in &self.policy.ssh {
@@ -1321,13 +1320,15 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_ssh_policy_tagged_node_skipped() {
+    fn test_compile_ssh_policy_tagged_node_receives_policy() {
+        // tagged nodes that match dst selectors must receive ssh policies
+        // (this mirrors headscale's group-to-tag ssh test)
         let mut policy = Policy::empty();
         policy.ssh.push(crate::ssh::SshPolicyRule {
             action: crate::ssh::SshActionType::Accept,
             check_period: None,
-            src: vec!["*".to_string()],
-            dst: vec!["*".to_string()],
+            src: vec!["autogroup:member".to_string()],
+            dst: vec!["autogroup:tagged".to_string()],
             users: vec!["autogroup:nonroot".to_string()],
             accept_env: None,
         });
@@ -1335,12 +1336,64 @@ mod tests {
         let engine = GrantsEngine::new(policy);
         let resolver = EmptyResolver;
 
-        // tagged node should not get ssh policy
-        let tagged_node = test_node(1, vec!["tag:server"]);
-        let all_nodes = vec![tagged_node.clone()];
+        let tagged_node = TestNodeBuilder::new(1)
+            .with_tags(vec!["tag:server".parse().unwrap()])
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+        let member_node = TestNodeBuilder::new(2)
+            .with_user_id(UserId::new(1))
+            .with_ipv4("100.64.0.2".parse().unwrap())
+            .build();
+        let all_nodes = vec![tagged_node.clone(), member_node.clone()];
 
         let ssh_policy = engine.compile_ssh_policy(&tagged_node, &all_nodes, &resolver);
-        assert!(ssh_policy.is_none());
+        assert!(
+            ssh_policy.is_some(),
+            "tagged node should receive ssh policy when it matches dst selectors"
+        );
+
+        let rules = ssh_policy.unwrap().rules;
+        assert_eq!(rules.len(), 1);
+        // member node should be a principal
+        assert!(
+            rules[0]
+                .principals
+                .iter()
+                .any(|p| p.node_ip.as_deref() == Some("100.64.0.2"))
+        );
+    }
+
+    #[test]
+    fn test_compile_ssh_policy_tagged_node_no_matching_dst() {
+        // tagged node should get no policy when no dst selectors match it
+        let mut policy = Policy::empty();
+        policy.ssh.push(crate::ssh::SshPolicyRule {
+            action: crate::ssh::SshActionType::Accept,
+            check_period: None,
+            src: vec!["*".to_string()],
+            dst: vec!["autogroup:self".to_string()],
+            users: vec!["autogroup:nonroot".to_string()],
+            accept_env: None,
+        });
+
+        let engine = GrantsEngine::new(policy);
+        let resolver = EmptyResolver;
+
+        let tagged_node = TestNodeBuilder::new(1)
+            .with_tags(vec!["tag:server".parse().unwrap()])
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .build();
+        let member_node = TestNodeBuilder::new(2)
+            .with_user_id(UserId::new(1))
+            .with_ipv4("100.64.0.2".parse().unwrap())
+            .build();
+        let all_nodes = vec![tagged_node.clone(), member_node.clone()];
+
+        let ssh_policy = engine.compile_ssh_policy(&tagged_node, &all_nodes, &resolver);
+        assert!(
+            ssh_policy.is_none(),
+            "tagged node should not get ssh policy when no dst selectors match"
+        );
     }
 
     #[test]
