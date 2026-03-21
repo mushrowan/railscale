@@ -681,7 +681,7 @@ fn node_to_map_response_node(
         addresses,
         allowed_ips,
         endpoints: node.endpoints().iter().map(|e| e.to_string()).collect(),
-        derp: String::new(), // Deprecated - use home_derp instead
+        derp: format!("127.3.3.40:{}", home_derp),
         home_derp,
         // always include hostinfo (default to empty if none) to prevent nil pointer
         // crashes in Tailscale client when accessing Hostinfo.Hostname() on peers
@@ -1012,12 +1012,33 @@ mod tests {
     }
 
     #[test]
-    fn test_home_derp_zero_when_no_hostinfo() {
+    fn test_legacy_derp_string_from_preferred_derp() {
+        use railscale_types::{HostInfo, NetInfo};
+
+        let node = TestNodeBuilder::new(1)
+            .with_ipv4("100.64.0.1".parse().unwrap())
+            .with_hostinfo(HostInfo {
+                net_info: Some(NetInfo {
+                    preferred_derp: 5,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .build();
+
+        let result = node_to_map_response_node(&node, Some(true), None, "example.com");
+        assert_eq!(result.derp, "127.3.3.40:5");
+        assert_eq!(result.home_derp, 5);
+    }
+
+    #[test]
+    fn test_legacy_derp_string_zero_when_no_hostinfo() {
         let node = TestNodeBuilder::new(1)
             .with_ipv4("100.64.0.1".parse().unwrap())
             .build();
 
         let result = node_to_map_response_node(&node, Some(true), None, "example.com");
+        assert_eq!(result.derp, "127.3.3.40:0");
         assert_eq!(result.home_derp, 0);
     }
 
