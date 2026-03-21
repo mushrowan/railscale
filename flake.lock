@@ -10,11 +10,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1772054921,
-        "narHash": "sha256-tbeZexvrT3j7FylbCa8WwA2tf4W/MWoVbYim85LP1RA=",
+        "lastModified": 1774092137,
+        "narHash": "sha256-BnMSZmC9y6nnq1LC4NSs1wKlrd446ivOjpOX7xxPxOU=",
         "owner": "mushrowan",
         "repo": "attest",
-        "rev": "61554142d8e4b89fb32df46772eac3a665e2f755",
+        "rev": "ab116f94300cd0a30d2eca3326ceab3ed6cf7b6b",
         "type": "github"
       },
       "original": {
@@ -41,16 +41,16 @@
     "firecracker-src": {
       "flake": false,
       "locked": {
-        "lastModified": 1771664761,
-        "narHash": "sha256-CGeWBn+EqR5cSVUV9p9XC3nODRTyyrKBUcaNwPhSsLw=",
-        "owner": "mushrowan",
+        "lastModified": 1773069327,
+        "narHash": "sha256-btZ26PQDbJcTX1CN2sbZtZfN7qUR0ypGUIXyDWF/1FY=",
+        "owner": "firecracker-microvm",
         "repo": "firecracker",
-        "rev": "06c631a141b4711c4f178ffe48927f4449f258aa",
+        "rev": "7db02adc28eaeb5f54a0d4a8c312e7e9954070b6",
         "type": "github"
       },
       "original": {
-        "owner": "mushrowan",
-        "ref": "fix/vsock-snapshot-restore-panic",
+        "owner": "firecracker-microvm",
+        "ref": "v1.15.0",
         "repo": "firecracker",
         "type": "github"
       }

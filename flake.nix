@@ -183,6 +183,15 @@
               attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
+
+            # headscale vs railscale benchmark comparison
+            # usage: nix run .#bench-comparison -L
+            bench-comparison = import ./nix/tests/bench-comparison.nix {
+              inherit pkgs railscale;
+              attest = inputs.attest.packages.${system}.default;
+              attestSrc = inputs.attest;
+            };
+
           };
 
           devShells.default = import ./nix/devshell.nix {

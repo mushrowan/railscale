@@ -9,6 +9,7 @@ members = [
   "crates/railscale-admin",
   "crates/railscale-tka",
   "crates/railscale-migrate",
+  "crates/railscale-bench",
 ]
 default-members = [
   "crates/railscale",
