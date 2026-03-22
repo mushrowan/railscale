@@ -845,12 +845,13 @@ impl Default for PkceConfig {
 
 /// pkce challenge method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
-#[serde(rename_all = "lowercase")]
 pub enum PkceMethod {
     /// sha256 challenge method (recommended).
     #[default]
+    #[nixcfg(rename = "S256")]
     S256,
     /// plain text challenge method.
+    #[nixcfg(rename = "Plain")]
     Plain,
 }
 
