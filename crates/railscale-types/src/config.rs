@@ -812,6 +812,28 @@ pub struct PkceConfig {
     pub method: PkceMethod,
 }
 
+impl Default for OidcConfig {
+    fn default() -> Self {
+        Self {
+            issuer: String::new(),
+            client_id: String::new(),
+            client_secret: SecretString::from(""),
+            client_secret_path: None,
+            scope: vec!["openid".into(), "profile".into(), "email".into()],
+            email_verified_required: default_true(),
+            pkce: PkceConfig::default(),
+            allowed_domains: Vec::new(),
+            allowed_users: Vec::new(),
+            allowed_groups: Vec::new(),
+            group_prefix: None,
+            expiry_secs: default_expiry_secs(),
+            use_expiry_from_token: false,
+            extra_params: std::collections::HashMap::new(),
+            rate_limit_per_minute: default_oidc_rate_limit(),
+        }
+    }
+}
+
 impl Default for PkceConfig {
     fn default() -> Self {
         Self {
