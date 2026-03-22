@@ -590,6 +590,8 @@ fn default_true() -> bool {
     true
 }
 
+
+
 impl Default for DnsConfig {
     fn default() -> Self {
         Self {
@@ -719,6 +721,8 @@ pub struct OidcConfig {
     pub client_secret_path: Option<std::path::PathBuf>,
 
     /// scopes to request.
+    /// common values: openid, profile, email.
+    #[serde(default)]
     pub scope: Vec<String>,
 
     /// whether email must be verified.
@@ -822,7 +826,7 @@ impl Default for OidcConfig {
             client_id: String::new(),
             client_secret: SecretString::from(""),
             client_secret_path: None,
-            scope: vec!["openid".into(), "profile".into(), "email".into()],
+            scope: Vec::new(),
             email_verified_required: default_true(),
             pkce: PkceConfig::default(),
             allowed_domains: Vec::new(),
