@@ -85,10 +85,8 @@ maxminddb = "0.27"
 secrecy = { version = "0.10", features = ["serde"] }
 
 # Nix config generation
-nixcfg = { git = "https://github.com/mushrowan/nixcfg", subdirectory = "drivers/rust/nixcfg", features = [
-  "ipnet",
-  "secrecy",
-] }
+nixcfg = { git = "https://github.com/mushrowan/nixcfg", rev = "7bfc46c54fee", subdirectory = "drivers/rust/nixcfg" }
+schemars = "1"
 
 # Internal crates
 railscale-types = { path = "crates/railscale-types" }

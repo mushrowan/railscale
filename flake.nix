@@ -14,7 +14,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nixcfg = {
-      url = "github:mushrowan/nixcfg";
+      url = "github:mushrowan/nixcfg/ro/dev";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     attest = {

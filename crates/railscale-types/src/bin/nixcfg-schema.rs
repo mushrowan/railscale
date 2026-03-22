@@ -1,4 +1,4 @@
-use nixcfg::Schema;
+use nixcfg::NixSchema;
 use railscale_types::{Config, OidcConfig};
 
 fn main() {
@@ -15,6 +15,6 @@ fn main() {
         );
     }
 
-    let schema = Schema::from::<Config>("railscale").with_defaults(defaults);
+    let schema = NixSchema::from::<Config>("railscale").with_defaults(defaults);
     println!("{}", schema.to_json_pretty());
 }

@@ -22,6 +22,7 @@ subtle = "2.6"
 zeroize = { version = "1.8", features = ["derive"] }
 url = { workspace = true }
 nixcfg = { workspace = true }
+schemars = { workspace = true }
 
 [[bin]]
 name = "nixcfg-schema"

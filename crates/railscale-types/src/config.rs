@@ -3,14 +3,14 @@
 use std::path::PathBuf;
 
 use ipnet::IpNet;
-use nixcfg::NixCfg;
+use schemars::JsonSchema;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::oidc_group_prefix::OidcGroupPrefix;
 
 /// main configuration for railscale.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct Config {
     /// server address to listen on.
@@ -23,9 +23,11 @@ pub struct Config {
     pub noise_private_key_path: PathBuf,
 
     /// ipv4 prefix for node address allocation.
+    #[schemars(with = "Option<String>")]
     pub prefix_v4: Option<IpNet>,
 
     /// ipv6 prefix for node address allocation.
+    #[schemars(with = "Option<String>")]
     pub prefix_v6: Option<IpNet>,
 
     /// base domain for magicdns.
@@ -104,7 +106,7 @@ pub struct Config {
     /// runtime-only: path to persist policy file on updates.
     /// set by CLI, not serialised to config.
     #[serde(skip)]
-    #[nixcfg(skip)]
+    #[schemars(skip)]
     pub policy_file_path: Option<PathBuf>,
 }
 
@@ -140,7 +142,7 @@ impl Default for Config {
 }
 
 /// ip allocation strategy for assigning addresses to new nodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum AllocationStrategy {
     /// allocate ips sequentially (100.64.0.1, 100.64.0.2, ...).
@@ -174,7 +176,7 @@ impl std::str::FromStr for AllocationStrategy {
 }
 
 /// log level for tracing output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     /// most verbose, includes all trace spans
@@ -218,7 +220,7 @@ impl std::str::FromStr for LogLevel {
 }
 
 /// database backend type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseType {
     /// sqlite file-based database
@@ -238,7 +240,7 @@ impl std::fmt::Display for DatabaseType {
 }
 
 /// database configuration.
-#[derive(Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct DatabaseConfig {
     /// database type: sqlite or postgres
@@ -268,7 +270,7 @@ pub struct DatabaseConfig {
 }
 
 /// sqlite-specific configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct SqliteConfig {
     /// enable write-ahead logging (WAL) mode.
@@ -345,7 +347,7 @@ impl Default for DatabaseConfig {
 }
 
 /// derp (relay) configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct DerpConfig {
     /// url to fetch the derp map from.
@@ -391,7 +393,7 @@ pub const DEFAULT_DERP_CONNECTION_RATE_PER_MINUTE: u32 = 10;
 pub const DEFAULT_STUN_RATE_PER_MINUTE: u32 = 60;
 
 /// embedded derp server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct EmbeddedDerpConfig {
     /// whether to enable the embedded derp server.
@@ -478,7 +480,7 @@ pub struct EmbeddedDerpConfig {
 
     /// runtime details populated when the derp server starts.
     #[serde(skip)]
-    #[nixcfg(skip)]
+    #[schemars(skip)]
     pub runtime: Option<EmbeddedDerpRuntime>,
 }
 
@@ -563,7 +565,7 @@ pub struct EmbeddedDerpRuntime {
 }
 
 /// dns configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct DnsConfig {
     /// enable magicdns.
@@ -601,7 +603,7 @@ impl Default for DnsConfig {
 }
 
 /// nameserver configuration with global and split dns support.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct Nameservers {
     /// global nameservers used for all dns queries.
@@ -629,7 +631,7 @@ impl Default for Nameservers {
 }
 
 /// a dns record.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DnsRecord {
     /// record name.
     pub name: String,
@@ -640,13 +642,13 @@ pub struct DnsRecord {
 }
 
 /// dns provider for ACME dns-01 challenges.
-#[derive(Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum DnsProviderConfig {
     /// cloudflare dns api.
     Cloudflare {
         /// api token with DNS:Edit permission for the zone.
-        #[nixcfg(skip)]
+        #[schemars(skip)]
         #[serde(default, skip_serializing)]
         api_token: SecretString,
         /// cloudflare zone id.
@@ -655,11 +657,11 @@ pub enum DnsProviderConfig {
     /// godaddy dns api.
     Godaddy {
         /// godaddy api key.
-        #[nixcfg(skip)]
+        #[schemars(skip)]
         #[serde(default, skip_serializing)]
         api_key: SecretString,
         /// godaddy api secret.
-        #[nixcfg(skip)]
+        #[schemars(skip)]
         #[serde(default, skip_serializing)]
         api_secret: SecretString,
     },
@@ -668,7 +670,7 @@ pub enum DnsProviderConfig {
         /// URL to POST record changes to.
         url: String,
         /// optional HMAC-SHA256 shared secret for request signing.
-        #[nixcfg(skip)]
+        #[schemars(skip)]
         #[serde(default, skip_serializing)]
         secret: Option<SecretString>,
     },
@@ -697,7 +699,7 @@ impl std::fmt::Debug for DnsProviderConfig {
 }
 
 /// oidc configuration.
-#[derive(Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Clone, Serialize, Deserialize, JsonSchema)]
 pub struct OidcConfig {
     /// oidc issuer url.
     pub issuer: String,
@@ -706,7 +708,7 @@ pub struct OidcConfig {
     pub client_id: String,
 
     /// client secret
-    #[nixcfg(secret)]
+    #[schemars(with = "String", extend("x-nixcfg-secret" = true))]
     #[serde(default, skip_serializing)]
     pub client_secret: SecretString,
 
@@ -747,6 +749,7 @@ pub struct OidcConfig {
     ///
     /// if not set, oidc groups are used as-is.
     #[serde(default)]
+    #[schemars(with = "Option<String>")]
     pub group_prefix: Option<OidcGroupPrefix>,
 
     /// node expiry in seconds (default: 180 days).
@@ -801,7 +804,7 @@ fn default_expiry_secs() -> u64 {
 }
 
 /// pkce (proof key for code exchange) configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PkceConfig {
     /// whether pkce is enabled.
     #[serde(default)]
@@ -844,19 +847,19 @@ impl Default for PkceConfig {
 }
 
 /// pkce challenge method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, JsonSchema)]
 pub enum PkceMethod {
     /// sha256 challenge method (recommended).
     #[default]
-    #[nixcfg(rename = "S256")]
+    #[schemars(rename = "S256")]
     S256,
     /// plain text challenge method.
-    #[nixcfg(rename = "Plain")]
+    #[schemars(rename = "Plain")]
     Plain,
 }
 
 /// performance tuning configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct TuningConfig {
     /// reserved for future use — not yet wired into runtime.
@@ -906,7 +909,7 @@ impl Default for TuningConfig {
 }
 
 /// rest api configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct ApiConfig {
     /// whether the rest api is enabled.
@@ -977,7 +980,7 @@ impl Default for ApiConfig {
 }
 
 /// verify endpoint configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct VerifyConfig {
     /// rate limit for verify requests (requests per minute per IP).
