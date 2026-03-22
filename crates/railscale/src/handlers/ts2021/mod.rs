@@ -157,7 +157,7 @@ pub async fn ts2021_http_upgrade(
         .unwrap_or("");
 
     if !upgrade.eq_ignore_ascii_case("tailscale-control-protocol") {
-        info!(upgrade = %upgrade, "Invalid Upgrade header");
+        warn!(upgrade = %upgrade, "Invalid Upgrade header");
         return (
             StatusCode::BAD_REQUEST,
             "Missing or invalid Upgrade header. Expected: tailscale-control-protocol",
