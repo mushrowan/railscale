@@ -646,7 +646,7 @@ pub enum DnsProviderConfig {
     /// cloudflare dns api.
     Cloudflare {
         /// api token with DNS:Edit permission for the zone.
-        #[nixcfg(secret)]
+        #[nixcfg(skip)]
         #[serde(default, skip_serializing)]
         api_token: SecretString,
         /// cloudflare zone id.
@@ -655,11 +655,11 @@ pub enum DnsProviderConfig {
     /// godaddy dns api.
     Godaddy {
         /// godaddy api key.
-        #[nixcfg(secret)]
+        #[nixcfg(skip)]
         #[serde(default, skip_serializing)]
         api_key: SecretString,
         /// godaddy api secret.
-        #[nixcfg(secret)]
+        #[nixcfg(skip)]
         #[serde(default, skip_serializing)]
         api_secret: SecretString,
     },
@@ -668,7 +668,7 @@ pub enum DnsProviderConfig {
         /// URL to POST record changes to.
         url: String,
         /// optional HMAC-SHA256 shared secret for request signing.
-        #[nixcfg(secret)]
+        #[nixcfg(skip)]
         #[serde(default, skip_serializing)]
         secret: Option<SecretString>,
     },

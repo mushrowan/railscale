@@ -2367,7 +2367,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 [[package]]
 name = "nixcfg"
 version = "0.1.0"
-source = "git+https://github.com/mushrowan/nixcfg#920010b285eedc2683caf8ba850b9d920753ceae"
+source = "git+https://github.com/mushrowan/nixcfg#7615fd5f85bfc48b5a6136affe9fd211d1124a2b"
 dependencies = [
  "ipnet",
  "nixcfg-derive",
@@ -2379,7 +2379,7 @@ dependencies = [
 [[package]]
 name = "nixcfg-derive"
 version = "0.1.0"
-source = "git+https://github.com/mushrowan/nixcfg#920010b285eedc2683caf8ba850b9d920753ceae"
+source = "git+https://github.com/mushrowan/nixcfg#7615fd5f85bfc48b5a6136affe9fd211d1124a2b"
 dependencies = [
  "proc-macro2",
  "quote",

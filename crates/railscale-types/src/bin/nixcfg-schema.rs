@@ -1,4 +1,4 @@
-use nixcfg::{NixOptions, Schema};
+use nixcfg::Schema;
 use railscale_types::Config;
 
 fn main() {
