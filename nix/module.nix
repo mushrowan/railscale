@@ -33,7 +33,7 @@ in
 {
   imports = [
     (nixcfgLib.mkModule {
-      inherit schema pkgs;
+      inherit schema;
       naming = "snake_case";
       settingsAttr = "settings";
     })
