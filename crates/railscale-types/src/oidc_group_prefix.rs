@@ -133,6 +133,12 @@ pub enum OidcGroupPrefixError {
     InvalidCharacters,
 }
 
+impl nixcfg::NixType for OidcGroupPrefix {
+    fn schema_type() -> nixcfg::SchemaType {
+        nixcfg::SchemaType::String
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

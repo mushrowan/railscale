@@ -1018,7 +1018,7 @@ map_keepalive_interval_secs = 60
 
         let config = cmd.into_config().unwrap();
         assert_eq!(config.server_url, "http://127.0.0.1:8080");
-        assert_eq!(config.listen_addr, "0.0.0.0:8080");
+        assert_eq!(config.listen_addr, "127.0.0.1:8080");
         assert_eq!(config.base_domain, "railscale.net");
         // derp max_connections should use the default value
         assert_eq!(

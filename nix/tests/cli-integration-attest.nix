@@ -9,12 +9,12 @@
 #   nix build .#cli-integration-attest -L
 {
   pkgs,
-  railscale,
+  railscaleModule,
   attest,
   attestSrc,
 }:
 let
-  nodes = import ./nodes.nix { inherit pkgs railscale; };
+  nodes = import ./nodes.nix { inherit pkgs railscaleModule; };
   makeTest = import "${attestSrc}/nix/firecracker/make-test.nix";
 in
 makeTest {

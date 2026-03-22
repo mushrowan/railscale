@@ -7,12 +7,12 @@
 #   nix build .#cli-integration-snapshot -L
 {
   pkgs,
-  railscale,
+  railscaleModule,
   attest,
   attestSrc,
 }:
 let
-  nodes = import ./nodes.nix { inherit pkgs railscale; };
+  nodes = import ./nodes.nix { inherit pkgs railscaleModule; };
   makeTest = import "${attestSrc}/nix/firecracker/make-test.nix";
 
   # add kernel 6.1 to each node for snapshot compatibility

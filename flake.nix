@@ -13,6 +13,10 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nixcfg = {
+      url = "github:mushrowan/nixcfg";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     attest = {
       url = "github:mushrowan/attest";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -51,9 +55,24 @@
 
           craneLib = (crane.mkLib pkgs).overrideToolchain (_: rustToolchain);
 
-          # Import package build
           packageSet = import ./nix/package.nix { inherit pkgs craneLib; };
           inherit (packageSet) railscale cargoArtifacts commonArgs;
+
+          # generate schema at build time from the binary
+          schema = pkgs.runCommand "railscale-schema.json" { } ''
+            ${railscale}/bin/nixcfg-schema > $out
+          '';
+
+          # module with package baked in, used by tests and nixosModules
+          railscaleModule = {
+            imports = [
+              (import ./nix/module.nix {
+                nixcfgLib = inputs.nixcfg.lib;
+                inherit schema;
+              })
+            ];
+            services.railscale.package = railscale;
+          };
 
           # Static musl build
           muslRustToolchain = pkgs.rust-bin.stable.latest.default.override {
@@ -110,15 +129,16 @@
               nextest = craneLib.cargoNextest (commonArgs // { inherit cargoArtifacts; });
               doctest = craneLib.cargoDocTest (commonArgs // { inherit cargoArtifacts; });
             }
+
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
               # NixOS integration tests via attest/firecracker
               nixos-test = import ./nix/tests/cli-integration-attest.nix {
-                inherit pkgs railscale;
+                inherit pkgs railscaleModule;
                 attest = inputs.attest.packages.${system}.default;
                 attestSrc = inputs.attest;
               };
               nixos-test-policy = import ./nix/tests/policy-reload-attest.nix {
-                inherit pkgs railscale;
+                inherit pkgs railscaleModule;
                 attest = inputs.attest.packages.${system}.default;
                 attestSrc = inputs.attest;
               };
@@ -126,7 +146,7 @@
 
           packages = {
             default = railscale;
-            inherit railscale railscaleStatic;
+            inherit railscale railscaleStatic schema;
 
             # release tarball with static musl binary
             railscale-tarball =
@@ -163,27 +183,47 @@
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             # attest/firecracker NixOS tests (run manually, not in checks)
             module-smoke = import ./nix/tests/module-smoke-attest.nix {
-              inherit pkgs railscale;
+              inherit pkgs railscaleModule;
               attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
             # snapshot-backed variants (faster, requires kernel 6.1)
             module-smoke-snapshot = import ./nix/tests/module-smoke-snapshot.nix {
-              inherit pkgs railscale;
+              inherit pkgs railscaleModule;
               attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
             cli-integration-snapshot = import ./nix/tests/cli-integration-snapshot.nix {
-              inherit pkgs railscale;
+              inherit pkgs railscaleModule;
               attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
             policy-reload-snapshot = import ./nix/tests/policy-reload-snapshot.nix {
-              inherit pkgs railscale;
+              inherit pkgs railscaleModule;
               attest = inputs.attest.packages.${system}.default;
               attestSrc = inputs.attest;
             };
+
+            # headscale vs railscale benchmark comparison
+            # usage: nix run .#bench-comparison -L
+            bench-comparison = import ./nix/tests/bench-comparison.nix {
+              inherit pkgs railscaleModule;
+              attest = inputs.attest.packages.${system}.default;
+              attestSrc = inputs.attest;
+            };
+
           };
+
+          apps =
+            let
+              ncl = inputs.nixcfg.lib.mkLib pkgs;
+            in
+            {
+              config-debug = ncl.mkDebugApp {
+                inherit schema;
+                naming = "snake_case";
+              };
+            };
 
           devShells.default = import ./nix/devshell.nix {
             inherit pkgs craneLib;
@@ -209,9 +249,19 @@
         nixosModules = rec {
           railscale =
             { pkgs, ... }:
+            let
+              sys = pkgs.stdenv.hostPlatform.system;
+              pkg = inputs.self.packages.${sys}.railscale;
+              schema = inputs.self.packages.${sys}.schema;
+            in
             {
-              imports = [ ./nix/module.nix ];
-              services.railscale.package = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.railscale;
+              imports = [
+                (import ./nix/module.nix {
+                  nixcfgLib = inputs.nixcfg.lib;
+                  inherit schema;
+                })
+              ];
+              services.railscale.package = pkg;
             };
           default = railscale;
         };

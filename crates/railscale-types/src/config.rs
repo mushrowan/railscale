@@ -3,13 +3,14 @@
 use std::path::PathBuf;
 
 use ipnet::IpNet;
+use nixcfg::NixCfg;
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use crate::oidc_group_prefix::OidcGroupPrefix;
 
 /// main configuration for railscale.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct Config {
     /// server address to listen on.
@@ -103,6 +104,7 @@ pub struct Config {
     /// runtime-only: path to persist policy file on updates.
     /// set by CLI, not serialised to config.
     #[serde(skip)]
+    #[nixcfg(skip)]
     pub policy_file_path: Option<PathBuf>,
 }
 
@@ -110,7 +112,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             server_url: "http://127.0.0.1:8080".to_string(),
-            listen_addr: "0.0.0.0:8080".to_string(),
+            listen_addr: "127.0.0.1:8080".to_string(),
             noise_private_key_path: PathBuf::from("/var/lib/railscale/noise_private.key"),
             prefix_v4: Some("100.64.0.0/10".parse().unwrap()),
             prefix_v6: Some("fd7a:115c:a1e0::/48".parse().unwrap()),
@@ -138,7 +140,7 @@ impl Default for Config {
 }
 
 /// ip allocation strategy for assigning addresses to new nodes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
 #[serde(rename_all = "lowercase")]
 pub enum AllocationStrategy {
     /// allocate ips sequentially (100.64.0.1, 100.64.0.2, ...).
@@ -172,7 +174,7 @@ impl std::str::FromStr for AllocationStrategy {
 }
 
 /// log level for tracing output.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     /// most verbose, includes all trace spans
@@ -216,7 +218,7 @@ impl std::str::FromStr for LogLevel {
 }
 
 /// database backend type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
 #[serde(rename_all = "lowercase")]
 pub enum DatabaseType {
     /// sqlite file-based database
@@ -236,7 +238,7 @@ impl std::fmt::Display for DatabaseType {
 }
 
 /// database configuration.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct DatabaseConfig {
     /// database type: sqlite or postgres
@@ -266,7 +268,7 @@ pub struct DatabaseConfig {
 }
 
 /// sqlite-specific configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct SqliteConfig {
     /// enable write-ahead logging (WAL) mode.
@@ -343,7 +345,7 @@ impl Default for DatabaseConfig {
 }
 
 /// derp (relay) configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct DerpConfig {
     /// url to fetch the derp map from.
@@ -389,7 +391,7 @@ pub const DEFAULT_DERP_CONNECTION_RATE_PER_MINUTE: u32 = 10;
 pub const DEFAULT_STUN_RATE_PER_MINUTE: u32 = 60;
 
 /// embedded derp server configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct EmbeddedDerpConfig {
     /// whether to enable the embedded derp server.
@@ -476,6 +478,7 @@ pub struct EmbeddedDerpConfig {
 
     /// runtime details populated when the derp server starts.
     #[serde(skip)]
+    #[nixcfg(skip)]
     pub runtime: Option<EmbeddedDerpRuntime>,
 }
 
@@ -491,7 +494,7 @@ impl Default for EmbeddedDerpConfig {
             cert_path: default_derp_cert_path(),
             tls_key_path: default_derp_tls_key_path(),
             private_key_path: default_derp_private_key_path(),
-            stun_listen_addr: Some("0.0.0.0:3478".to_string()),
+            stun_listen_addr: Some("127.0.0.1:3478".to_string()),
             max_connections: default_derp_max_connections(),
             idle_timeout_secs: default_derp_idle_timeout(),
             bytes_per_second: default_derp_bytes_per_second(),
@@ -509,7 +512,7 @@ fn default_server_side_rate_limit() -> bool {
 }
 
 fn default_derp_listen_addr() -> String {
-    "0.0.0.0:3340".to_string()
+    "127.0.0.1:3340".to_string()
 }
 
 fn default_derp_cert_path() -> PathBuf {
@@ -560,7 +563,7 @@ pub struct EmbeddedDerpRuntime {
 }
 
 /// dns configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct DnsConfig {
     /// enable magicdns.
@@ -598,7 +601,7 @@ impl Default for DnsConfig {
 }
 
 /// nameserver configuration with global and split dns support.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct Nameservers {
     /// global nameservers used for all dns queries.
@@ -626,7 +629,7 @@ impl Default for Nameservers {
 }
 
 /// a dns record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 pub struct DnsRecord {
     /// record name.
     pub name: String,
@@ -636,37 +639,36 @@ pub struct DnsRecord {
     pub value: String,
 }
 
-/// external dns provider for ACME dns-01 challenges (`tailscale cert`).
-///
-/// when configured, railscale advertises CertDomains to clients and handles
-/// `/machine/set-dns` requests by creating TXT records via this provider.
-#[derive(Clone, Serialize, Deserialize)]
+/// dns provider for ACME dns-01 challenges.
+#[derive(Clone, Serialize, Deserialize, NixCfg)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum DnsProviderConfig {
     /// cloudflare dns api.
     Cloudflare {
         /// api token with DNS:Edit permission for the zone.
+        #[nixcfg(secret)]
         #[serde(default, skip_serializing)]
         api_token: SecretString,
         /// cloudflare zone id.
         zone_id: String,
     },
     /// godaddy dns api.
-    /// note: requires 10+ domains on the account or an active domain pro plan.
     Godaddy {
         /// godaddy api key.
+        #[nixcfg(secret)]
         #[serde(default, skip_serializing)]
         api_key: SecretString,
         /// godaddy api secret.
+        #[nixcfg(secret)]
         #[serde(default, skip_serializing)]
         api_secret: SecretString,
     },
-    /// generic webhook — POST's record details to a user-configured URL.
-    /// use this for DNS providers without built-in support.
+    /// generic webhook for unsupported providers.
     Webhook {
         /// URL to POST record changes to.
         url: String,
         /// optional HMAC-SHA256 shared secret for request signing.
+        #[nixcfg(secret)]
         #[serde(default, skip_serializing)]
         secret: Option<SecretString>,
     },
@@ -695,7 +697,7 @@ impl std::fmt::Debug for DnsProviderConfig {
 }
 
 /// oidc configuration.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, NixCfg)]
 pub struct OidcConfig {
     /// oidc issuer url.
     pub issuer: String,
@@ -703,8 +705,8 @@ pub struct OidcConfig {
     /// client id.
     pub client_id: String,
 
-    /// client secret (set directly or loaded from `client_secret_path`).
-    /// wrapped in secretstring to prevent accidental logging/serialisation.
+    /// client secret
+    #[nixcfg(secret)]
     #[serde(default, skip_serializing)]
     pub client_secret: SecretString,
 
@@ -799,7 +801,7 @@ fn default_expiry_secs() -> u64 {
 }
 
 /// pkce (proof key for code exchange) configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 pub struct PkceConfig {
     /// whether pkce is enabled.
     #[serde(default)]
@@ -820,7 +822,7 @@ impl Default for PkceConfig {
 }
 
 /// pkce challenge method.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, NixCfg)]
 pub enum PkceMethod {
     /// sha256 challenge method (recommended).
     #[default]
@@ -830,7 +832,7 @@ pub enum PkceMethod {
 }
 
 /// performance tuning configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct TuningConfig {
     /// reserved for future use — not yet wired into runtime.
@@ -880,10 +882,7 @@ impl Default for TuningConfig {
 }
 
 /// rest api configuration.
-///
-/// the rest api provides headscale-compatible endpoints for remote administration.
-/// it is disabled by default and must be explicitly enabled.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct ApiConfig {
     /// whether the rest api is enabled.
@@ -953,11 +952,8 @@ impl Default for ApiConfig {
     }
 }
 
-/// verify endpoint configuration (/verify for derp client verification).
-///
-/// this endpoint is intentionally unauthenticated for compatibility with
-/// tailscale's derp server. protect it with rate limiting and/or IP allowlists.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// verify endpoint configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, NixCfg)]
 #[serde(default)]
 pub struct VerifyConfig {
     /// rate limit for verify requests (requests per minute per IP).

@@ -9,6 +9,7 @@ members = [
   "crates/railscale-admin",
   "crates/railscale-tka",
   "crates/railscale-migrate",
+  "crates/railscale-bench",
 ]
 default-members = [
   "crates/railscale",
@@ -82,6 +83,12 @@ maxminddb = "0.27"
 
 # Secret handling
 secrecy = { version = "0.10", features = ["serde"] }
+
+# Nix config generation
+nixcfg = { git = "https://github.com/mushrowan/nixcfg", subdirectory = "drivers/rust/nixcfg", features = [
+  "ipnet",
+  "secrecy",
+] }
 
 # Internal crates
 railscale-types = { path = "crates/railscale-types" }

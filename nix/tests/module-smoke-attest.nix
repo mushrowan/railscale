@@ -7,14 +7,14 @@
 #   nix build .#module-smoke-attest -L
 {
   pkgs,
-  railscale,
+  railscaleModule,
   # the attest escript package (from nixos-test-ng flake)
   attest,
   # path to the attest source tree (for nix/firecracker/make-test.nix)
   attestSrc,
 }:
 let
-  common = import ./common.nix { inherit pkgs railscale; };
+  common = import ./common.nix { inherit pkgs railscaleModule; };
 
   mkServerNode =
     name: extraSettings:
@@ -28,10 +28,8 @@ let
 
       services.railscale = {
         enable = true;
-        package = railscale;
-        address = "0.0.0.0";
-        port = 8080;
         settings = {
+          listen_addr = "0.0.0.0:8080";
           server_url = "http://${name}:8080";
         }
         // extraSettings;

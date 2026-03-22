@@ -21,6 +21,11 @@ sha2 = "0.10"
 subtle = "2.6"
 zeroize = { version = "1.8", features = ["derive"] }
 url = { workspace = true }
+nixcfg = { workspace = true }
+
+[[bin]]
+name = "nixcfg-schema"
+path = "src/bin/nixcfg-schema.rs"
 
 [dev-dependencies]
 proptest = "1.10"

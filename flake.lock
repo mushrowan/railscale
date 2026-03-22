@@ -10,11 +10,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1772054921,
-        "narHash": "sha256-tbeZexvrT3j7FylbCa8WwA2tf4W/MWoVbYim85LP1RA=",
+        "lastModified": 1774092137,
+        "narHash": "sha256-BnMSZmC9y6nnq1LC4NSs1wKlrd446ivOjpOX7xxPxOU=",
         "owner": "mushrowan",
         "repo": "attest",
-        "rev": "61554142d8e4b89fb32df46772eac3a665e2f755",
+        "rev": "ab116f94300cd0a30d2eca3326ceab3ed6cf7b6b",
         "type": "github"
       },
       "original": {
@@ -38,19 +38,34 @@
         "type": "github"
       }
     },
-    "firecracker-src": {
-      "flake": false,
+    "crane_2": {
       "locked": {
-        "lastModified": 1771664761,
-        "narHash": "sha256-CGeWBn+EqR5cSVUV9p9XC3nODRTyyrKBUcaNwPhSsLw=",
-        "owner": "mushrowan",
-        "repo": "firecracker",
-        "rev": "06c631a141b4711c4f178ffe48927f4449f258aa",
+        "lastModified": 1772080396,
+        "narHash": "sha256-84W9UNtSk9DNMh43WBkOjpkbfODlmg+RDi854PnNgLE=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "8525580bc0316c39dbfa18bd09a1331e98c9e463",
         "type": "github"
       },
       "original": {
-        "owner": "mushrowan",
-        "ref": "fix/vsock-snapshot-restore-panic",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
+    "firecracker-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1773069327,
+        "narHash": "sha256-btZ26PQDbJcTX1CN2sbZtZfN7qUR0ypGUIXyDWF/1FY=",
+        "owner": "firecracker-microvm",
+        "repo": "firecracker",
+        "rev": "7db02adc28eaeb5f54a0d4a8c312e7e9954070b6",
+        "type": "github"
+      },
+      "original": {
+        "owner": "firecracker-microvm",
+        "ref": "v1.15.0",
         "repo": "firecracker",
         "type": "github"
       }
@@ -88,6 +103,28 @@
       "original": {
         "owner": "hercules-ci",
         "repo": "flake-parts",
+        "type": "github"
+      }
+    },
+    "nixcfg": {
+      "inputs": {
+        "crane": "crane_2",
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust-overlay": "rust-overlay"
+      },
+      "locked": {
+        "lastModified": 1774143309,
+        "narHash": "sha256-+ad1HXgZBO9ofpPUxaFCatOX0LsHEHN4ucOP/qmgr98=",
+        "owner": "mushrowan",
+        "repo": "nixcfg",
+        "rev": "924b1ffbbd5a2838c05f1e9c1122140c1d0a6f23",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mushrowan",
+        "repo": "nixcfg",
         "type": "github"
       }
     },
@@ -142,12 +179,34 @@
         "attest": "attest",
         "crane": "crane",
         "flake-parts": "flake-parts_2",
+        "nixcfg": "nixcfg",
         "nixpkgs": "nixpkgs",
-        "rust-overlay": "rust-overlay",
+        "rust-overlay": "rust-overlay_2",
         "treefmt-nix": "treefmt-nix_2"
       }
     },
     "rust-overlay": {
+      "inputs": {
+        "nixpkgs": [
+          "nixcfg",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1772334676,
+        "narHash": "sha256-Jrc0J3AH+iNJDlUze3+FJZv2R0BZnhANFnD52V4kyvI=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "9879be11f30fd3bbf848e653a7f991549e8973b5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "rust-overlay_2": {
       "inputs": {
         "nixpkgs": [
           "nixpkgs"

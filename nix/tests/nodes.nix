@@ -4,10 +4,10 @@
 #   nodes = import ./nodes.nix { inherit pkgs railscale; };
 {
   pkgs,
-  railscale,
+  railscaleModule,
 }:
 let
-  common = import ./common.nix { inherit pkgs railscale; };
+  common = import ./common.nix { inherit pkgs railscaleModule; };
 in
 {
   server =
@@ -23,11 +23,7 @@ in
 
       services.railscale = {
         enable = true;
-        package = railscale;
         openFirewall = true;
-        address = "0.0.0.0";
-        port = 8080;
-
         # declarative policy (immutable, nix-managed)
         policy = {
           groups = {
@@ -57,6 +53,7 @@ in
         };
 
         settings = {
+          listen_addr = "0.0.0.0:8080";
           server_url = "http://server:8080";
           api = {
             enabled = true;

@@ -4,10 +4,9 @@
 # across test files and ensure consistent behavior.
 {
   pkgs,
-  railscale,
+  railscaleModule,
 }:
 let
-  railscaleModule = import ../module.nix;
 
   # Common tailscale client flags
   commonClientFlags = [ "--verbose=5" ];
@@ -73,6 +72,8 @@ in
   embeddedDerpSettings = {
     derp.embedded_derp = {
       enabled = true;
+      listen_addr = "0.0.0.0:3340";
+      stun_listen_addr = "0.0.0.0:3478";
       advertise_host = "192.168.1.3";
       advertise_port = 3340;
     };

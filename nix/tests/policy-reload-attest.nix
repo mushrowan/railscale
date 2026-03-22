@@ -7,12 +7,12 @@
 #   nix build .#policy-reload-attest -L
 {
   pkgs,
-  railscale,
+  railscaleModule,
   attest,
   attestSrc,
 }:
 let
-  common = import ./common.nix { inherit pkgs railscale; };
+  common = import ./common.nix { inherit pkgs railscaleModule; };
 
   initialPolicy = builtins.toJSON {
     groups = {
@@ -52,10 +52,8 @@ makeTest {
 
         services.railscale = {
           enable = true;
-          package = railscale;
-          address = "0.0.0.0";
-          port = 8080;
           settings = {
+            listen_addr = "0.0.0.0:8080";
             server_url = "http://server:8080";
           }
           // common.embeddedDerpSettings;
