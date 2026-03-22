@@ -85,7 +85,7 @@ maxminddb = "0.27"
 secrecy = { version = "0.10", features = ["serde"] }
 
 # Nix config generation
-nixcfg = { git = "https://github.com/mushrowan/nixcfg", rev = "9c31e4ddb241", subdirectory = "drivers/rust/nixcfg" }
+nixcfg = { git = "https://github.com/mushrowan/nixcfg", rev = "612db42bead1", subdirectory = "drivers/rust/nixcfg" }
 schemars = "1"
 
 # Internal crates
