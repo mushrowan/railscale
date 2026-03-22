@@ -590,8 +590,6 @@ fn default_true() -> bool {
     true
 }
 
-
-
 impl Default for DnsConfig {
     fn default() -> Self {
         Self {

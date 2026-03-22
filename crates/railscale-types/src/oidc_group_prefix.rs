@@ -133,8 +133,6 @@ pub enum OidcGroupPrefixError {
     InvalidCharacters,
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;

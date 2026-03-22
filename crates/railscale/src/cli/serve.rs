@@ -530,7 +530,9 @@ impl ServeCommand {
             }
 
             if oidc_config.scope.is_empty() {
-                warn!("OIDC scope is empty - no scopes will be requested. consider setting scope to [\"openid\", \"profile\", \"email\"]");
+                warn!(
+                    "OIDC scope is empty - no scopes will be requested. consider setting scope to [\"openid\", \"profile\", \"email\"]"
+                );
             }
 
             let provider = crate::oidc::AuthProviderOidc::new(oidc_config, &config.server_url)
