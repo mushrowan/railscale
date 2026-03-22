@@ -15,6 +15,8 @@ fn main() {
         );
     }
 
-    let schema = NixSchema::from::<Config>("railscale").with_defaults(defaults);
+    let schema = NixSchema::from::<Config>("railscale")
+        .with_defaults(defaults)
+        .with_extension("x-nixcfg-config-format", "toml");
     println!("{}", schema.to_json_pretty());
 }
