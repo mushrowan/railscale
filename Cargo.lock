@@ -2367,7 +2367,7 @@ checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 [[package]]
 name = "nixcfg"
 version = "0.2.0"
-source = "git+https://github.com/mushrowan/nixcfg?rev=7bfc46c54fee#7bfc46c54fee929922fdd2a744440ef15952158b"
+source = "git+https://github.com/mushrowan/nixcfg?rev=36aa420f8c72#36aa420f8c72519e75baf6e3bee7e92ae4cfc6d8"
 dependencies = [
  "schemars 1.2.1",
  "serde",
